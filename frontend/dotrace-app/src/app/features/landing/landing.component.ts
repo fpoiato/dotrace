@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
+import { environment } from '../../../environments/environment';
 import { LanguageToggleComponent } from '../../shared/language-toggle.component';
 import { RoomService } from '../../core/services/room.service';
 import { SessionStorageService } from '../../core/services/session-storage.service';
@@ -23,6 +24,7 @@ export class LandingComponent implements OnInit {
   showJoin = false;
   loading = false;
   error = '';
+  readonly version = environment.version;
 
   ngOnInit(): void {
     const deepLink = this.route.snapshot.queryParamMap.get('room');
