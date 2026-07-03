@@ -8,6 +8,7 @@ import { Injectable } from '@angular/core';
 export interface SessionData {
   nickname?: string;
   trackId?: string;
+  laps?: number;
 }
 
 const KEY = 'dotrace-session';

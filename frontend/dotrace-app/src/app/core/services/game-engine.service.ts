@@ -76,14 +76,25 @@ export class GameEngineService implements OnDestroy {
     this.setStateAndRelay('TRACK_SELECTED', state);
   }
 
+  selectLaps(laps: number): void {
+    if (!this.isHost) return;
+    if (![1, 2, 3].includes(laps)) return;
+    const state = this.state ?? this.bootstrapLobbyState();
+    state.totalLaps = laps;
+    this.session.save({ laps });
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
   startRace(): void {
     if (!this.isHost) return;
     const room = this.roomService.room;
     const lobbyPlayers = this.roomService.players.filter((p) => p.status === 'approved');
     if (!room || lobbyPlayers.length < MIN_PLAYERS) return;
 
-    const trackId = this.state?.trackId || this.session.load()?.trackId || '';
+    const saved = this.session.load();
+    const trackId = this.state?.trackId || saved?.trackId || '';
     if (!trackId || !getTrackById(trackId)) return;
+    const totalLaps = this.state?.totalLaps ?? saved?.laps ?? 1;
 
     // Rebuild the roster from players$ (the single source of truth) so anyone
     // approved after the track was selected is included in the race.
@@ -94,6 +105,7 @@ export class GameEngineService implements OnDestroy {
       room.connectionId
     );
     state.trackId = trackId;
+    state.totalLaps = [1, 2, 3].includes(totalLaps) ? totalLaps : 1;
 
     state.phase = 'GRID_ORDER';
     state.diceRolls = {};
@@ -139,6 +151,7 @@ export class GameEngineService implements OnDestroy {
       player.isOffTrack = false;
       player.passedCheckpoint = false;
       player.trail = [{ ...start }];
+      player.lap = 1;
     });
     state.round = 1;
 
@@ -197,19 +210,27 @@ export class GameEngineService implements OnDestroy {
       player.passedCheckpoint = segmentEntersRect(from, landing, track.checkpoint);
     }
 
-    // Crossing the stripe (even flying over it) finishes the lap — but only
+    // Crossing the stripe (even flying over it) closes the lap — but only
     // after the far-side checkpoint, so the line can't be gamed on turn one.
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
-      const pos = state.podium.length + 1;
-      player.finishOrder = pos;
-      state.podium.push({
-        connectionId: player.connectionId,
-        nickname: player.nickname,
-        position: pos,
-      });
-      this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
+      if (player.lap < state.totalLaps) {
+        // Lap done, more to go: rearm the checkpoint and erase the pen trail
+        // so the sheet stays readable on the next tour.
+        player.lap += 1;
+        player.passedCheckpoint = false;
+        player.trail = [{ ...landing }];
+      } else {
+        const pos = state.podium.length + 1;
+        player.finishOrder = pos;
+        state.podium.push({
+          connectionId: player.connectionId,
+          nickname: player.nickname,
+          position: pos,
+        });
+        this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
+      }
     }
 
     if (isGameOver(state)) {
@@ -395,12 +416,14 @@ export class GameEngineService implements OnDestroy {
       velocity: player.velocity ?? { x: 0, y: 0 },
       isOffTrack: player.isOffTrack ?? false,
       trail: player.trail ?? [],
+      lap: player.lap ?? 1,
     };
     if (idx >= 0) {
       merged.position = state.players[idx].position;
       merged.velocity = state.players[idx].velocity;
       merged.isOffTrack = state.players[idx].isOffTrack;
       merged.trail = state.players[idx].trail ?? [];
+      merged.lap = state.players[idx].lap ?? 1;
       merged.passedCheckpoint = state.players[idx].passedCheckpoint;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;

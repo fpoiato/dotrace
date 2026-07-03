@@ -28,6 +28,8 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly minPlayers = MIN_PLAYERS;
 
   selectedTrackId = '';
+  selectedLaps = 1;
+  readonly lapOptions = [1, 2, 3];
   copied = false;
   private readonly subs: Subscription[] = [];
 
@@ -45,6 +47,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
       // everyone to the game screen.
       this.game.state$.subscribe((state) => {
         if (state?.trackId) this.selectedTrackId = state.trackId;
+        if (state?.totalLaps) this.selectedLaps = state.totalLaps;
         if (state && state.phase !== 'LOBBY') {
           void this.router.navigate(['/game']);
         }
@@ -77,6 +80,11 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectTrack(trackId: string): void {
     this.selectedTrackId = trackId;
     this.game.selectTrack(trackId);
+  }
+
+  selectLaps(laps: number): void {
+    this.selectedLaps = laps;
+    this.game.selectLaps(laps);
   }
 
   startRace(): void {

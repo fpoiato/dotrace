@@ -103,6 +103,7 @@ describe('turn order', () => {
       turnOrder: ['a', 'b', 'c'],
       currentTurnIndex: 0,
       round: 1,
+      totalLaps: 1,
       diceRolls: {},
       podium: [],
     };
@@ -136,6 +137,7 @@ describe('game over conditions', () => {
       turnOrder: ['c1'],
       currentTurnIndex: 0,
       round: 1,
+      totalLaps: 1,
       diceRolls: {},
       podium: [
         { connectionId: 'x', nickname: 'X', position: 1 },
@@ -155,6 +157,7 @@ describe('game over conditions', () => {
       turnOrder: ['c1'],
       currentTurnIndex: 0,
       round: 1,
+      totalLaps: 1,
       diceRolls: {},
       podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
     };
@@ -170,6 +173,7 @@ describe('game over conditions', () => {
       turnOrder: ['c1', 'c2'],
       currentTurnIndex: 0,
       round: 1,
+      totalLaps: 1,
       diceRolls: {},
       podium: [{ connectionId: 'c2', nickname: 'Bia', position: 1 }],
     };

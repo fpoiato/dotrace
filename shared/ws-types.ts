@@ -53,8 +53,10 @@ export interface Player {
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
-  /** Move history (pen trail on the paper), starting at the grid slot. */
+  /** Move history (pen trail on the paper), reset at every completed lap. */
   trail: Vector2D[];
+  /** Current lap, 1-based. */
+  lap: number;
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
   diceRoll?: number;
@@ -78,6 +80,8 @@ export interface GameState {
   currentTurnIndex: number;
   /** 1-based racing round (increments each time the turn order wraps). */
   round: number;
+  /** Race length chosen by the host in the lobby. */
+  totalLaps: number;
   diceRolls: Record<string, number>;
   podium: PodiumEntry[];
 }
@@ -183,6 +187,7 @@ export type PlayerGameAction = SubmitMoveAction | SelectTrackAction;
 
 export const MAX_PLAYERS = 12;
 export const MIN_PLAYERS = 2;
+export const LAP_OPTIONS = [1, 2, 3] as const;
 export const ROOM_CODE_LENGTH = 5;
 export const PODIUM_SIZE = 3;
 
@@ -232,6 +237,7 @@ export function createLobbyPlayer(
     velocity: zeroVector(),
     isOffTrack: false,
     trail: [],
+    lap: 1,
   };
 }
 
@@ -247,6 +253,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     turnOrder: [],
     currentTurnIndex: 0,
     round: 1,
+    totalLaps: 1,
     diceRolls: {},
     podium: [],
   };
