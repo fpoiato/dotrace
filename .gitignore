@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.cdk.staging/
+cdk.out/
+*.js.map
+.env
+.env.local
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+tfplan
+terraform.tfvars
+.DS_Store
+*.log
+.angular/

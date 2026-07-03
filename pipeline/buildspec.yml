@@ -1,0 +1,57 @@
+version: 0.2
+
+env:
+  variables:
+    PROJECT_NAME: "dotrace-game"
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Installing CDK CLI..."
+      - npm install -g aws-cdk
+      - cdk --version
+  pre_build:
+    commands:
+      - echo "Forcing public npm registry (avoids CodeArtifact E401)..."
+      - unset NPM_TOKEN NODE_AUTH_TOKEN || true
+      - npm config delete //registry.npmjs.org/:_authToken || true
+      - npm config set registry https://registry.npmjs.org/
+      - echo "Installing project dependencies..."
+      - npm ci
+      - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+      - export CDK_DEFAULT_REGION=${AWS_REGION}
+  build:
+    commands:
+      - echo "Deploying CDK stack..."
+      - (cd infra/cdk && npm run deploy)
+      - export WS_URL=$(aws cloudformation describe-stacks --stack-name DotRaceWsStack --query "Stacks[0].Outputs[?OutputKey=='WebSocketUrl'].OutputValue" --output text)
+      - echo "WebSocket URL=$WS_URL"
+      - test -n "$WS_URL" && [ "$WS_URL" != "None" ] || (echo "Missing WebSocketUrl output" && exit 1)
+      - aws ssm put-parameter --name "/${PROJECT_NAME}/prod/websocket_url" --type String --value "$WS_URL" --overwrite
+      - echo "Injecting production environment (WS URL + app URL)..."
+      - |
+        cat > frontend/dotrace-app/src/environments/environment.prod.ts <<EOF
+        export const environment = {
+          production: true,
+          wsUrl: '${WS_URL}',
+          appUrl: '${APP_URL}',
+        };
+        EOF
+      - echo "Building Angular frontend..."
+      - npm run build --workspace=frontend/dotrace-app
+      - export BUCKET=$(aws ssm get-parameter --name /${PROJECT_NAME}/prod/s3_bucket_name --query Parameter.Value --output text)
+      - export CF_ID=$(aws ssm get-parameter --name /${PROJECT_NAME}/prod/cloudfront_distribution_id --query Parameter.Value --output text)
+      - echo "Syncing to s3://$BUCKET ..."
+      - aws s3 sync frontend/dotrace-app/dist/dotrace-app/browser s3://$BUCKET --delete
+      - echo "Invalidating CloudFront $CF_ID ..."
+      - aws cloudfront create-invalidation --distribution-id $CF_ID --paths "/*"
+  post_build:
+    commands:
+      - echo "Deployment complete at ${APP_URL}"
+
+artifacts:
+  files:
+    - '**/*'
+  base-directory: frontend/dotrace-app/dist/dotrace-app/browser

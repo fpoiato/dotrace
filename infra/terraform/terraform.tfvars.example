@@ -1,0 +1,10 @@
+aws_region       = "us-east-1"
+project_name     = "dotrace-game"
+environment      = "prod"
+domain_name      = "dotrace.fpoiato.com"
+route53_zone_id  = "Z094351536ZBINA5SU45F"
+github_owner     = "fpoiato"
+github_repo      = "dotrace"
+github_branch    = "main"
+codestar_connection_name = "testproject-github"
+# websocket_url = "wss://..."  # optional — CodeBuild writes this after CDK deploy

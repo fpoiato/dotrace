@@ -1,0 +1,94 @@
+@if (room$ | async; as room) {
+  <div class="mx-auto min-h-screen max-w-md px-4 py-6">
+    <h1 class="mb-2 text-2xl font-bold text-orange-400">{{ 'lobby.title' | translate }}</h1>
+    <p class="mb-6 font-mono text-xl tracking-widest text-white">{{ room.roomCode }}</p>
+
+    @if (room.isHost) {
+      <p class="mb-4 text-sm text-orange-300">{{ 'lobby.youAreHost' | translate }}</p>
+
+      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
+      <div class="mb-6 grid grid-cols-1 gap-3">
+        @for (track of tracks; track track.id) {
+          <button
+            type="button"
+            (click)="selectTrack(track.id)"
+            class="min-h-14 rounded-xl border-2 px-4 text-left font-semibold transition"
+            [class]="selectedTrackId === track.id ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+          >
+            {{ track.nameKey | translate }}
+          </button>
+        }
+      </div>
+
+      <div class="mb-4 flex gap-2">
+        <button
+          type="button"
+          (click)="copyInvite(room.roomCode)"
+          class="min-h-12 flex-1 rounded-xl bg-slate-700 text-sm font-medium"
+        >
+          {{ copied ? ('common.copied' | translate) : ('lobby.invite' | translate) }}
+        </button>
+        <button
+          type="button"
+          (click)="whatsApp(room.roomCode)"
+          class="min-h-12 flex-1 rounded-xl bg-green-700 text-sm font-medium"
+        >
+          {{ 'lobby.whatsapp' | translate }}
+        </button>
+      </div>
+    } @else {
+      <p class="mb-2 text-slate-400">{{ 'lobby.waitHost' | translate }}</p>
+      @if (selectedTrackId) {
+        <p class="mb-6 text-sm text-orange-300">
+          {{ 'lobby.selectTrack' | translate }}: {{ trackName(selectedTrackId) | translate }}
+        </p>
+      }
+    }
+
+    <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.players' | translate }}</h2>
+    <ul class="mb-4 space-y-2">
+      @for (p of players$ | async; track p.connectionId) {
+        <li class="flex min-h-12 items-center gap-3 rounded-xl bg-slate-800 px-4">
+          <span class="h-4 w-4 rounded-full" [style.background]="p.color"></span>
+          <span class="flex-1 font-medium">{{ p.nickname }}</span>
+          @if (p.isHost) {
+            <span class="text-xs text-orange-400">{{ 'common.host' | translate }}</span>
+          }
+        </li>
+      }
+    </ul>
+
+    @if (pending$ | async; as pending) {
+      @if (pending.length > 0 && room.isHost) {
+        <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.pending' | translate }}</h2>
+        <ul class="mb-4 space-y-2">
+          @for (p of pending; track p.connectionId) {
+            <li class="flex min-h-14 items-center gap-2 rounded-xl bg-slate-800 px-4">
+              <span class="flex-1">{{ p.nickname }}</span>
+              <button type="button" (click)="approve(p.connectionId)" class="min-h-10 rounded-lg bg-green-600 px-4 text-sm">
+                {{ 'lobby.approve' | translate }}
+              </button>
+              <button type="button" (click)="reject(p.connectionId)" class="min-h-10 rounded-lg bg-red-700 px-4 text-sm">
+                {{ 'lobby.reject' | translate }}
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    }
+
+    @if (room.isHost) {
+      @if (((players$ | async)?.length ?? 0) < minPlayers) {
+        <p class="mb-2 text-center text-sm text-amber-400">{{ 'lobby.minPlayers' | translate }}</p>
+      }
+      <button
+        type="button"
+        (click)="startRace()"
+        [disabled]="!selectedTrackId || (((players$ | async)?.length ?? 0) < minPlayers)"
+        class="min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
+      >
+        {{ 'lobby.startRace' | translate }}
+      </button>
+    }
+  </div>
+}
