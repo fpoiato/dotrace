@@ -54,11 +54,19 @@ terraform apply -var-file=terraform.tfvars
 
 Note outputs: `github_actions_role_arn`, `codepipeline_name`, S3 bucket, CloudFront ID (also in SSM).
 
-### 2. GitHub secrets
+### 2. GitHub access (one-time)
 
 In the private repo `fpoiato/dotrace`, set:
 
 - `AWS_ROLE_ARN` — value of `github_actions_role_arn` from Terraform
+
+The pipeline sources code through the existing CodeStar connection
+`testproject-github`. That connection's **AWS Connector for GitHub** app must
+have access to this repo: go to
+[github.com/settings/installations](https://github.com/settings/installations)
+→ AWS Connector for GitHub → Configure → add `fpoiato/dotrace` to the
+repository list. Until then the Source stage fails with
+`No Branch [main] found`.
 
 ### 3. CDK + frontend via CodePipeline
 
