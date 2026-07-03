@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable, Subscription } from 'rxjs';
 import { Player, RoomRejoinedPayload } from '../models/ws-types';
-import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
 
 export interface RoomContext {
@@ -14,7 +13,6 @@ export interface RoomContext {
 @Injectable({ providedIn: 'root' })
 export class RoomService {
   private readonly ws = inject(WebSocketService);
-  private readonly session = inject(SessionStorageService);
   private readonly roomSubject = new BehaviorSubject<RoomContext | null>(null);
   private readonly playersSubject = new BehaviorSubject<Player[]>([]);
   private readonly pendingSubject = new BehaviorSubject<Player[]>([]);
@@ -38,20 +36,22 @@ export class RoomService {
     return this.playersSubject.value;
   }
 
+  /**
+   * Rejoin after a socket drop, using ONLY the in-memory room context.
+   * Room identity is deliberately not persisted anywhere: a fresh page
+   * never gets pulled back into an old room.
+   */
   private autoRejoin(): void {
     const ctx = this.roomSubject.value;
-    const saved = this.session.load();
-    const roomCode = ctx?.roomCode ?? saved?.roomCode;
-    const nickname = ctx?.nickname ?? saved?.nickname;
-    if (!roomCode || !nickname) return;
+    if (!ctx) return;
     this.ws.send(
       'REJOIN_ROOM',
       {
-        nickname,
-        roomCode,
-        previousConnectionId: ctx?.connectionId ?? saved?.connectionId,
+        nickname: ctx.nickname,
+        roomCode: ctx.roomCode,
+        previousConnectionId: ctx.connectionId,
       },
-      roomCode
+      ctx.roomCode
     );
   }
 
@@ -63,7 +63,6 @@ export class RoomService {
       connectionId: payload.connectionId,
     };
     this.roomSubject.next(context);
-    this.persistRoom(context);
     this.playersSubject.next(payload.players.map((p) => this.normalize(p)));
     this.pendingSubject.next(payload.pending.map((p) => this.normalize(p)));
   }
@@ -78,18 +77,9 @@ export class RoomService {
     };
   }
 
-  private persistRoom(context: RoomContext): void {
-    this.session.save({
-      roomCode: context.roomCode,
-      nickname: context.nickname,
-      isHost: context.isHost,
-      connectionId: context.connectionId,
-    });
-  }
-
   async createRoom(nickname: string): Promise<string> {
     await this.ws.connect();
-    this.reset(false);
+    this.reset();
     this.ws.send('CREATE_ROOM', { nickname });
     return new Promise((resolve, reject) => {
       const subs: Subscription[] = [];
@@ -106,8 +96,6 @@ export class RoomService {
                 connectionId: payload.connectionId,
               };
               this.roomSubject.next(context);
-              this.persistRoom(context);
-              this.session.save({ screen: 'lobby' });
               // Seed players$ with the host — single source of truth for the lobby.
               this.playersSubject.next([
                 {
@@ -141,7 +129,7 @@ export class RoomService {
 
   async joinRoom(nickname: string, roomCode: string): Promise<void> {
     await this.ws.connect();
-    this.reset(false);
+    this.reset();
     this.ws.send('JOIN_ROOM', { nickname, roomCode: roomCode.toUpperCase() });
     return new Promise((resolve, reject) => {
       const subs: Subscription[] = [];
@@ -158,8 +146,6 @@ export class RoomService {
                 connectionId: payload.connectionId,
               };
               this.roomSubject.next(context);
-              this.persistRoom(context);
-              this.session.save({ screen: 'lobby' });
               // Seed self on join.
               this.playersSubject.next([
                 {
@@ -189,52 +175,6 @@ export class RoomService {
         })
       );
     });
-  }
-
-  async rejoinSession(): Promise<void> {
-    const saved = this.session.load();
-    if (!saved?.roomCode || !saved.nickname) {
-      throw new Error('No saved session');
-    }
-
-    await this.ws.connect();
-    this.reset(false);
-    this.ws.send(
-      'REJOIN_ROOM',
-      {
-        nickname: saved.nickname,
-        roomCode: saved.roomCode,
-        previousConnectionId: saved.connectionId,
-      },
-      saved.roomCode
-    );
-
-    return new Promise((resolve, reject) => {
-      const subs: Subscription[] = [];
-      const done = () => subs.forEach((s) => s.unsubscribe());
-      subs.push(
-        this.ws.onAction<RoomRejoinedPayload>('ROOM_REJOINED').subscribe({
-          next: () => {
-            // State application happens in the persistent applyRejoined handler.
-            done();
-            resolve();
-          },
-          error: (err) => {
-            done();
-            reject(err);
-          },
-        }),
-        this.ws.onAction<{ message: string }>('ERROR').subscribe((err) => {
-          done();
-          this.session.clear();
-          reject(new Error(err.message));
-        })
-      );
-    });
-  }
-
-  setScreen(screen: 'lobby' | 'game'): void {
-    this.session.save({ screen });
   }
 
   listenForLobbyUpdates(): Observable<void> {
@@ -293,7 +233,6 @@ export class RoomService {
             const room = this.roomSubject.value;
             if (room?.connectionId === p.oldConnectionId) {
               this.roomSubject.next({ ...room, connectionId: p.newConnectionId, isHost: p.player.isHost });
-              this.session.save({ connectionId: p.newConnectionId, isHost: p.player.isHost });
             }
             this.playersSubject.next(
               this.playersSubject.value
@@ -308,7 +247,6 @@ export class RoomService {
           if (room) {
             const isNewHost = room.connectionId === p.newHostId;
             this.roomSubject.next({ ...room, isHost: isNewHost });
-            this.session.save({ isHost: isNewHost });
             this.playersSubject.next(
               this.playersSubject.value.map((pl) => ({
                 ...pl,
@@ -346,12 +284,9 @@ export class RoomService {
     return `https://wa.me/?text=${text}`;
   }
 
-  reset(clearSession = true): void {
+  reset(): void {
     this.roomSubject.next(null);
     this.playersSubject.next([]);
     this.pendingSubject.next([]);
-    if (clearSession) {
-      this.session.clear();
-    }
   }
 }

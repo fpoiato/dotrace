@@ -78,7 +78,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         // Host-migration fallback can reset the game to the lobby phase;
         // follow it so nobody is stranded on the game screen.
         if (state?.phase === 'LOBBY') {
-          this.room.setScreen('lobby');
           void this.router.navigate(['/lobby']);
         }
       })

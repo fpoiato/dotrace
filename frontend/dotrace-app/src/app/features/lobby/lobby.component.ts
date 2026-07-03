@@ -46,7 +46,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
       this.game.state$.subscribe((state) => {
         if (state?.trackId) this.selectedTrackId = state.trackId;
         if (state && state.phase !== 'LOBBY') {
-          this.room.setScreen('game');
           void this.router.navigate(['/game']);
         }
       }),
@@ -82,7 +81,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   startRace(): void {
     this.game.startRace();
-    this.room.setScreen('game');
     void this.router.navigate(['/game']);
   }
 

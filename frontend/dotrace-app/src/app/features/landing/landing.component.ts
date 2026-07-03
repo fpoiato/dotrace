@@ -33,23 +33,11 @@ export class LandingComponent implements OnInit {
       this.roomCode = deepLink.toUpperCase();
     }
 
+    // Only the nickname is restored. Room identity is never persisted, so a
+    // fresh visit always starts clean instead of rejoining a stale room.
     const saved = this.session.load();
     if (saved?.nickname) {
       this.nickname = saved.nickname;
-    }
-
-    if (saved?.roomCode && saved.connectionId) {
-      this.loading = true;
-      this.room
-        .rejoinSession()
-        .then(() => {
-          const screen = saved.screen ?? 'lobby';
-          void this.router.navigate([screen === 'game' ? '/game' : '/lobby']);
-        })
-        .catch(() => {
-          this.loading = false;
-          this.session.clear();
-        });
     }
   }
 

@@ -1,11 +1,12 @@
 import { Injectable } from '@angular/core';
 
+/**
+ * Only user preferences are persisted. Room identity (room code,
+ * connection id, host flag) deliberately lives in memory alone — persisting
+ * it caused fresh visits to get pulled back into stale rooms.
+ */
 export interface SessionData {
-  roomCode?: string;
   nickname?: string;
-  isHost?: boolean;
-  connectionId?: string;
-  screen?: 'lobby' | 'game';
   trackId?: string;
 }
 
