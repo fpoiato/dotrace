@@ -69,6 +69,10 @@
         @if (game.isMyTurn()) {
           <p class="mt-2 text-center text-xs text-slate-400">{{ 'game.tapHint' | translate }}</p>
         }
+
+        <div class="mt-4">
+          <app-mini-map [state]="state" />
+        </div>
       }
     }
 
