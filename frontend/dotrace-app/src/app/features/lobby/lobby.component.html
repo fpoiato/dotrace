@@ -1,6 +1,16 @@
 @if (room$ | async; as room) {
   <div class="mx-auto min-h-screen max-w-md px-4 py-6">
-    <h1 class="mb-2 text-2xl font-bold text-orange-400">{{ 'lobby.title' | translate }}</h1>
+    <div class="mb-2 flex items-center justify-between">
+      <h1 class="text-2xl font-bold text-orange-400">{{ 'lobby.title' | translate }}</h1>
+      <button
+        type="button"
+        (click)="showHowTo = true"
+        [attr.aria-label]="'howto.title' | translate"
+        class="min-h-11 min-w-11 rounded-full bg-slate-800 text-lg font-bold text-slate-300 hover:text-white"
+      >
+        ?
+      </button>
+    </div>
     <p class="mb-6 font-mono text-xl tracking-widest text-white">{{ room.roomCode }}</p>
 
     @if (room.isHost) {
@@ -106,4 +116,8 @@
       </button>
     }
   </div>
+}
+
+@if (showHowTo) {
+  <app-how-to-play (close)="showHowTo = false" />
 }

@@ -66,5 +66,17 @@
     @if (error) {
       <p class="rounded-lg bg-red-900/50 px-4 py-3 text-center text-red-200">{{ error }}</p>
     }
+
+    <button
+      type="button"
+      (click)="showHowTo = true"
+      class="min-h-11 text-sm text-slate-400 underline underline-offset-4 hover:text-white"
+    >
+      {{ 'howto.link' | translate }}
+    </button>
   </div>
 </div>
+
+@if (showHowTo) {
+  <app-how-to-play (close)="showHowTo = false" />
+}

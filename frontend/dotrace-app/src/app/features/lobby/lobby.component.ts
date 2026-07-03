@@ -8,11 +8,12 @@ import { MIN_PLAYERS } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
+import { HowToPlayComponent } from '../../shared/how-to-play.component';
 
 @Component({
   selector: 'app-lobby',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule],
+  imports: [AsyncPipe, TranslateModule, HowToPlayComponent],
   templateUrl: './lobby.component.html',
 })
 export class LobbyComponent implements OnInit, OnDestroy {
@@ -31,6 +32,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedLaps = 1;
   readonly lapOptions = [1, 2, 3];
   copied = false;
+  showHowTo = false;
   private readonly subs: Subscription[] = [];
 
   ngOnInit(): void {

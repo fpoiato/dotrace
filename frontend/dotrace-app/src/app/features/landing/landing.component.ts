@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
+import { HowToPlayComponent } from '../../shared/how-to-play.component';
 import { LanguageToggleComponent } from '../../shared/language-toggle.component';
 import { RoomService } from '../../core/services/room.service';
 import { SessionStorageService } from '../../core/services/session-storage.service';
@@ -9,7 +10,7 @@ import { SessionStorageService } from '../../core/services/session-storage.servi
 @Component({
   selector: 'app-landing',
   standalone: true,
-  imports: [FormsModule, TranslateModule, LanguageToggleComponent],
+  imports: [FormsModule, TranslateModule, LanguageToggleComponent, HowToPlayComponent],
   templateUrl: './landing.component.html',
 })
 export class LandingComponent implements OnInit {
@@ -21,6 +22,7 @@ export class LandingComponent implements OnInit {
   nickname = '';
   roomCode = '';
   showJoin = false;
+  showHowTo = false;
   loading = false;
   error = '';
 
