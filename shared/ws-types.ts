@@ -267,6 +267,9 @@ export function rollDice(): number {
 /** Max gear adjustment per axis per turn. */
 export const MAX_GEAR_DELTA = 1;
 
+/** Top speed: velocity magnitude (Chebyshev) can never exceed this. */
+export const MAX_GEAR = 6;
+
 /** Off-track players may only use velocity components in this set. */
 export const OFF_TRACK_GEARS = [-1, 0, 1] as const;
 
@@ -287,7 +290,7 @@ export function isValidGearChange(
       OFF_TRACK_GEARS.includes(next.y as (typeof OFF_TRACK_GEARS)[number])
     );
   }
-  return true;
+  return gearOf(next) <= MAX_GEAR;
 }
 
 export function landingPosition(position: Vector2D, velocity: Vector2D): Vector2D {

@@ -12,9 +12,11 @@ import {
 import { PAPER_COLORS, getTrackById } from '../../core/models/tracks';
 import {
   GameState,
+  MAX_GEAR,
   Player,
   TrackDefinition,
   Vector2D,
+  gearOf,
   getValidMoves,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
@@ -26,6 +28,25 @@ const MIN_CELL_PX = 8;
 const MAX_CELL_PX = 46;
 /** Finger/mouse travel (in CSS px) below which a gesture still counts as a tap. */
 const TAP_SLOP = 10;
+
+/** Precomputed arc paths for the 6-segment gear gauge (100×62 viewBox). */
+function buildGaugeSegments(): string[] {
+  const cx = 50;
+  const cy = 54;
+  const r = 38;
+  const gap = 0.015;
+  const point = (f: number): [number, number] => {
+    const angle = Math.PI - f * Math.PI;
+    return [cx + r * Math.cos(angle), cy - r * Math.sin(angle)];
+  };
+  const paths: string[] = [];
+  for (let i = 0; i < MAX_GEAR; i++) {
+    const [x0, y0] = point(i / MAX_GEAR + gap);
+    const [x1, y1] = point((i + 1) / MAX_GEAR - gap);
+    paths.push(`M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`);
+  }
+  return paths;
+}
 
 /**
  * "Pen and paper" renderer with a map-style camera: drag to pan, pinch or
@@ -42,6 +63,31 @@ const TAP_SLOP = 10;
         #canvas
         class="h-[48vh] w-full cursor-grab touch-none rounded-xl border border-slate-600 active:cursor-grabbing md:h-[62vh]"
       ></canvas>
+      @if (gaugePlayer; as me) {
+        <div class="pointer-events-none absolute bottom-2 left-2 rounded-xl bg-slate-900/75 px-1 pb-1 pt-2">
+          <svg viewBox="0 0 100 62" class="block h-14 w-24">
+            @for (seg of gaugeSegments; track $index) {
+              <path
+                [attr.d]="seg"
+                fill="none"
+                stroke-width="9"
+                stroke-linecap="round"
+                [attr.stroke]="segmentColor(me, $index)"
+              />
+            }
+            <text
+              x="50"
+              y="52"
+              text-anchor="middle"
+              font-size="26"
+              font-weight="800"
+              [attr.fill]="me.isOffTrack ? '#FBBF24' : '#ffffff'"
+            >
+              {{ gaugeGear(me) }}
+            </text>
+          </svg>
+        </div>
+      }
       <div class="absolute bottom-2 right-2 flex flex-col gap-1">
         <button
           type="button"
@@ -89,6 +135,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private validMoves: { velocity: Vector2D; landing: Vector2D }[] = [];
 
   fitMode = false;
+  readonly gaugeSegments = buildGaugeSegments();
   private zoomFactor = 1;
   private fitModeInitialized = false;
   /** Current view transform: world px → device px. */
@@ -206,6 +253,23 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
+  }
+
+  /** My car, for the gear gauge overlay (null while spectating). */
+  get gaugePlayer(): Player | null {
+    const state = this.state;
+    if (!state || (state.phase !== 'GAME_ROUND' && state.phase !== 'GAME_OVER')) return null;
+    return this.myPlayer(state) ?? null;
+  }
+
+  gaugeGear(player: Player): number {
+    return gearOf(player.velocity);
+  }
+
+  segmentColor(player: Player, index: number): string {
+    const gear = this.gaugeGear(player);
+    if (index >= gear) return '#334155';
+    return player.isOffTrack ? '#FBBF24' : player.color;
   }
 
   /** The player whose turn it is, derived from the rendered state itself. */

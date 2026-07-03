@@ -8,7 +8,6 @@ import {
   GameState,
   Player,
   Vector2D,
-  gearOf,
   getTileAt,
   getValidMoves,
   landingPosition,
@@ -153,10 +152,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
-  }
-
-  myGear(player: Player): number {
-    return gearOf(player.velocity);
   }
 
   backToMenu(): void {
