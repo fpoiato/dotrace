@@ -29,7 +29,7 @@
   "game.velocity": "Velocity",
   "game.gear": "Gear",
   "game.round": "Round",
-  "game.tapHint": "Tap a highlighted square to move",
+  "game.tapHint": "Use the arrows or tap a highlighted square on the map",
   "game.offTrack": "Off track — max gear 1",
   "game.finished": "Finished #{{pos}}",
   "game.podium": "Podium",

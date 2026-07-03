@@ -29,7 +29,7 @@
   "game.velocity": "Velocidade",
   "game.gear": "Marcha",
   "game.round": "Rodada",
-  "game.tapHint": "Toque em um quadrado destacado para mover",
+  "game.tapHint": "Use as setas ou toque em um quadrado destacado no mapa",
   "game.offTrack": "Fora da pista — marcha máx. 1",
   "game.finished": "Chegou em #{{pos}}",
   "game.podium": "Pódio",

@@ -46,8 +46,29 @@
 
       <app-track-canvas [state]="state" />
 
-      @if (game.isMyTurn()) {
-        <p class="mt-2 text-center text-xs text-slate-400">{{ 'game.tapHint' | translate }}</p>
+      @if (state.phase === 'GAME_ROUND') {
+        <div class="mx-auto mt-3 grid max-w-[17rem] grid-cols-3 gap-2">
+          @for (opt of padOptions; track opt.key) {
+            <button
+              type="button"
+              (click)="pad(opt)"
+              [disabled]="!opt.enabled"
+              class="min-h-14 rounded-xl border-2 text-2xl font-bold transition active:scale-95"
+              [class.border-slate-600]="!opt.grass"
+              [class.bg-slate-800]="opt.enabled && !opt.grass"
+              [class.text-white]="opt.enabled && !opt.grass"
+              [class.border-amber-500]="opt.enabled && opt.grass"
+              [class.bg-amber-900]="opt.enabled && opt.grass"
+              [class.text-amber-300]="opt.enabled && opt.grass"
+              [class.opacity-25]="!opt.enabled"
+            >
+              {{ opt.glyph }}
+            </button>
+          }
+        </div>
+        @if (game.isMyTurn()) {
+          <p class="mt-2 text-center text-xs text-slate-400">{{ 'game.tapHint' | translate }}</p>
+        }
       }
     }
 
