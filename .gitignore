@@ -11,6 +11,12 @@ cdk.out/
 .terraform.lock.hcl
 tfplan
 terraform.tfvars
+
+# local design reference images
+/track.png
+/monza.jpg
+/monaco.png
+/interlagos.webp
 .DS_Store
 *.log
 .angular/

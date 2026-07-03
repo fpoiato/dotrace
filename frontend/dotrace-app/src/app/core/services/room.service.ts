@@ -74,6 +74,7 @@ export class RoomService {
       position: p.position ?? { x: 0, y: 0 },
       velocity: p.velocity ?? { x: 0, y: 0 },
       isOffTrack: p.isOffTrack ?? false,
+      trail: p.trail ?? [],
     };
   }
 
@@ -119,6 +120,7 @@ export class RoomService {
                   position: { x: 0, y: 0 },
                   velocity: { x: 0, y: 0 },
                   isOffTrack: false,
+                  trail: [],
                 },
               ]);
               done();
@@ -170,6 +172,7 @@ export class RoomService {
                   position: { x: 0, y: 0 },
                   velocity: { x: 0, y: 0 },
                   isOffTrack: false,
+                  trail: [],
                 },
               ]);
               done();
@@ -267,6 +270,7 @@ export class RoomService {
                 position: { x: 0, y: 0 },
                 velocity: { x: 0, y: 0 },
                 isOffTrack: false,
+                trail: [],
               };
               this.pendingSubject.next([
                 ...this.pendingSubject.value.filter((x) => x.connectionId !== p.connectionId),

@@ -3,7 +3,7 @@ import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
-import { GameState, Player } from '../../core/models/ws-types';
+import { GameState, Player, gearOf } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -63,6 +63,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
+  }
+
+  myGear(player: Player): number {
+    return gearOf(player.velocity);
   }
 
   backToMenu(): void {

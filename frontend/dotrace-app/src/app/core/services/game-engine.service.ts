@@ -15,7 +15,10 @@ import {
   isGameOver,
   landingPosition,
   nextActiveTurnIndex,
+  pushTrail,
   rollDice,
+  segmentCrossesFinish,
+  segmentEntersRect,
   zeroVector,
 } from '../models/ws-types';
 import { RoomService } from './room.service';
@@ -124,7 +127,10 @@ export class GameEngineService implements OnDestroy {
       player.position = { ...start };
       player.velocity = zeroVector();
       player.isOffTrack = false;
+      player.passedCheckpoint = false;
+      player.trail = [{ ...start }];
     });
+    state.round = 1;
 
     state.currentTurnIndex = 0;
     while (
@@ -159,13 +165,17 @@ export class GameEngineService implements OnDestroy {
     );
     if (!isLegal) return;
 
+    const from = { ...player.position };
     const landing = landingPosition(player.position, vector);
     const tile = getTileAt(track, landing.x, landing.y);
     if (tile === null) return;
 
     player.position = landing;
+    pushTrail(player, landing);
 
     if (tile === 'grass') {
+      // Gravel trap: stop on the spot, kill momentum (gotcha #5 — only the
+      // landing square matters for the off-track check).
       player.velocity = zeroVector();
       player.isOffTrack = true;
     } else {
@@ -173,7 +183,15 @@ export class GameEngineService implements OnDestroy {
       player.isOffTrack = false;
     }
 
-    if (tile === 'finish' && player.finishOrder === undefined) {
+    if (track.checkpoint && !player.passedCheckpoint) {
+      player.passedCheckpoint = segmentEntersRect(from, landing, track.checkpoint);
+    }
+
+    // Crossing the stripe (even flying over it) finishes the lap — but only
+    // after the far-side checkpoint, so the line can't be gamed on turn one.
+    const crossedFinish =
+      player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
+    if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
       const pos = state.podium.length + 1;
       player.finishOrder = pos;
       state.podium.push({
@@ -190,7 +208,11 @@ export class GameEngineService implements OnDestroy {
       return;
     }
 
+    const prevIndex = state.currentTurnIndex;
     state.currentTurnIndex = nextActiveTurnIndex(state);
+    if (state.currentTurnIndex <= prevIndex) {
+      state.round += 1;
+    }
     this.setStateAndRelay('TURN_ADVANCED', state);
   }
 
@@ -362,11 +384,14 @@ export class GameEngineService implements OnDestroy {
       position: player.position ?? { x: 0, y: 0 },
       velocity: player.velocity ?? { x: 0, y: 0 },
       isOffTrack: player.isOffTrack ?? false,
+      trail: player.trail ?? [],
     };
     if (idx >= 0) {
       merged.position = state.players[idx].position;
       merged.velocity = state.players[idx].velocity;
       merged.isOffTrack = state.players[idx].isOffTrack;
+      merged.trail = state.players[idx].trail ?? [];
+      merged.passedCheckpoint = state.players[idx].passedCheckpoint;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;
       state.players[idx] = merged;

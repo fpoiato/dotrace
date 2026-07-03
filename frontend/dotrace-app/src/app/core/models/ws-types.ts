@@ -14,6 +14,18 @@ export interface Vector2D {
 
 export type TileType = 'track' | 'grass' | 'finish';
 
+export interface CheckpointRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface TrackArrow {
+  at: Vector2D;
+  dir: Vector2D;
+}
+
 export interface TrackDefinition {
   id: string;
   nameKey: string;
@@ -21,6 +33,14 @@ export interface TrackDefinition {
   height: number;
   grid: TileType[][];
   startLine: Vector2D[];
+  /** Race-direction arrows drawn next to the start stripe. */
+  arrows: TrackArrow[];
+  /**
+   * Zone (usually the far side of the circuit) a car must have visited before
+   * landing on the finish stripe counts as completing the lap. Prevents
+   * "finishing" by reversing over the line on turn one.
+   */
+  checkpoint?: CheckpointRect;
 }
 
 export interface Player {
@@ -33,6 +53,10 @@ export interface Player {
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
+  /** Move history (pen trail on the paper), starting at the grid slot. */
+  trail: Vector2D[];
+  /** Set once the car has passed the far-side checkpoint (lap validity gate). */
+  passedCheckpoint?: boolean;
   diceRoll?: number;
   finishOrder?: number;
 }
@@ -52,6 +76,8 @@ export interface GameState {
   trackId: string;
   turnOrder: string[];
   currentTurnIndex: number;
+  /** 1-based racing round (increments each time the turn order wraps). */
+  round: number;
   diceRolls: Record<string, number>;
   podium: PodiumEntry[];
 }
@@ -205,6 +231,7 @@ export function createLobbyPlayer(
     position: zeroVector(),
     velocity: zeroVector(),
     isOffTrack: false,
+    trail: [],
   };
 }
 
@@ -219,6 +246,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     trackId: '',
     turnOrder: [],
     currentTurnIndex: 0,
+    round: 1,
     diceRolls: {},
     podium: [],
   };
@@ -261,6 +289,60 @@ export function landingPosition(position: Vector2D, velocity: Vector2D): Vector2
 
 export function posKey(p: Vector2D): string {
   return `${p.x},${p.y}`;
+}
+
+/** Racing "gear" = Chebyshev magnitude of the velocity vector. */
+export function gearOf(velocity: Vector2D): number {
+  return Math.max(Math.abs(velocity.x), Math.abs(velocity.y));
+}
+
+/**
+ * Whether the straight move from → to passes over a finish tile.
+ * Sampled along the segment: a fast car may jump the stripe without
+ * landing on it, and that still counts as crossing the line.
+ */
+export function segmentCrossesFinish(
+  track: TrackDefinition,
+  from: Vector2D,
+  to: Vector2D
+): boolean {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  if (steps === 0) {
+    return getTileAt(track, to.x, to.y) === 'finish';
+  }
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (getTileAt(track, x, y) === 'finish') return true;
+  }
+  return false;
+}
+
+/** Whether the straight move from → to enters the given checkpoint zone. */
+export function segmentEntersRect(
+  from: Vector2D,
+  to: Vector2D,
+  rect: CheckpointRect
+): boolean {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  for (let i = 0; i <= Math.max(steps, 1); i++) {
+    const t = steps === 0 ? 1 : i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (x >= rect.x0 && x <= rect.x1 && y >= rect.y0 && y <= rect.y1) return true;
+  }
+  return false;
+}
+
+/** Trail history cap — bounds RELAY payload size on long races. */
+export const MAX_TRAIL_POINTS = 300;
+
+export function pushTrail(player: Player, point: Vector2D): void {
+  player.trail.push({ ...point });
+  if (player.trail.length > MAX_TRAIL_POINTS) {
+    player.trail.shift();
+  }
 }
 
 export function getTileAt(track: TrackDefinition, x: number, y: number): TileType | null {

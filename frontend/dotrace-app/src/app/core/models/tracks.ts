@@ -1,142 +1,227 @@
-import { TileType, TrackDefinition, Vector2D } from './ws-types';
+import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
 
-function emptyGrid(w: number, h: number, fill: TileType = 'grass'): TileType[][] {
-  return Array.from({ length: h }, () => Array.from({ length: w }, () => fill));
+/**
+ * Circuits are rasterized from a centerline polyline stamped with a round
+ * brush, mimicking a marker pen on grid paper. Layouts approximate the
+ * classic outlines of Monza, Monaco and Interlagos.
+ */
+
+const GRID_W = 56;
+const GRID_H = 36;
+const BRUSH_RADIUS = 2.3; // corridor ≈ 5 cells wide
+
+function emptyGrid(w: number, h: number): TileType[][] {
+  return Array.from({ length: h }, () => Array.from({ length: w }, () => 'grass' as TileType));
 }
 
-function carveRect(
-  grid: TileType[][],
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  tile: TileType = 'track'
-): void {
-  for (let row = y; row < y + h && row < grid.length; row++) {
-    for (let col = x; col < x + w && col < grid[0].length; col++) {
-      grid[row][col] = tile;
-    }
-  }
-}
-
-function carvePath(grid: TileType[][], points: Vector2D[], width = 1): void {
-  for (const p of points) {
-    for (let dy = 0; dy < width; dy++) {
-      for (let dx = 0; dx < width; dx++) {
-        const y = p.y + dy;
-        const x = p.x + dx;
-        if (y >= 0 && y < grid.length && x >= 0 && x < grid[0].length) {
-          grid[y][x] = 'track';
-        }
+function stampDisc(grid: TileType[][], cx: number, cy: number, r: number): void {
+  const h = grid.length;
+  const w = grid[0].length;
+  const minY = Math.max(0, Math.floor(cy - r));
+  const maxY = Math.min(h - 1, Math.ceil(cy + r));
+  const minX = Math.max(0, Math.floor(cx - r));
+  const maxX = Math.min(w - 1, Math.ceil(cx + r));
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      if (dx * dx + dy * dy <= r * r) {
+        grid[y][x] = 'track';
       }
     }
   }
 }
 
-/** Monza-inspired oval with chicane (32×24). */
-function buildMonza(): TrackDefinition {
-  const w = 32;
-  const h = 24;
-  const grid = emptyGrid(w, h);
-  const path: Vector2D[] = [];
-  for (let x = 4; x <= 27; x++) path.push({ x, y: 4 });
-  for (let y = 4; y <= 19; y++) path.push({ x: 27, y });
-  for (let x = 27; x >= 4; x--) path.push({ x, y: 19 });
-  for (let y = 19; y >= 4; y--) path.push({ x: 4, y });
-  carvePath(grid, path, 2);
-  carveRect(grid, 12, 3, 4, 3, 'finish');
-  const startLine: Vector2D[] = [
-    { x: 6, y: 5 },
-    { x: 8, y: 5 },
-    { x: 10, y: 5 },
-    { x: 12, y: 5 },
-  ];
+function carvePolyline(grid: TileType[][], points: Vector2D[], radius = BRUSH_RADIUS): void {
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(dist * 4));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      stampDisc(grid, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, radius);
+    }
+  }
+}
+
+/** Convert existing track cells inside the rect into the finish stripe. */
+function stampFinish(grid: TileType[][], x0: number, x1: number, y0: number, y1: number): void {
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (grid[y]?.[x] === 'track') {
+        grid[y][x] = 'finish';
+      }
+    }
+  }
+}
+
+/** Twelve staggered grid slots marching away from the stripe. */
+function gridSlots(firstCol: number, colStep: number, rows: [number, number]): Vector2D[] {
+  const slots: Vector2D[] = [];
+  for (let i = 0; i < 6; i++) {
+    const x = firstCol + i * colStep;
+    slots.push({ x, y: rows[0] }, { x, y: rows[1] });
+  }
+  return slots;
+}
+
+interface CircuitSpec {
+  id: string;
+  nameKey: string;
+  centerline: Vector2D[];
+  finish: { x0: number; x1: number; y0: number; y1: number };
+  startLine: Vector2D[];
+  arrows: TrackArrow[];
+  checkpoint: { x0: number; y0: number; x1: number; y1: number };
+}
+
+function buildCircuit(spec: CircuitSpec): TrackDefinition {
+  const grid = emptyGrid(GRID_W, GRID_H);
+  carvePolyline(grid, spec.centerline);
+  stampFinish(grid, spec.finish.x0, spec.finish.x1, spec.finish.y0, spec.finish.y1);
   return {
-    id: 'monza',
-    nameKey: 'tracks.monza',
-    width: w,
-    height: h,
+    id: spec.id,
+    nameKey: spec.nameKey,
+    width: GRID_W,
+    height: GRID_H,
     grid,
-    startLine,
+    startLine: spec.startLine,
+    arrows: spec.arrows,
+    checkpoint: spec.checkpoint,
   };
 }
 
-/** Monaco-inspired tight street circuit (28×32). */
-function buildMonaco(): TrackDefinition {
-  const w = 28;
-  const h = 32;
-  const grid = emptyGrid(w, h);
-  const path: Vector2D[] = [];
-  for (let x = 3; x <= 24; x++) path.push({ x, y: 3 });
-  for (let y = 3; y <= 10; y++) path.push({ x: 24, y });
-  for (let x = 24; x >= 14; x--) path.push({ x, y: 10 });
-  for (let y = 10; y <= 22; y++) path.push({ x: 14, y });
-  for (let x = 14; x <= 24; x++) path.push({ x, y: 22 });
-  for (let y = 22; y <= 28; y++) path.push({ x: 24, y });
-  for (let x = 24; x >= 3; x--) path.push({ x, y: 28 });
-  for (let y = 28; y >= 3; y--) path.push({ x: 3, y });
-  carvePath(grid, path, 2);
-  carveRect(grid, 20, 2, 4, 2, 'finish');
-  const startLine: Vector2D[] = [
-    { x: 5, y: 4 },
-    { x: 7, y: 4 },
-    { x: 9, y: 4 },
-    { x: 11, y: 4 },
-  ];
-  return {
-    id: 'monaco',
-    nameKey: 'tracks.monaco',
-    width: w,
-    height: h,
-    grid,
-    startLine,
-  };
-}
-
-/** Interlagos-inspired figure-eight-ish layout (30×26). */
-function buildInterlagos(): TrackDefinition {
-  const w = 30;
-  const h = 26;
-  const grid = emptyGrid(w, h);
-  const path: Vector2D[] = [];
-  for (let x = 4; x <= 25; x++) path.push({ x, y: 5 });
-  for (let y = 5; y <= 12; y++) path.push({ x: 25, y });
-  for (let x = 25; x >= 15; x--) path.push({ x, y: 12 });
-  for (let y = 12; y <= 20; y++) path.push({ x: 15, y });
-  for (let x = 15; x <= 25; x++) path.push({ x, y: 20 });
-  for (let y = 20; y >= 5; y--) path.push({ x: 4, y });
-  carvePath(grid, path, 2);
-  carveRect(grid, 22, 4, 3, 2, 'finish');
-  const startLine: Vector2D[] = [
+/**
+ * Monza — elongated clockwise ring: long bottom start straight, Parabolica
+ * sweeping up on the right, back straight climbing to the top-left (Lesmo
+ * side), tall left flank returning down to the line.
+ */
+const MONZA: CircuitSpec = {
+  id: 'monza',
+  nameKey: 'tracks.monza',
+  centerline: [
+    { x: 12, y: 32 },
+    { x: 44, y: 32 },
+    { x: 50, y: 29 },
+    { x: 52, y: 23 },
+    { x: 47, y: 17 },
+    { x: 34, y: 11 },
+    { x: 20, y: 6 },
+    { x: 11, y: 3 },
     { x: 6, y: 6 },
-    { x: 8, y: 6 },
-    { x: 10, y: 6 },
-    { x: 12, y: 6 },
-  ];
-  return {
-    id: 'interlagos',
-    nameKey: 'tracks.interlagos',
-    width: w,
-    height: h,
-    grid,
-    startLine,
-  };
-}
+    { x: 6, y: 12 },
+    { x: 9, y: 20 },
+    { x: 11, y: 27 },
+    { x: 12, y: 32 },
+  ],
+  finish: { x0: 28, x1: 29, y0: 29, y1: 35 },
+  startLine: gridSlots(31, 2, [31, 33]),
+  arrows: [
+    { at: { x: 28.5, y: 27.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 28.5, y: 35.4 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 3, y0: 1, x1: 20, y1: 12 },
+};
 
-export const TRACKS: TrackDefinition[] = [buildMonza(), buildMonaco(), buildInterlagos()];
+/**
+ * Monaco — anticlockwise street loop: low tail around the left (Rascasse),
+ * climb up the left edge, run along the top to the casino hook at the
+ * top-right, then squeeze back left along the harbour straight.
+ */
+const MONACO: CircuitSpec = {
+  id: 'monaco',
+  nameKey: 'tracks.monaco',
+  centerline: [
+    { x: 10, y: 30 },
+    { x: 6, y: 26 },
+    { x: 5, y: 20 },
+    { x: 7, y: 14 },
+    { x: 12, y: 10 },
+    { x: 20, y: 12 },
+    { x: 28, y: 14 },
+    { x: 36, y: 12 },
+    { x: 42, y: 8 },
+    { x: 48, y: 7 },
+    { x: 51, y: 11 },
+    { x: 48, y: 16 },
+    { x: 42, y: 19 },
+    { x: 34, y: 21 },
+    { x: 24, y: 21 },
+    { x: 15, y: 24 },
+    { x: 10, y: 30 },
+  ],
+  finish: { x0: 30, x1: 31, y0: 17, y1: 25 },
+  startLine: gridSlots(28, -1, [20, 22]),
+  arrows: [
+    { at: { x: 30.5, y: 15.5 }, dir: { x: -1, y: 0 } },
+    { at: { x: 30.5, y: 26.5 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 42, y0: 4, x1: 54, y1: 18 },
+};
+
+/**
+ * Interlagos — anticlockwise: top start straight running right-to-left,
+ * left bulge diving down, infield S climbing back up and curling around
+ * (Senna S / Bico de Pato), bottom sweep and the long right side back up.
+ */
+const INTERLAGOS: CircuitSpec = {
+  id: 'interlagos',
+  nameKey: 'tracks.interlagos',
+  centerline: [
+    { x: 46, y: 7 },
+    { x: 30, y: 5 },
+    { x: 16, y: 5 },
+    { x: 9, y: 8 },
+    { x: 6, y: 14 },
+    { x: 7, y: 20 },
+    { x: 12, y: 23 },
+    { x: 17, y: 21 },
+    { x: 20, y: 16 },
+    { x: 25, y: 13 },
+    { x: 30, y: 15 },
+    { x: 31, y: 20 },
+    { x: 27, y: 24 },
+    { x: 22, y: 28 },
+    { x: 26, y: 31 },
+    { x: 34, y: 31 },
+    { x: 42, y: 29 },
+    { x: 48, y: 24 },
+    { x: 51, y: 17 },
+    { x: 50, y: 11 },
+    { x: 46, y: 7 },
+  ],
+  finish: { x0: 30, x1: 31, y0: 2, y1: 9 },
+  startLine: gridSlots(28, -2, [4, 6]),
+  arrows: [
+    { at: { x: 30.5, y: 1.2 }, dir: { x: -1, y: 0 } },
+    { at: { x: 30.5, y: 10.5 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 44, y0: 12, x1: 54, y1: 28 },
+};
+
+export const TRACKS: TrackDefinition[] = [
+  buildCircuit(MONZA),
+  buildCircuit(MONACO),
+  buildCircuit(INTERLAGOS),
+];
 
 export function getTrackById(id: string): TrackDefinition | undefined {
   return TRACKS.find((t) => t.id === id);
 }
 
-export const TILE_COLORS: Record<TileType, string> = {
-  track: '#374151',
-  grass: '#166534',
-  finish: '#FBBF24',
+/** Paper-sketch palette used by the canvas renderer. */
+export const PAPER_COLORS = {
+  paper: '#fbfaf6',
+  gridLine: '#d8dee4',
+  grass: '#22b422',
+  ink: '#111111',
+  finish: '#f97316',
+  finishDark: '#111111',
 };
 
-export const TILE_COLORS_DARK: Record<TileType, string> = {
-  track: '#1F2937',
-  grass: '#14532D',
-  finish: '#F59E0B',
+export const TILE_COLORS: Record<TileType, string> = {
+  track: PAPER_COLORS.paper,
+  grass: PAPER_COLORS.grass,
+  finish: PAPER_COLORS.finish,
 };

@@ -18,24 +18,37 @@
     }
 
     @if (state.phase === 'GAME_ROUND' || state.phase === 'GAME_OVER') {
-      <div class="mb-3 flex items-center justify-between text-sm">
+      <div class="mb-3 flex items-center justify-between gap-2 text-sm">
         @if (game.isMyTurn()) {
           <span class="rounded-full bg-green-600 px-3 py-1 font-bold">{{ 'game.yourTurn' | translate }}</span>
         } @else if (state.phase === 'GAME_ROUND') {
           <span class="text-slate-400">{{ 'game.waitTurn' | translate: { name: currentPlayerName() } }}</span>
         }
-        @if (myPlayer(state); as me) {
-          <span class="font-mono text-slate-400">
-            {{ 'game.velocity' | translate }}: ({{ me.velocity.x }}, {{ me.velocity.y }})
-          </span>
-        }
+        <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+          {{ 'game.round' | translate }} {{ state.round }}
+        </span>
       </div>
 
-      @if (myPlayer(state)?.isOffTrack) {
-        <p class="mb-2 text-center text-sm text-amber-400">{{ 'game.offTrack' | translate }}</p>
+      @if (myPlayer(state); as me) {
+        <div class="mb-3 flex items-center gap-2 text-sm">
+          <span
+            class="rounded-lg px-3 py-1 font-bold text-slate-900"
+            [style.background]="me.color"
+          >
+            {{ 'game.gear' | translate }} {{ myGear(me) }}
+          </span>
+          <span class="font-mono text-slate-400">({{ me.velocity.x }}, {{ me.velocity.y }})</span>
+          @if (me.isOffTrack) {
+            <span class="text-amber-400">{{ 'game.offTrack' | translate }}</span>
+          }
+        </div>
       }
 
       <app-track-canvas [state]="state" />
+
+      @if (game.isMyTurn()) {
+        <p class="mt-2 text-center text-xs text-slate-400">{{ 'game.tapHint' | translate }}</p>
+      }
     }
 
     @if (state.phase === 'GAME_OVER' || showCelebration) {

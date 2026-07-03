@@ -8,12 +8,15 @@ import {
   Player,
   TrackDefinition,
   createLobbyPlayer,
+  gearOf,
   getValidMoves,
   isGameOver,
   isValidGearChange,
   nextActiveTurnIndex,
   rollDice,
   generateRoomCode,
+  segmentCrossesFinish,
+  segmentEntersRect,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -29,6 +32,7 @@ function makeTrack(): TrackDefinition {
     height: 4,
     grid,
     startLine: [{ x: 0, y: 0 }],
+    arrows: [],
   };
 }
 
@@ -98,6 +102,7 @@ describe('turn order', () => {
       trackId: 'test',
       turnOrder: ['a', 'b', 'c'],
       currentTurnIndex: 0,
+      round: 1,
       diceRolls: {},
       podium: [],
     };
@@ -130,6 +135,7 @@ describe('game over conditions', () => {
       trackId: 'test',
       turnOrder: ['c1'],
       currentTurnIndex: 0,
+      round: 1,
       diceRolls: {},
       podium: [
         { connectionId: 'x', nickname: 'X', position: 1 },
@@ -148,6 +154,7 @@ describe('game over conditions', () => {
       trackId: 'test',
       turnOrder: ['c1'],
       currentTurnIndex: 0,
+      round: 1,
       diceRolls: {},
       podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
     };
@@ -162,10 +169,47 @@ describe('game over conditions', () => {
       trackId: 'test',
       turnOrder: ['c1', 'c2'],
       currentTurnIndex: 0,
+      round: 1,
       diceRolls: {},
       podium: [{ connectionId: 'c2', nickname: 'Bia', position: 1 }],
     };
     expect(isGameOver(state)).toBe(false);
+  });
+});
+
+describe('finish line crossing', () => {
+  function trackWithStripe(): TrackDefinition {
+    const t = makeTrack();
+    // vertical stripe at x=3
+    for (let y = 0; y < 4; y++) t.grid[y][3] = 'finish';
+    return t;
+  }
+
+  it('detects landing on the stripe', () => {
+    expect(segmentCrossesFinish(trackWithStripe(), { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(true);
+  });
+
+  it('detects flying over the stripe without landing on it', () => {
+    expect(segmentCrossesFinish(trackWithStripe(), { x: 1, y: 1 }, { x: 4, y: 1 })).toBe(true);
+  });
+
+  it('does not trigger when the move stays clear of the stripe', () => {
+    expect(segmentCrossesFinish(trackWithStripe(), { x: 0, y: 0 }, { x: 1, y: 2 })).toBe(false);
+  });
+
+  it('checkpoint detection samples the whole segment', () => {
+    const rect = { x0: 2, y0: 0, x1: 2, y1: 3 };
+    expect(segmentEntersRect({ x: 0, y: 1 }, { x: 4, y: 1 }, rect)).toBe(true);
+    expect(segmentEntersRect({ x: 0, y: 0 }, { x: 1, y: 3 }, rect)).toBe(false);
+  });
+});
+
+describe('gear', () => {
+  it('is the Chebyshev magnitude of velocity', () => {
+    expect(gearOf({ x: 0, y: 0 })).toBe(0);
+    expect(gearOf({ x: 2, y: 0 })).toBe(2);
+    expect(gearOf({ x: -3, y: 2 })).toBe(3);
+    expect(gearOf({ x: 1, y: -4 })).toBe(4);
   });
 });
 
