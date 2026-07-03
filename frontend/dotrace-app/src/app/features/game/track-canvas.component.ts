@@ -24,11 +24,14 @@ import { RoomService } from '../../core/services/room.service';
 const CELL = 16;
 const MIN_CELL_PX = 8;
 const MAX_CELL_PX = 46;
+/** Finger/mouse travel (in CSS px) below which a gesture still counts as a tap. */
+const TAP_SLOP = 10;
 
 /**
- * "Pen and paper" renderer with a camera. On phones the camera follows the
- * action zoomed-in (framing your car and every square you can tap); the
- * overlay buttons zoom in/out or toggle the whole-track view.
+ * "Pen and paper" renderer with a map-style camera: drag to pan, pinch or
+ * use the overlay buttons to zoom, tap a highlighted square to move. The
+ * camera auto-frames your car and options on your turn; panning hands
+ * control to the user until their next turn (or the fit toggle).
  */
 @Component({
   selector: 'app-track-canvas',
@@ -37,7 +40,7 @@ const MAX_CELL_PX = 46;
     <div class="relative">
       <canvas
         #canvas
-        class="h-[48vh] w-full touch-none rounded-xl border border-slate-600 md:h-[62vh]"
+        class="h-[48vh] w-full cursor-grab touch-none rounded-xl border border-slate-600 active:cursor-grabbing md:h-[62vh]"
       ></canvas>
       <div class="absolute bottom-2 right-2 flex flex-col gap-1">
         <button
@@ -92,44 +95,112 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private scale = 1;
   private offsetX = 0;
   private offsetY = 0;
+  /** True after the user pans/pinches: camera stops auto-following. */
+  private manualCamera = false;
+  private lastTrack: TrackDefinition | null = null;
+
+  // gesture bookkeeping
+  private pointerDown = false;
+  private gestureMoved = false;
+  private startX = 0;
+  private startY = 0;
+  private lastX = 0;
+  private lastY = 0;
+  private pinchDist = 0;
+  private suppressClick = false;
+
   private readonly onResize = () => requestAnimationFrame(() => this.draw());
+  private readonly onMouseMoveBound = (e: MouseEvent) => this.onMouseMove(e);
+  private readonly onMouseUpBound = () => this.onMouseUp();
 
   ngAfterViewInit(): void {
     const canvas = this.canvasRef.nativeElement;
     canvas.addEventListener('click', (e) => this.onTap(e));
-    canvas.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      this.onTap(e);
-    });
+    canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    window.addEventListener('mousemove', this.onMouseMoveBound);
+    window.addEventListener('mouseup', this.onMouseUpBound);
+    canvas.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
+    canvas.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
+    canvas.addEventListener('touchend', (e) => this.onTouchEnd(e), { passive: false });
     window.addEventListener('resize', this.onResize);
     requestAnimationFrame(() => this.draw());
   }
 
   ngOnDestroy(): void {
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('mousemove', this.onMouseMoveBound);
+    window.removeEventListener('mouseup', this.onMouseUpBound);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['state']) {
+      // My turn → retake the camera so the reachable squares are framed.
+      const state = this.state;
+      if (state && this.activePlayer(state)?.connectionId === this.room.room?.connectionId) {
+        this.manualCamera = false;
+      }
       requestAnimationFrame(() => this.draw());
     }
   }
 
+  // ---------------------------------------------------------------- camera
+
   zoomIn(): void {
-    this.zoomFactor = Math.min(3, this.zoomFactor * 1.3);
-    this.fitMode = false;
-    this.draw();
+    this.zoomBy(1.3);
   }
 
   zoomOut(): void {
-    this.zoomFactor = Math.max(0.4, this.zoomFactor / 1.3);
+    this.zoomBy(1 / 1.3);
+  }
+
+  private zoomBy(factor: number): void {
+    const canvas = this.canvasRef.nativeElement;
+    if (this.manualCamera) {
+      this.scaleAround(canvas.width / 2, canvas.height / 2, factor);
+    } else {
+      this.zoomFactor = Math.min(3, Math.max(0.4, this.zoomFactor * factor));
+      this.fitMode = factor > 1 ? false : this.fitMode;
+    }
     this.draw();
   }
 
   toggleFit(): void {
     this.fitMode = !this.fitMode;
     this.zoomFactor = 1;
+    this.manualCamera = false;
     this.draw();
+  }
+
+  private minScale(track: TrackDefinition): number {
+    const canvas = this.canvasRef.nativeElement;
+    return Math.min(canvas.width / (track.width * CELL), canvas.height / (track.height * CELL)) * 0.5;
+  }
+
+  private maxScale(): number {
+    return (MAX_CELL_PX * (window.devicePixelRatio || 1)) / CELL;
+  }
+
+  /** Zoom keeping the given device-px point fixed on screen. */
+  private scaleAround(px: number, py: number, factor: number): void {
+    const track = this.lastTrack;
+    if (!track) return;
+    const next = Math.min(this.maxScale(), Math.max(this.minScale(track), this.scale * factor));
+    const applied = next / this.scale;
+    this.offsetX = px - applied * (px - this.offsetX);
+    this.offsetY = py - applied * (py - this.offsetY);
+    this.scale = next;
+    this.clampOffsets(track);
+  }
+
+  /** Keep at least part of the sheet on screen while panning. */
+  private clampOffsets(track: TrackDefinition): void {
+    const canvas = this.canvasRef.nativeElement;
+    const worldW = track.width * CELL * this.scale;
+    const worldH = track.height * CELL * this.scale;
+    const slackX = canvas.width * 0.6;
+    const slackY = canvas.height * 0.6;
+    this.offsetX = Math.min(slackX, Math.max(canvas.width - worldW - slackX, this.offsetX));
+    this.offsetY = Math.min(slackY, Math.max(canvas.height - worldH - slackY, this.offsetY));
   }
 
   private myPlayer(state: GameState): Player | undefined {
@@ -146,15 +217,17 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
   /**
    * Frame the interesting region: my car plus every reachable landing when it
-   * is my turn, otherwise the car in focus — clamped to sane zoom levels.
+   * is my turn, otherwise the car in focus — unless the user took the camera.
    */
   private computeCamera(state: GameState, track: TrackDefinition): void {
     const canvas = this.canvasRef.nativeElement;
     const dpr = window.devicePixelRatio || 1;
-    const cw = canvas.clientWidth * dpr;
-    const ch = canvas.clientHeight * dpr;
-    canvas.width = cw;
-    canvas.height = ch;
+    const cw = Math.round(canvas.clientWidth * dpr);
+    const ch = Math.round(canvas.clientHeight * dpr);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
 
     const worldW = track.width * CELL;
     const worldH = track.height * CELL;
@@ -163,6 +236,11 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       // Big screens start with the whole sheet; phones start zoomed on the action.
       this.fitMode = canvas.clientWidth >= 640;
       this.fitModeInitialized = true;
+    }
+
+    if (this.manualCamera && !this.fitMode) {
+      this.clampOffsets(track);
+      return;
     }
 
     if (this.fitMode || state.phase !== 'GAME_ROUND') {
@@ -193,22 +271,21 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     let maxX = Math.max(...pts.map((p) => p.x));
     let minY = Math.min(...pts.map((p) => p.y));
     let maxY = Math.max(...pts.map((p) => p.y));
-    // generous margin so players see the road around the action
     const margin = 5;
     minX -= margin;
     maxX += margin;
     minY -= margin;
     maxY += margin;
 
-    const boxW = (maxX - minX + 1) * CELL;
-    const boxH = (maxY - minY + 1) * CELL;
-    let cellPx = Math.min(cw / (boxW / CELL), ch / (boxH / CELL)) * this.zoomFactor;
-    cellPx = Math.max(MIN_CELL_PX * (window.devicePixelRatio || 1), Math.min(MAX_CELL_PX * (window.devicePixelRatio || 1), cellPx));
+    const boxW = maxX - minX + 1;
+    const boxH = maxY - minY + 1;
+    let cellPx = Math.min(cw / boxW, ch / boxH) * this.zoomFactor;
+    const dprScale = window.devicePixelRatio || 1;
+    cellPx = Math.max(MIN_CELL_PX * dprScale, Math.min(MAX_CELL_PX * dprScale, cellPx));
     const s = cellPx / CELL;
 
     let cxWorld = ((minX + maxX + 1) / 2) * CELL;
     let cyWorld = ((minY + maxY + 1) / 2) * CELL;
-    // keep the camera inside the sheet when possible
     const viewW = cw / s;
     const viewH = ch / s;
     if (viewW < worldW) {
@@ -227,6 +304,134 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.offsetY = ch / 2 - cyWorld * s;
   }
 
+  // -------------------------------------------------------------- gestures
+
+  private cssToDevice(): number {
+    const canvas = this.canvasRef.nativeElement;
+    const rect = canvas.getBoundingClientRect();
+    return rect.width > 0 ? canvas.width / rect.width : 1;
+  }
+
+  private onMouseDown(e: MouseEvent): void {
+    this.pointerDown = true;
+    this.gestureMoved = false;
+    this.startX = this.lastX = e.clientX;
+    this.startY = this.lastY = e.clientY;
+  }
+
+  private onMouseMove(e: MouseEvent): void {
+    if (!this.pointerDown) return;
+    if (!this.gestureMoved) {
+      if (Math.hypot(e.clientX - this.startX, e.clientY - this.startY) < TAP_SLOP) return;
+      this.gestureMoved = true;
+      this.manualCamera = true;
+      this.fitMode = false;
+    }
+    const k = this.cssToDevice();
+    this.offsetX += (e.clientX - this.lastX) * k;
+    this.offsetY += (e.clientY - this.lastY) * k;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
+    if (this.lastTrack) this.clampOffsets(this.lastTrack);
+    this.draw();
+  }
+
+  private onMouseUp(): void {
+    if (this.pointerDown && this.gestureMoved) {
+      this.suppressClick = true;
+    }
+    this.pointerDown = false;
+  }
+
+  private onTouchStart(e: TouchEvent): void {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      this.pointerDown = true;
+      this.gestureMoved = false;
+      this.startX = this.lastX = t.clientX;
+      this.startY = this.lastY = t.clientY;
+    } else if (e.touches.length === 2) {
+      e.preventDefault();
+      this.pointerDown = true;
+      this.gestureMoved = true;
+      this.manualCamera = true;
+      this.fitMode = false;
+      this.pinchDist = this.touchDist(e);
+      const [mx, my] = this.touchMid(e);
+      this.lastX = mx;
+      this.lastY = my;
+    }
+  }
+
+  private onTouchMove(e: TouchEvent): void {
+    e.preventDefault();
+    if (e.touches.length === 1 && this.pointerDown) {
+      const t = e.touches[0];
+      if (!this.gestureMoved) {
+        if (Math.hypot(t.clientX - this.startX, t.clientY - this.startY) < TAP_SLOP) return;
+        this.gestureMoved = true;
+        this.manualCamera = true;
+        this.fitMode = false;
+      }
+      const k = this.cssToDevice();
+      this.offsetX += (t.clientX - this.lastX) * k;
+      this.offsetY += (t.clientY - this.lastY) * k;
+      this.lastX = t.clientX;
+      this.lastY = t.clientY;
+      if (this.lastTrack) this.clampOffsets(this.lastTrack);
+      this.draw();
+    } else if (e.touches.length === 2) {
+      const dist = this.touchDist(e);
+      const [mx, my] = this.touchMid(e);
+      const canvas = this.canvasRef.nativeElement;
+      const rect = canvas.getBoundingClientRect();
+      const k = this.cssToDevice();
+      if (this.pinchDist > 0) {
+        this.scaleAround((mx - rect.left) * k, (my - rect.top) * k, dist / this.pinchDist);
+      }
+      this.offsetX += (mx - this.lastX) * k;
+      this.offsetY += (my - this.lastY) * k;
+      this.pinchDist = dist;
+      this.lastX = mx;
+      this.lastY = my;
+      if (this.lastTrack) this.clampOffsets(this.lastTrack);
+      this.draw();
+    }
+  }
+
+  private onTouchEnd(e: TouchEvent): void {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      // pinch → single finger: re-anchor to avoid a jump
+      const t = e.touches[0];
+      this.lastX = t.clientX;
+      this.lastY = t.clientY;
+      this.pinchDist = 0;
+      return;
+    }
+    if (e.touches.length > 0) return;
+    const wasTap = this.pointerDown && !this.gestureMoved;
+    this.pointerDown = false;
+    this.pinchDist = 0;
+    if (wasTap) {
+      this.onTap(e);
+    }
+  }
+
+  private touchDist(e: TouchEvent): number {
+    const a = e.touches[0];
+    const b = e.touches[1];
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+
+  private touchMid(e: TouchEvent): [number, number] {
+    const a = e.touches[0];
+    const b = e.touches[1];
+    return [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2];
+  }
+
+  // -------------------------------------------------------------- painting
+
   private draw(): void {
     const canvas = this.canvasRef.nativeElement;
     const ctx = canvas.getContext('2d');
@@ -235,6 +440,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     const track = getTrackById(state.trackId);
     if (!track) return;
+    this.lastTrack = track;
 
     this.computeCamera(state, track);
 
@@ -460,6 +666,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
   /** Tap → nearest valid landing square within ~1 cell (generous on mobile). */
   private onTap(event: MouseEvent | TouchEvent): void {
+    if (this.suppressClick) {
+      this.suppressClick = false;
+      return;
+    }
     const state = this.state;
     if (!state || state.phase !== 'GAME_ROUND' || !this.game.isMyTurn()) return;
     if (this.validMoves.length === 0) return;
