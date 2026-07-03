@@ -44,6 +44,16 @@ export class GameEngineService implements OnDestroy {
     return this.stateSubject.value;
   }
 
+  /**
+   * Emit a deep clone so every emission is a NEW reference. The host mutates
+   * game state in place; without cloning, Angular input bindings (e.g. the
+   * track canvas) never see a change and stop re-rendering — the "player 2
+   * has no highlighted squares" bug.
+   */
+  private emit(state: GameState): void {
+    this.stateSubject.next(structuredClone(state));
+  }
+
   get isHost(): boolean {
     return this.roomService.room?.isHost ?? false;
   }
@@ -226,7 +236,7 @@ export class GameEngineService implements OnDestroy {
     const state = createInitialState(players, room.connectionId);
     const savedTrack = this.session.load()?.trackId;
     if (savedTrack) state.trackId = savedTrack;
-    this.stateSubject.next(state);
+    this.emit(state);
     return state;
   }
 
@@ -261,7 +271,7 @@ export class GameEngineService implements OnDestroy {
     for (const p of state.players) {
       p.isHost = p.connectionId === state.hostId;
     }
-    this.stateSubject.next(state);
+    this.emit(state);
 
     // Purge the disconnected old host from the recovered snapshot and let
     // every peer converge on the cleaned state.
@@ -333,7 +343,7 @@ export class GameEngineService implements OnDestroy {
     // Podium entries are kept: a finished player who leaves still earned their spot.
 
     if (state.turnOrder.length === 0) {
-      this.stateSubject.next(state);
+      this.emit(state);
       return;
     }
 
@@ -408,7 +418,7 @@ export class GameEngineService implements OnDestroy {
 
   private applyRelay(relay: RelayPayload): void {
     if (this.isHost) return;
-    this.stateSubject.next(relay.state);
+    this.emit(relay.state);
   }
 
   private handlePlayerAction(action: Record<string, unknown>): void {
@@ -434,7 +444,7 @@ export class GameEngineService implements OnDestroy {
   }
 
   private setStateAndRelay(type: RelayPayload['type'], state: GameState, meta?: Record<string, unknown>): void {
-    this.stateSubject.next(state);
+    this.emit(state);
     const room = this.roomService.room;
     if (!room?.isHost) return;
     this.ws.send('RELAY', { type, state, meta }, room.roomCode);

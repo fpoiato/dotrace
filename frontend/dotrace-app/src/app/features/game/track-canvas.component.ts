@@ -228,6 +228,13 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit {
     }
   }
 
+  /** The player whose turn it is, derived from the rendered state itself. */
+  private activePlayer(state: GameState): Player | undefined {
+    if (state.phase !== 'GAME_ROUND') return undefined;
+    const id = state.turnOrder[state.currentTurnIndex];
+    return state.players.find((p) => p.connectionId === id);
+  }
+
   /** Squares the active player can tap, in their pen color. */
   private drawValidTargets(
     ctx: CanvasRenderingContext2D,
@@ -236,8 +243,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit {
   ): void {
     this.validMoves = [];
     const myId = this.room.room?.connectionId;
-    const active = this.game.currentPlayer();
-    if (state.phase !== 'GAME_ROUND' || !active || active.connectionId !== myId) return;
+    const active = this.activePlayer(state);
+    if (!active || active.connectionId !== myId || active.finishOrder !== undefined) return;
 
     this.validMoves = getValidMoves(active, track);
     const color = active.color;
@@ -271,7 +278,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit {
   }
 
   private drawCars(ctx: CanvasRenderingContext2D, state: GameState): void {
-    const active = this.game.currentPlayer();
+    const active = this.activePlayer(state);
     for (const player of state.players) {
       if (player.finishOrder !== undefined && state.phase !== 'GAME_OVER') continue;
       const [cx, cy] = this.center(player.position);
