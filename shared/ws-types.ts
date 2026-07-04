@@ -61,6 +61,10 @@ export interface Player {
   passedCheckpoint?: boolean;
   diceRoll?: number;
   finishOrder?: number;
+  /** Wall-clock finish time (epoch ms). Set when the player completes the race. */
+  finishedAt?: number;
+  /** Racing round when the player finished (turn-based race time). */
+  finishRound?: number;
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
@@ -84,6 +88,28 @@ export interface GameState {
   totalLaps: number;
   diceRolls: Record<string, number>;
   podium: PodiumEntry[];
+  /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
+  raceStartedAt?: number;
+}
+
+/** Per-player snapshot for telemetry and live standings. */
+export interface PlayerTelemetry {
+  connectionId: string;
+  nickname: string;
+  position: Vector2D;
+  velocity: Vector2D;
+  lap: number;
+  finishOrder?: number;
+  finishRound?: number;
+  finishedAt?: number;
+}
+
+/** Host-authoritative race snapshot (positions + elapsed time). */
+export interface RaceTelemetrySnapshot {
+  timestamp: number;
+  round: number;
+  elapsedMs: number;
+  players: PlayerTelemetry[];
 }
 
 export type ClientAction =
@@ -449,4 +475,37 @@ export function isGameOver(state: GameState): boolean {
   if (state.podium.length >= PODIUM_SIZE) return true;
   const racing = state.players.filter((p) => p.finishOrder === undefined);
   return racing.length === 0 && state.turnOrder.length > 0;
+}
+
+/** Build a telemetry snapshot from the current game state. */
+export function buildRaceTelemetry(
+  state: GameState,
+  now = Date.now()
+): RaceTelemetrySnapshot | null {
+  if (!state.raceStartedAt || state.phase === 'LOBBY' || state.phase === 'GRID_ORDER') {
+    return null;
+  }
+  return {
+    timestamp: now,
+    round: state.round,
+    elapsedMs: Math.max(0, now - state.raceStartedAt),
+    players: state.players.map((p) => ({
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      position: { ...p.position },
+      velocity: { ...p.velocity },
+      lap: p.lap,
+      finishOrder: p.finishOrder,
+      finishRound: p.finishRound,
+      finishedAt: p.finishedAt,
+    })),
+  };
+}
+
+/** Format elapsed race time as m:ss. */
+export function formatRaceTime(elapsedMs: number): string {
+  const totalSec = Math.floor(Math.max(0, elapsedMs) / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
 }

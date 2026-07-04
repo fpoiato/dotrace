@@ -19,6 +19,8 @@ import {
   segmentCrossesCell,
   segmentCrossesFinish,
   segmentEntersRect,
+  buildRaceTelemetry,
+  formatRaceTime,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -280,6 +282,57 @@ describe('gear', () => {
     expect(gearOf({ x: 2, y: 0 })).toBe(2);
     expect(gearOf({ x: -3, y: 2 })).toBe(3);
     expect(gearOf({ x: 1, y: -4 })).toBe(4);
+  });
+});
+
+describe('race telemetry', () => {
+  it('builds a snapshot with player positions and elapsed time', () => {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ connectionId: 'a', position: { x: 3, y: 5 }, lap: 2 }),
+        makePlayer({ connectionId: 'b', position: { x: 10, y: 2 }, lap: 1, isHost: false }),
+      ],
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b'],
+      currentTurnIndex: 0,
+      round: 4,
+      totalLaps: 2,
+      diceRolls: {},
+      podium: [],
+      raceStartedAt: 1_000,
+    };
+
+    const snap = buildRaceTelemetry(state, 61_000);
+    expect(snap).not.toBeNull();
+    expect(snap!.elapsedMs).toBe(60_000);
+    expect(snap!.round).toBe(4);
+    expect(snap!.players).toHaveLength(2);
+    expect(snap!.players[0].position).toEqual({ x: 3, y: 5 });
+    expect(snap!.players[1].position).toEqual({ x: 10, y: 2 });
+  });
+
+  it('returns null before the race starts', () => {
+    const state: GameState = {
+      phase: 'GRID_ORDER',
+      players: [makePlayer()],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: [],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 1,
+      diceRolls: {},
+      podium: [],
+    };
+    expect(buildRaceTelemetry(state)).toBeNull();
+  });
+
+  it('formats elapsed time as m:ss', () => {
+    expect(formatRaceTime(0)).toBe('0:00');
+    expect(formatRaceTime(45_000)).toBe('0:45');
+    expect(formatRaceTime(125_000)).toBe('2:05');
   });
 });
 

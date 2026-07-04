@@ -21,6 +21,7 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
   zeroVector,
+  buildRaceTelemetry,
 } from '../models/ws-types';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
@@ -165,6 +166,7 @@ export class GameEngineService implements OnDestroy {
     }
 
     state.phase = 'GAME_ROUND';
+    state.raceStartedAt = Date.now();
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -232,7 +234,10 @@ export class GameEngineService implements OnDestroy {
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
+        const now = Date.now();
         player.finishOrder = pos;
+        player.finishRound = state.round;
+        player.finishedAt = now;
         state.podium.push({
           connectionId: player.connectionId,
           nickname: player.nickname,
@@ -446,6 +451,8 @@ export class GameEngineService implements OnDestroy {
       merged.passedCheckpoint = state.players[idx].passedCheckpoint;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;
+      merged.finishRound = state.players[idx].finishRound;
+      merged.finishedAt = state.players[idx].finishedAt;
       state.players[idx] = merged;
     } else {
       state.players.push(merged);
@@ -489,7 +496,9 @@ export class GameEngineService implements OnDestroy {
     this.emit(state);
     const room = this.roomService.room;
     if (!room?.isHost) return;
-    this.ws.send('RELAY', { type, state, meta }, room.roomCode);
+    const telemetry = buildRaceTelemetry(state);
+    const relayMeta = telemetry ? { ...meta, telemetry } : meta;
+    this.ws.send('RELAY', { type, state, meta: relayMeta }, room.roomCode);
   }
 
   currentPlayer(): Player | null {

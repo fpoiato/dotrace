@@ -377,6 +377,21 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         const hostConn = await getConnection(connectionId);
         if (!hostConn) return ok();
 
+        const relayPayload = payload as {
+          type?: string;
+          meta?: { telemetry?: unknown };
+        };
+        if (relayPayload.meta?.telemetry) {
+          console.log(
+            JSON.stringify({
+              event: 'race_telemetry',
+              roomCode: hostConn.roomCode,
+              relayType: relayPayload.type,
+              telemetry: relayPayload.meta.telemetry,
+            })
+          );
+        }
+
         await broadcastToApproved(
           hostConn.roomCode,
           {

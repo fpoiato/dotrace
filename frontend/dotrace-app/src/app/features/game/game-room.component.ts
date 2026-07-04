@@ -8,12 +8,14 @@ import {
   GameState,
   Player,
   Vector2D,
+  formatRaceTime,
   getTileAt,
   getValidMoves,
   landingPosition,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
+import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
 import { MiniMapComponent } from './mini-map.component';
@@ -48,12 +50,14 @@ const PAD_GLYPHS: Record<string, string> = {
 })
 export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);
+  readonly telemetry = inject(TelemetryService);
   private readonly room = inject(RoomService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
 
   readonly state$ = this.game.state$;
   readonly roomCtx$ = this.room.room$;
+  readonly formatRaceTime = formatRaceTime;
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;
@@ -65,6 +69,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       return;
     }
     this.game.init();
+    this.telemetry.init();
     this.game.ensureLobbyState();
 
     this.subs.push(
@@ -152,6 +157,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
+  }
+
+  finishTime(state: GameState, connectionId: string): string | null {
+    const player = state.players.find((p) => p.connectionId === connectionId);
+    if (!player?.finishedAt || !state.raceStartedAt) return null;
+    return formatRaceTime(player.finishedAt - state.raceStartedAt);
   }
 
   backToMenu(): void {
