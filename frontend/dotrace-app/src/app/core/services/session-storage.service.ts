@@ -9,6 +9,7 @@ export interface SessionData {
   nickname?: string;
   trackId?: string;
   laps?: number;
+  gameMode?: 'TURNS' | 'TIMED';
 }
 
 const KEY = 'dotrace-session';

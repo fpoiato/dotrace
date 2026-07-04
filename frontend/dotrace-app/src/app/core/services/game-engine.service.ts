@@ -2,18 +2,21 @@ import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
 import {
+  GameMode,
   GameState,
   MIN_PLAYERS,
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
   Vector2D,
+  canPlayerMove,
   createInitialState,
   createLobbyPlayer,
   findCollisionOpponent,
   getTileAt,
   getValidMoves,
   isGameOver,
+  isTimedMode,
   landingPosition,
   nextActiveTurnIndex,
   pushTrail,
@@ -86,6 +89,15 @@ export class GameEngineService implements OnDestroy {
     this.setStateAndRelay('STATE_SYNC', state);
   }
 
+  selectGameMode(mode: GameMode): void {
+    if (!this.isHost) return;
+    if (mode !== 'TURNS' && mode !== 'TIMED') return;
+    const state = this.state ?? this.bootstrapLobbyState();
+    state.gameMode = mode;
+    this.session.save({ gameMode: mode });
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
   startRace(): void {
     if (!this.isHost) return;
     const room = this.roomService.room;
@@ -96,6 +108,7 @@ export class GameEngineService implements OnDestroy {
     const trackId = this.state?.trackId || saved?.trackId || '';
     if (!trackId || !getTrackById(trackId)) return;
     const totalLaps = this.state?.totalLaps ?? saved?.laps ?? 1;
+    const gameMode = this.state?.gameMode ?? saved?.gameMode ?? 'TURNS';
 
     // Rebuild the roster from players$ (the single source of truth) so anyone
     // approved after the track was selected is included in the race.
@@ -107,6 +120,20 @@ export class GameEngineService implements OnDestroy {
     );
     state.trackId = trackId;
     state.totalLaps = [1, 2, 3].includes(totalLaps) ? totalLaps : 1;
+    state.gameMode = gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
+
+    const track = getTrackById(trackId)!;
+
+    if (isTimedMode(state)) {
+      const sorted = [...state.players].sort((a, b) => a.joinOrder - b.joinOrder);
+      this.placePlayersOnStartLine(state, track, sorted);
+      state.turnOrder = sorted.map((p) => p.connectionId);
+      state.currentTurnIndex = 0;
+      state.round = 1;
+      state.phase = 'GAME_ROUND';
+      this.setStateAndRelay('GRID_ORDER_DONE', state);
+      return;
+    }
 
     state.phase = 'GRID_ORDER';
     state.diceRolls = {};
@@ -145,15 +172,7 @@ export class GameEngineService implements OnDestroy {
     });
 
     state.turnOrder = sorted.map((p) => p.connectionId);
-    sorted.forEach((player, idx) => {
-      const start = track.startLine[idx % track.startLine.length];
-      player.position = { ...start };
-      player.velocity = zeroVector();
-      player.isOffTrack = false;
-      player.passedCheckpoint = false;
-      player.trail = [{ ...start }];
-      player.lap = 1;
-    });
+    this.placePlayersOnStartLine(state, track, sorted);
     state.round = 1;
 
     state.currentTurnIndex = 0;
@@ -168,12 +187,28 @@ export class GameEngineService implements OnDestroy {
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
+  private placePlayersOnStartLine(
+    state: GameState,
+    track: ReturnType<typeof getTrackById>,
+    ordered: Player[]
+  ): void {
+    if (!track) return;
+    ordered.forEach((player, idx) => {
+      const start = track.startLine[idx % track.startLine.length];
+      player.position = { ...start };
+      player.velocity = zeroVector();
+      player.isOffTrack = false;
+      player.passedCheckpoint = false;
+      player.trail = [{ ...start }];
+      player.lap = 1;
+    });
+  }
+
   private applyMove(senderId: string, vector: Vector2D): void {
     const state = this.state;
     if (!state || state.phase !== 'GAME_ROUND') return;
 
-    const currentId = state.turnOrder[state.currentTurnIndex];
-    if (senderId !== currentId) return;
+    if (!canPlayerMove(state, senderId)) return;
 
     const player = state.players.find((p) => p.connectionId === senderId);
     if (!player || player.finishOrder !== undefined) return;
@@ -195,7 +230,7 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
-      this.advanceTurn(state);
+      this.afterMove(state);
       return;
     }
 
@@ -248,6 +283,14 @@ export class GameEngineService implements OnDestroy {
       return;
     }
 
+    this.afterMove(state);
+  }
+
+  private afterMove(state: GameState): void {
+    if (isTimedMode(state)) {
+      this.setStateAndRelay('TURN_ADVANCED', state);
+      return;
+    }
     this.advanceTurn(state);
   }
 
@@ -274,8 +317,10 @@ export class GameEngineService implements OnDestroy {
         createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
       );
     const state = createInitialState(players, room.connectionId);
-    const savedTrack = this.session.load()?.trackId;
-    if (savedTrack) state.trackId = savedTrack;
+    const saved = this.session.load();
+    if (saved?.trackId) state.trackId = saved.trackId;
+    if (saved?.laps) state.totalLaps = saved.laps;
+    if (saved?.gameMode) state.gameMode = saved.gameMode;
     this.emit(state);
     return state;
   }
@@ -306,6 +351,7 @@ export class GameEngineService implements OnDestroy {
     if (!this.hostRecoveryTimer) return;
     clearTimeout(this.hostRecoveryTimer);
     this.hostRecoveryTimer = null;
+    if (!state.gameMode) state.gameMode = 'TURNS';
     const myId = this.myId;
     state.hostId = myId ?? state.hostId;
     for (const p of state.players) {
@@ -394,7 +440,7 @@ export class GameEngineService implements OnDestroy {
       state.currentTurnIndex = Math.max(0, state.turnOrder.indexOf(currentId));
     }
 
-    if (state.phase === 'GAME_ROUND') {
+    if (state.phase === 'GAME_ROUND' && !isTimedMode(state)) {
       const active = state.players.find(
         (p) => p.connectionId === state.turnOrder[state.currentTurnIndex]
       );
@@ -460,7 +506,9 @@ export class GameEngineService implements OnDestroy {
 
   private applyRelay(relay: RelayPayload): void {
     if (this.isHost) return;
-    this.emit(relay.state);
+    const state = relay.state;
+    if (!state.gameMode) state.gameMode = 'TURNS';
+    this.emit(state);
   }
 
   private handlePlayerAction(action: Record<string, unknown>): void {
@@ -501,8 +549,9 @@ export class GameEngineService implements OnDestroy {
 
   isMyTurn(): boolean {
     const id = this.myId;
-    const current = this.currentPlayer();
-    return !!id && current?.connectionId === id;
+    const state = this.state;
+    if (!id || !state) return false;
+    return canPlayerMove(state, id);
   }
 
   ensureLobbyState(): void {

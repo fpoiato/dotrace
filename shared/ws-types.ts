@@ -65,6 +65,11 @@ export interface Player {
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
 
+/** TURNS = classic turn order; TIMED = everyone races at once, first to finish wins. */
+export type GameMode = 'TURNS' | 'TIMED';
+
+export const GAME_MODES = ['TURNS', 'TIMED'] as const;
+
 export interface PodiumEntry {
   connectionId: string;
   nickname: string;
@@ -82,6 +87,8 @@ export interface GameState {
   round: number;
   /** Race length chosen by the host in the lobby. */
   totalLaps: number;
+  /** TURNS (default) or simultaneous TIMED race. */
+  gameMode: GameMode;
   diceRolls: Record<string, number>;
   podium: PodiumEntry[];
 }
@@ -254,9 +261,23 @@ export function createInitialState(players: Player[], hostId: string): GameState
     currentTurnIndex: 0,
     round: 1,
     totalLaps: 1,
+    gameMode: 'TURNS',
     diceRolls: {},
     podium: [],
   };
+}
+
+export function isTimedMode(state: GameState): boolean {
+  return state.gameMode === 'TIMED';
+}
+
+/** Whether this player may submit a move in the current phase. */
+export function canPlayerMove(state: GameState, playerId: string): boolean {
+  if (state.phase !== 'GAME_ROUND') return false;
+  const player = state.players.find((p) => p.connectionId === playerId);
+  if (!player || player.finishOrder !== undefined) return false;
+  if (isTimedMode(state)) return true;
+  return state.turnOrder[state.currentTurnIndex] === playerId;
 }
 
 /** Roll virtual 2d6 (2–12). */
@@ -446,6 +467,9 @@ export function nextActiveTurnIndex(state: GameState): number {
 }
 
 export function isGameOver(state: GameState): boolean {
+  if (isTimedMode(state)) {
+    return state.podium.length >= 1;
+  }
   if (state.podium.length >= PODIUM_SIZE) return true;
   const racing = state.players.filter((p) => p.finishOrder === undefined);
   return racing.length === 0 && state.turnOrder.length > 0;

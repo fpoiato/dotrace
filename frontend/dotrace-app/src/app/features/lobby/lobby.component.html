@@ -44,6 +44,20 @@
         }
       </div>
 
+      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.gameMode' | translate }}</h2>
+      <div class="mb-6 grid grid-cols-2 gap-3">
+        @for (mode of gameModes; track mode) {
+          <button
+            type="button"
+            (click)="selectGameMode(mode)"
+            class="min-h-12 rounded-xl border-2 px-3 text-sm font-semibold transition"
+            [class]="selectedGameMode === mode ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+          >
+            {{ 'lobby.mode.' + mode | translate }}
+          </button>
+        }
+      </div>
+
       <div class="mb-4 flex gap-2">
         <button
           type="button"
@@ -68,6 +82,9 @@
         </p>
       }
       <p class="mb-6 text-sm text-orange-300">{{ 'lobby.laps' | translate }}: {{ selectedLaps }}</p>
+      <p class="mb-6 text-sm text-orange-300">
+        {{ 'lobby.gameMode' | translate }}: {{ 'lobby.mode.' + selectedGameMode | translate }}
+      </p>
     }
 
     <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.players' | translate }}</h2>

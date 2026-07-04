@@ -20,13 +20,23 @@
     @if (state.phase === 'GAME_ROUND' || state.phase === 'GAME_OVER') {
       <div class="mb-3 flex items-center justify-between gap-2 text-sm">
         @if (game.isMyTurn()) {
-          <span class="rounded-full bg-green-600 px-3 py-1 font-bold">{{ 'game.yourTurn' | translate }}</span>
+          @if (state.gameMode === 'TIMED') {
+            <span class="rounded-full bg-green-600 px-3 py-1 font-bold">{{ 'game.raceOn' | translate }}</span>
+          } @else {
+            <span class="rounded-full bg-green-600 px-3 py-1 font-bold">{{ 'game.yourTurn' | translate }}</span>
+          }
         } @else if (state.phase === 'GAME_ROUND') {
-          <span class="text-slate-400">{{ 'game.waitTurn' | translate: { name: currentPlayerName() } }}</span>
+          @if (state.gameMode === 'TIMED') {
+            <span class="text-slate-400">{{ 'game.timedRace' | translate }}</span>
+          } @else {
+            <span class="text-slate-400">{{ 'game.waitTurn' | translate: { name: currentPlayerName() } }}</span>
+          }
         }
-        <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
-          {{ 'game.round' | translate }} {{ state.round }}
-        </span>
+        @if (state.gameMode !== 'TIMED') {
+          <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+            {{ 'game.round' | translate }} {{ state.round }}
+          </span>
+        }
         @if (myPlayer(state); as me) {
           <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
             {{ 'game.lap' | translate }} {{ me.lap }}/{{ state.totalLaps }}
@@ -61,7 +71,13 @@
           }
         </div>
         @if (game.isMyTurn()) {
-          <p class="mt-2 text-center text-xs text-slate-400">{{ 'game.tapHint' | translate }}</p>
+          <p class="mt-2 text-center text-xs text-slate-400">
+            @if (state.gameMode === 'TIMED') {
+              {{ 'game.timedHint' | translate }}
+            } @else {
+              {{ 'game.tapHint' | translate }}
+            }
+          </p>
         }
 
         <div class="mt-4">
@@ -73,19 +89,25 @@
     @if (state.phase === 'GAME_OVER' || showCelebration) {
       <div class="celebrate mt-6 rounded-2xl bg-gradient-to-br from-orange-600 to-yellow-500 p-6 text-center shadow-lg">
         <h2 class="text-2xl font-black text-white">{{ 'game.raceOver' | translate }} 🏁</h2>
-        <h3 class="mt-4 text-lg font-semibold text-white/90">{{ 'game.podium' | translate }}</h3>
-        <ol class="mt-3 space-y-2">
-          @for (entry of state.podium; track entry.connectionId) {
-            <li class="rounded-xl bg-black/20 px-4 py-3 text-lg font-bold text-white">
-              @switch (entry.position) {
-                @case (1) { 🥇 }
-                @case (2) { 🥈 }
-                @case (3) { 🥉 }
-              }
-              {{ entry.nickname }}
-            </li>
-          }
-        </ol>
+        @if (state.gameMode === 'TIMED' && state.podium.length === 1) {
+          <p class="mt-2 text-lg font-bold text-white">
+            🏆 {{ state.podium[0].nickname }}
+          </p>
+        } @else {
+          <h3 class="mt-4 text-lg font-semibold text-white/90">{{ 'game.podium' | translate }}</h3>
+          <ol class="mt-3 space-y-2">
+            @for (entry of state.podium; track entry.connectionId) {
+              <li class="rounded-xl bg-black/20 px-4 py-3 text-lg font-bold text-white">
+                @switch (entry.position) {
+                  @case (1) { 🥇 }
+                  @case (2) { 🥈 }
+                  @case (3) { 🥉 }
+                }
+                {{ entry.nickname }}
+              </li>
+            }
+          </ol>
+        }
         <button
           type="button"
           (click)="backToMenu()"

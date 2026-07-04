@@ -8,6 +8,7 @@ import {
   GameState,
   Player,
   Vector2D,
+  canPlayerMove,
   getTileAt,
   getValidMoves,
   landingPosition,
@@ -93,13 +94,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const myId = this.room.room?.connectionId;
     const track = state?.trackId ? getTrackById(state.trackId) : undefined;
     const me = state?.players.find((p) => p.connectionId === myId);
-    const isMyTurn =
-      !!state &&
-      state.phase === 'GAME_ROUND' &&
-      state.turnOrder[state.currentTurnIndex] === myId &&
-      me?.finishOrder === undefined;
+    const canMove =
+      !!state && !!myId && canPlayerMove(state, myId) && me?.finishOrder === undefined;
 
-    const valid = isMyTurn && me && track ? getValidMoves(me, track, state?.players) : [];
+    const valid = canMove && me && track ? getValidMoves(me, track, state?.players) : [];
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
