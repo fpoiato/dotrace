@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Output } from '@angular/core';
+import { Component, EventEmitter, OnDestroy, OnInit, Output } from '@angular/core';
 import { TranslateModule } from '@ngx-translate/core';
 
 @Component({
@@ -11,7 +11,7 @@ import { TranslateModule } from '@ngx-translate/core';
       (click)="close.emit()"
     >
       <div
-        class="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-slate-900 p-5 sm:rounded-2xl"
+        class="max-h-[85dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-2xl bg-slate-900 p-5 sm:rounded-2xl"
         (click)="$event.stopPropagation()"
       >
         <h2 class="mb-4 text-xl font-bold text-orange-400">{{ 'howto.title' | translate }}</h2>
@@ -41,8 +41,16 @@ import { TranslateModule } from '@ngx-translate/core';
     </div>
   `,
 })
-export class HowToPlayComponent {
+export class HowToPlayComponent implements OnInit, OnDestroy {
   @Output() readonly close = new EventEmitter<void>();
+
+  ngOnInit(): void {
+    document.body.classList.add('scroll-locked');
+  }
+
+  ngOnDestroy(): void {
+    document.body.classList.remove('scroll-locked');
+  }
 
   readonly sections = [
     { n: 1, icon: '🏁' },

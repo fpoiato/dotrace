@@ -1,5 +1,5 @@
 @if (state$ | async; as state) {
-  <div class="mx-auto min-h-screen max-w-lg px-3 py-4">
+  <div class="mx-auto max-w-lg px-3 py-4">
     @if (state.phase === 'GRID_ORDER') {
       <div class="mb-4 rounded-xl bg-slate-800 p-4 text-center">
         <h2 class="text-lg font-bold text-orange-400">{{ 'game.gridOrder' | translate }}</h2>
@@ -132,7 +132,7 @@
     }
   </div>
 } @else {
-  <div class="mx-auto flex min-h-screen max-w-lg items-center justify-center">
+  <div class="mx-auto flex flex-1 max-w-lg items-center justify-center">
     <app-loading-spinner />
   </div>
 }

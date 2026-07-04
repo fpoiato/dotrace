@@ -61,7 +61,7 @@ function buildGaugeSegments(): string[] {
     <div class="relative">
       <canvas
         #canvas
-        class="h-[48vh] w-full cursor-grab touch-none rounded-xl border border-slate-600 active:cursor-grabbing md:h-[62vh]"
+        class="h-[48dvh] w-full cursor-grab touch-none rounded-xl border border-slate-600 active:cursor-grabbing md:h-[62dvh]"
       ></canvas>
       @if (gaugePlayer; as me) {
         <div class="pointer-events-none absolute bottom-2 left-2 rounded-xl bg-slate-900/75 px-1 pb-1 pt-2">
