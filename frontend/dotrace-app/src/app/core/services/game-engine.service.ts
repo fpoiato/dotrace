@@ -10,6 +10,7 @@ import {
   Vector2D,
   createInitialState,
   createLobbyPlayer,
+  findCollisionOpponent,
   getTileAt,
   getValidMoves,
   isGameOver,
@@ -183,13 +184,21 @@ export class GameEngineService implements OnDestroy {
     // Strict validation: the submitted velocity must be one of the moves the
     // host itself considers legal (±1 gear rule, off-track cap, in-grid landing,
     // including the emergency stop when no other move exists).
-    const isLegal = getValidMoves(player, track).some(
+    const isLegal = getValidMoves(player, track, state.players).some(
       (m) => m.velocity.x === vector.x && m.velocity.y === vector.y
     );
     if (!isLegal) return;
 
     const from = { ...player.position };
     const landing = landingPosition(player.position, vector);
+
+    if (findCollisionOpponent(senderId, from, landing, state.players)) {
+      // Crash: stay put, kill momentum (gear 0). Never share a cell.
+      player.velocity = zeroVector();
+      this.advanceTurn(state);
+      return;
+    }
+
     const tile = getTileAt(track, landing.x, landing.y);
     if (tile === null) return;
 
@@ -233,6 +242,16 @@ export class GameEngineService implements OnDestroy {
       }
     }
 
+    if (isGameOver(state)) {
+      state.phase = 'GAME_OVER';
+      this.setStateAndRelay('GAME_OVER', state);
+      return;
+    }
+
+    this.advanceTurn(state);
+  }
+
+  private advanceTurn(state: GameState): void {
     if (isGameOver(state)) {
       state.phase = 'GAME_OVER';
       this.setStateAndRelay('GAME_OVER', state);

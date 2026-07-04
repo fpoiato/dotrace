@@ -327,7 +327,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     const pts: Vector2D[] = [focus.position];
     const myId = this.room.room?.connectionId;
     if (focus.connectionId === myId && focus.finishOrder === undefined) {
-      for (const m of getValidMoves(focus, track)) {
+      for (const m of getValidMoves(focus, track, state.players)) {
         pts.push(m.landing);
       }
     }
@@ -673,7 +673,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     const active = this.activePlayer(state);
     if (!active || active.connectionId !== myId || active.finishOrder !== undefined) return;
 
-    this.validMoves = getValidMoves(active, track);
+    this.validMoves = getValidMoves(active, track, state.players);
     const color = active.color;
     for (const m of this.validMoves) {
       const px = m.landing.x * CELL;

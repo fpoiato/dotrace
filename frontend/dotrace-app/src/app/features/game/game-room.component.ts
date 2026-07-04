@@ -99,7 +99,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       state.turnOrder[state.currentTurnIndex] === myId &&
       me?.finishOrder === undefined;
 
-    const valid = isMyTurn && me && track ? getValidMoves(me, track) : [];
+    const valid = isMyTurn && me && track ? getValidMoves(me, track, state?.players) : [];
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {

@@ -301,6 +301,43 @@ export function posKey(p: Vector2D): string {
   return `${p.x},${p.y}`;
 }
 
+/** Racers still on track (not finished). */
+export function activeRacers(players: Player[], excludeId?: string): Player[] {
+  return players.filter(
+    (p) => p.finishOrder === undefined && p.connectionId !== excludeId
+  );
+}
+
+/** Whether the straight move from → to passes over a grid cell. */
+export function segmentCrossesCell(from: Vector2D, to: Vector2D, cell: Vector2D): boolean {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  for (let i = 0; i <= Math.max(steps, 1); i++) {
+    const t = steps === 0 ? 1 : i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (x === cell.x && y === cell.y) return true;
+  }
+  return false;
+}
+
+/**
+ * If a move collides with another active racer (landing on them or flying
+ * through their cell), return that opponent. The mover is the causer.
+ */
+export function findCollisionOpponent(
+  moverId: string,
+  from: Vector2D,
+  landing: Vector2D,
+  players: Player[]
+): Player | null {
+  for (const other of activeRacers(players, moverId)) {
+    const pos = other.position;
+    if (landing.x === pos.x && landing.y === pos.y) return other;
+    if (segmentCrossesCell(from, landing, pos)) return other;
+  }
+  return null;
+}
+
 /** Racing "gear" = Chebyshev magnitude of the velocity vector. */
 export function gearOf(velocity: Vector2D): number {
   return Math.max(Math.abs(velocity.x), Math.abs(velocity.y));
@@ -368,10 +405,12 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
  */
 export function getValidMoves(
   player: Player,
-  track: TrackDefinition
+  track: TrackDefinition,
+  others?: Player[]
 ): { velocity: Vector2D; landing: Vector2D }[] {
   const moves: { velocity: Vector2D; landing: Vector2D }[] = [];
   const { position, velocity, isOffTrack } = player;
+  const opponents = others ? activeRacers(others, player.connectionId) : [];
 
   for (let dvx = -MAX_GEAR_DELTA; dvx <= MAX_GEAR_DELTA; dvx++) {
     for (let dvy = -MAX_GEAR_DELTA; dvy <= MAX_GEAR_DELTA; dvy++) {
@@ -379,6 +418,9 @@ export function getValidMoves(
       if (!isValidGearChange(velocity, next, isOffTrack)) continue;
       const landing = landingPosition(position, next);
       if (getTileAt(track, landing.x, landing.y) === null) continue;
+      if (opponents.some((o) => o.position.x === landing.x && o.position.y === landing.y)) {
+        continue;
+      }
       moves.push({ velocity: next, landing });
     }
   }
