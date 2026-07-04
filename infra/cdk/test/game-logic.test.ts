@@ -11,6 +11,7 @@ import {
   findCollisionOpponent,
   gearOf,
   getValidMoves,
+  canPlayerMove,
   isGameOver,
   isValidGearChange,
   nextActiveTurnIndex,
@@ -172,6 +173,7 @@ describe('turn order', () => {
       currentTurnIndex: 0,
       round: 1,
       totalLaps: 1,
+      gameMode: 'TURNS',
       diceRolls: {},
       podium: [],
     };
@@ -206,6 +208,7 @@ describe('game over conditions', () => {
       currentTurnIndex: 0,
       round: 1,
       totalLaps: 1,
+      gameMode: 'TURNS',
       diceRolls: {},
       podium: [
         { connectionId: 'x', nickname: 'X', position: 1 },
@@ -226,6 +229,7 @@ describe('game over conditions', () => {
       currentTurnIndex: 0,
       round: 1,
       totalLaps: 1,
+      gameMode: 'TURNS',
       diceRolls: {},
       podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
     };
@@ -242,10 +246,65 @@ describe('game over conditions', () => {
       currentTurnIndex: 0,
       round: 1,
       totalLaps: 1,
+      gameMode: 'TURNS',
       diceRolls: {},
       podium: [{ connectionId: 'c2', nickname: 'Bia', position: 1 }],
     };
     expect(isGameOver(state)).toBe(false);
+  });
+
+  it('ends timed mode as soon as the first player finishes', () => {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [makePlayer({ finishOrder: 1 }), makePlayer({ connectionId: 'c2' })],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: ['c1', 'c2'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 1,
+      gameMode: 'TIMED',
+      diceRolls: {},
+      podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
+    };
+    expect(isGameOver(state)).toBe(true);
+  });
+});
+
+describe('canPlayerMove', () => {
+  const base: GameState = {
+    phase: 'GAME_ROUND',
+    players: [makePlayer(), makePlayer({ connectionId: 'c2', nickname: 'Bia', joinOrder: 1, color: '#000' })],
+    hostId: 'c1',
+    trackId: 'test',
+    turnOrder: ['c1', 'c2'],
+    currentTurnIndex: 0,
+    round: 1,
+    totalLaps: 1,
+    gameMode: 'TURNS',
+    diceRolls: {},
+    podium: [],
+  };
+
+  it('allows only the active player in turns mode', () => {
+    expect(canPlayerMove(base, 'c1')).toBe(true);
+    expect(canPlayerMove(base, 'c2')).toBe(false);
+  });
+
+  it('allows any active racer in timed mode', () => {
+    const timed = { ...base, gameMode: 'TIMED' as const };
+    expect(canPlayerMove(timed, 'c1')).toBe(true);
+    expect(canPlayerMove(timed, 'c2')).toBe(true);
+  });
+
+  it('blocks finished players in timed mode', () => {
+    const timed: GameState = {
+      ...base,
+      gameMode: 'TIMED',
+      players: [makePlayer({ finishOrder: 1 }), makePlayer({ connectionId: 'c2', nickname: 'Bia', joinOrder: 1, color: '#000' })],
+    };
+    expect(canPlayerMove(timed, 'c1')).toBe(false);
+    expect(canPlayerMove(timed, 'c2')).toBe(true);
   });
 });
 
@@ -299,6 +358,7 @@ describe('race telemetry', () => {
       currentTurnIndex: 0,
       round: 4,
       totalLaps: 2,
+      gameMode: 'TURNS',
       diceRolls: {},
       podium: [],
       raceStartedAt: 1_000,
@@ -323,6 +383,7 @@ describe('race telemetry', () => {
       currentTurnIndex: 0,
       round: 1,
       totalLaps: 1,
+      gameMode: 'TURNS',
       diceRolls: {},
       podium: [],
     };

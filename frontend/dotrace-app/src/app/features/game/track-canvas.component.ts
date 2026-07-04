@@ -16,8 +16,10 @@ import {
   Player,
   TrackDefinition,
   Vector2D,
+  canPlayerMove,
   gearOf,
   getValidMoves,
+  isTimedMode,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
@@ -670,7 +672,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   ): void {
     this.validMoves = [];
     const myId = this.room.room?.connectionId;
-    const active = this.activePlayer(state);
+    if (!myId || !canPlayerMove(state, myId)) return;
+
+    const active = isTimedMode(state) ? this.myPlayer(state) : this.activePlayer(state);
     if (!active || active.connectionId !== myId || active.finishOrder !== undefined) return;
 
     this.validMoves = getValidMoves(active, track, state.players);
