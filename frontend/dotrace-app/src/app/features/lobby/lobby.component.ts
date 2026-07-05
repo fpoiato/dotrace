@@ -33,6 +33,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedGameMode: GameMode = 'TURNS';
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
+  readonly practiceHintKey = 'lobby.practiceHint';
   copied = false;
   showHowTo = false;
   private readonly subs: Subscription[] = [];
@@ -72,6 +73,14 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   trackName(trackId: string): string {
     return getTrackById(trackId)?.nameKey ?? '';
+  }
+
+  isPractice(playerCount: number): boolean {
+    return playerCount <= 1;
+  }
+
+  startLabelKey(playerCount: number): string {
+    return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
   }
 
   approve(id: string): void {

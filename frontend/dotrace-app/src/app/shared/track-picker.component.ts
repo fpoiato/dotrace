@@ -15,6 +15,8 @@ export class TrackPickerComponent implements OnInit, OnDestroy {
 
   open = false;
 
+  readonly closeLabelKey = 'common.close';
+
   get buttonLabelKey(): string {
     if (this.selectedTrackId) {
       return this.tracks.find((t) => t.id === this.selectedTrackId)?.nameKey ?? 'lobby.selectTrackPlaceholder';
@@ -40,6 +42,10 @@ export class TrackPickerComponent implements OnInit, OnDestroy {
   closePicker(): void {
     this.open = false;
     document.body.classList.remove('scroll-locked');
+  }
+
+  trackLabelKey(track: TrackDefinition): string {
+    return track.nameKey;
   }
 
   pick(trackId: string): void {

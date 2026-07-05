@@ -112,17 +112,19 @@
     }
 
     @if (room.isHost) {
-      @if (((players$ | async)?.length ?? 0) <= 1) {
-        <p class="mb-2 text-center text-sm text-sky-400">{{ 'lobby.practiceHint' | translate }}</p>
+      @if (players$ | async; as players) {
+        @if (isPractice(players.length)) {
+          <p class="mb-2 text-center text-sm text-sky-400">{{ practiceHintKey | translate }}</p>
+        }
+        <button
+          type="button"
+          (click)="startRace()"
+          [disabled]="!selectedTrackId"
+          class="min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
+        >
+          {{ startLabelKey(players.length) | translate }}
+        </button>
       }
-      <button
-        type="button"
-        (click)="startRace()"
-        [disabled]="!selectedTrackId"
-        class="min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
-      >
-        {{ (((players$ | async)?.length ?? 0) <= 1 ? 'lobby.startPractice' : 'lobby.startRace') | translate }}
-      </button>
     }
   </div>
 }
