@@ -70,11 +70,12 @@ repository list. Until then the Source stage fails with
 
 ### 3. CDK + frontend via CodePipeline
 
-Push to `main` — GitHub Actions runs tests and triggers `dotrace-game-pipeline`. CodeBuild:
+Every **push to `main`** runs the GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
 
-1. `cdk deploy` → writes WebSocket URL to SSM
-2. Injects `environment.prod.ts` with WS URL + app URL
-3. `ng build` → `aws s3 sync` → CloudFront invalidation `/*`
+1. **Test** — `npm test`, `cdk synth`, Angular production build
+2. **Deploy** — starts `dotrace-game-pipeline` and waits until the CodeBuild stage finishes (CDK deploy → S3 sync → CloudFront invalidation)
+
+Pull requests to `main` run tests only (no deploy).
 
 Manual pipeline trigger:
 
