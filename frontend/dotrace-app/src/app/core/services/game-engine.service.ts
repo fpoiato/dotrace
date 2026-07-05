@@ -135,6 +135,7 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      this.initLapTimers(state, state.raceStartedAt);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -189,6 +190,7 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    this.initLapTimers(state, state.raceStartedAt);
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -206,7 +208,16 @@ export class GameEngineService implements OnDestroy {
       player.passedCheckpoint = false;
       player.trail = [{ ...start }];
       player.lap = 1;
+      player.lapTimesMs = [];
+      player.lapStartedAt = undefined;
     });
+  }
+
+  private initLapTimers(state: GameState, startedAt: number): void {
+    for (const player of state.players) {
+      player.lapTimesMs = [];
+      player.lapStartedAt = startedAt;
+    }
   }
 
   private applyMove(senderId: string, vector: Vector2D): void {
@@ -264,15 +275,20 @@ export class GameEngineService implements OnDestroy {
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
+      const now = Date.now();
+      const lapStart = player.lapStartedAt ?? state.raceStartedAt ?? now;
+      const lapMs = Math.max(0, now - lapStart);
+      player.lapTimesMs = [...(player.lapTimesMs ?? []), lapMs];
+
       if (player.lap < state.totalLaps) {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
         // so the sheet stays readable on the next tour.
         player.lap += 1;
+        player.lapStartedAt = now;
         player.passedCheckpoint = false;
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
-        const now = Date.now();
         player.finishOrder = pos;
         player.finishRound = state.round;
         player.finishedAt = now;
@@ -490,6 +506,8 @@ export class GameEngineService implements OnDestroy {
       isOffTrack: player.isOffTrack ?? false,
       trail: player.trail ?? [],
       lap: player.lap ?? 1,
+      lapStartedAt: player.lapStartedAt,
+      lapTimesMs: player.lapTimesMs ?? [],
     };
     if (idx >= 0) {
       merged.position = state.players[idx].position;
@@ -497,6 +515,8 @@ export class GameEngineService implements OnDestroy {
       merged.isOffTrack = state.players[idx].isOffTrack;
       merged.trail = state.players[idx].trail ?? [];
       merged.lap = state.players[idx].lap ?? 1;
+      merged.lapStartedAt = state.players[idx].lapStartedAt;
+      merged.lapTimesMs = state.players[idx].lapTimesMs ?? [];
       merged.passedCheckpoint = state.players[idx].passedCheckpoint;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;

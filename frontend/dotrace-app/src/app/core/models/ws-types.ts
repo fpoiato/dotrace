@@ -57,6 +57,10 @@ export interface Player {
   trail: Vector2D[];
   /** Current lap, 1-based. */
   lap: number;
+  /** Epoch ms when the current lap began. */
+  lapStartedAt?: number;
+  /** Completed lap durations in ms (split times). */
+  lapTimesMs?: number[];
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
   diceRoll?: number;

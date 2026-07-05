@@ -57,6 +57,51 @@
 
       <app-track-canvas [state]="state" />
 
+      <div class="mt-4 overflow-hidden rounded-xl bg-slate-800/80">
+        <div class="border-b border-slate-700 px-4 py-3 text-sm font-semibold text-slate-200">
+          {{ 'game.leaderboard' | translate }}
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-900/70 text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th class="px-3 py-2 text-left">#</th>
+                <th class="px-3 py-2 text-left">{{ 'lobby.players' | translate }}</th>
+                <th class="px-3 py-2 text-center">{{ 'game.lap' | translate }}</th>
+                <th class="px-3 py-2 text-center">{{ 'game.lastLap' | translate }}</th>
+                <th class="px-3 py-2 text-center">{{ 'game.bestLap' | translate }}</th>
+                <th class="px-3 py-2 text-center">{{ 'game.totalTime' | translate }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (entry of leaderboard(state); track entry.connectionId) {
+                <tr class="border-t border-slate-700/70 text-slate-200">
+                  <td class="px-3 py-2 font-semibold">{{ entry.rank }}</td>
+                  <td class="px-3 py-2">
+                    <span class="inline-flex items-center gap-2">
+                      <span class="h-2.5 w-2.5 rounded-full" [style.background]="entry.color"></span>
+                      <span>{{ entry.nickname }}</span>
+                    </span>
+                  </td>
+                  <td class="px-3 py-2 text-center font-mono">
+                    {{ entry.lap }}/{{ state.totalLaps }}
+                  </td>
+                  <td class="px-3 py-2 text-center font-mono">{{ displayLapTime(entry.lastLapMs) }}</td>
+                  <td class="px-3 py-2 text-center font-mono">{{ displayLapTime(entry.bestLapMs) }}</td>
+                  <td class="px-3 py-2 text-center font-mono">
+                    @if (entry.finished) {
+                      {{ displayLapTime(entry.totalMs) }}
+                    } @else {
+                      —
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       @if (state.phase === 'GAME_ROUND') {
         <div class="mx-auto mt-3 grid max-w-[17rem] grid-cols-3 gap-2">
           @for (opt of padOptions; track opt.key) {

@@ -31,6 +31,18 @@ interface PadOption {
   grass: boolean;
 }
 
+interface LeaderboardEntry {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  rank: number;
+  lap: number;
+  finished: boolean;
+  lastLapMs?: number;
+  bestLapMs?: number;
+  totalMs?: number;
+}
+
 const PAD_GLYPHS: Record<string, string> = {
   '-1,-1': '↖',
   '0,-1': '↑',
@@ -161,6 +173,40 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const player = state.players.find((p) => p.connectionId === connectionId);
     if (!player?.finishedAt || !state.raceStartedAt) return null;
     return formatRaceTime(player.finishedAt - state.raceStartedAt);
+  }
+
+  leaderboard(state: GameState): LeaderboardEntry[] {
+    const sorted = [...state.players].sort((a, b) => {
+      if (a.finishOrder !== undefined && b.finishOrder !== undefined) {
+        return a.finishOrder - b.finishOrder;
+      }
+      if (a.finishOrder !== undefined) return -1;
+      if (b.finishOrder !== undefined) return 1;
+      if (b.lap !== a.lap) return b.lap - a.lap;
+      return a.joinOrder - b.joinOrder;
+    });
+
+    return sorted.map((player, index) => {
+      const lapTimes = player.lapTimesMs ?? [];
+      return {
+        connectionId: player.connectionId,
+        nickname: player.nickname,
+        color: player.color,
+        rank: player.finishOrder ?? index + 1,
+        lap: Math.min(player.lap, state.totalLaps),
+        finished: player.finishOrder !== undefined,
+        lastLapMs: lapTimes.at(-1),
+        bestLapMs: lapTimes.length > 0 ? Math.min(...lapTimes) : undefined,
+        totalMs:
+          player.finishedAt && state.raceStartedAt
+            ? Math.max(0, player.finishedAt - state.raceStartedAt)
+            : undefined,
+      };
+    });
+  }
+
+  displayLapTime(timeMs?: number): string {
+    return timeMs === undefined ? '—' : formatRaceTime(timeMs);
   }
 
   backToMenu(): void {
