@@ -20,6 +20,7 @@ import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
 import { MiniMapComponent } from './mini-map.component';
+import { ReplayViewerComponent } from './replay-viewer.component';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 interface PadOption {
@@ -46,7 +47,14 @@ const PAD_GLYPHS: Record<string, string> = {
 @Component({
   selector: 'app-game-room',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent],
+  imports: [
+    AsyncPipe,
+    TranslateModule,
+    TrackCanvasComponent,
+    MiniMapComponent,
+    ReplayViewerComponent,
+    LoadingSpinnerComponent,
+  ],
   templateUrl: './game-room.component.html',
 })
 export class GameRoomComponent implements OnInit, OnDestroy {
@@ -62,6 +70,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;
+  showReplay = false;
   padOptions: PadOption[] = [];
 
   ngOnInit(): void {
@@ -83,6 +92,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         // Host-migration fallback can reset the game to the lobby phase;
         // follow it so nobody is stranded on the game screen.
         if (state?.phase === 'LOBBY') {
+          this.showReplay = false;
           void this.router.navigate(['/lobby']);
         }
       })
@@ -165,6 +175,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   backToMenu(): void {
     this.showCelebration = false;
+    this.showReplay = false;
     this.game.reset();
     this.room.reset();
     this.ws.disconnect();

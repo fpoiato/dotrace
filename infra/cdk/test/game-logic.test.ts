@@ -22,6 +22,10 @@ import {
   segmentEntersRect,
   buildRaceTelemetry,
   formatRaceTime,
+  MAX_REPLAY_MOVES,
+  buildReplayState,
+  createRaceReplay,
+  recordReplayMove,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -394,6 +398,143 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('race replay recording', () => {
+  function makeRaceState(): GameState {
+    const players = [
+      makePlayer({ connectionId: 'a', position: { x: 0, y: 0 } }),
+      makePlayer({ connectionId: 'b', position: { x: 0, y: 1 }, isHost: false, nickname: 'Bia' }),
+    ];
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players,
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 2,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+    };
+    state.replay = createRaceReplay(state, players);
+    return state;
+  }
+
+  it('captures the starting grid and race settings', () => {
+    const state = makeRaceState();
+    expect(state.replay!.trackId).toBe('test');
+    expect(state.replay!.totalLaps).toBe(2);
+    expect(state.replay!.grid).toHaveLength(2);
+    expect(state.replay!.grid[1]).toEqual({
+      connectionId: 'b',
+      nickname: 'Bia',
+      color: '#fff',
+      position: { x: 0, y: 1 },
+    });
+    expect(state.replay!.moves).toHaveLength(0);
+  });
+
+  it('records moves indexed by grid position', () => {
+    const state = makeRaceState();
+    const rec = recordReplayMove(state, 'b', { round: 1, to: { x: 1, y: 1 }, lap: 1 });
+    expect(rec).not.toBeNull();
+    expect(state.replay!.moves).toEqual([
+      { player: 1, round: 1, to: { x: 1, y: 1 }, lap: 1 },
+    ]);
+  });
+
+  it('ignores moves from players not on the grid', () => {
+    const state = makeRaceState();
+    expect(recordReplayMove(state, 'ghost', { round: 1, to: { x: 1, y: 1 }, lap: 1 })).toBeNull();
+    expect(state.replay!.moves).toHaveLength(0);
+  });
+
+  it('is a no-op when no recording was started', () => {
+    const state = makeRaceState();
+    delete state.replay;
+    expect(recordReplayMove(state, 'a', { round: 1, to: { x: 1, y: 0 }, lap: 1 })).toBeNull();
+  });
+
+  it('drops the oldest moves beyond the cap', () => {
+    const state = makeRaceState();
+    for (let i = 0; i < MAX_REPLAY_MOVES + 5; i++) {
+      recordReplayMove(state, 'a', { round: i + 1, to: { x: i, y: 0 }, lap: 1 });
+    }
+    expect(state.replay!.moves).toHaveLength(MAX_REPLAY_MOVES);
+    expect(state.replay!.moves[0].round).toBe(6);
+  });
+});
+
+describe('race replay playback', () => {
+  function makeReplay() {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ connectionId: 'a', position: { x: 0, y: 0 } }),
+        makePlayer({ connectionId: 'b', position: { x: 0, y: 1 }, isHost: false, nickname: 'Bia' }),
+      ],
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 2,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+    };
+    state.replay = createRaceReplay(state, state.players);
+    recordReplayMove(state, 'a', { round: 1, to: { x: 1, y: 0 }, lap: 1 });
+    recordReplayMove(state, 'b', { round: 1, to: { x: 1, y: 1 }, lap: 1, offTrack: true });
+    recordReplayMove(state, 'a', { round: 2, to: { x: 1, y: 0 }, lap: 1, crashed: true });
+    recordReplayMove(state, 'b', { round: 2, to: { x: 2, y: 1 }, lap: 2 });
+    return state.replay!;
+  }
+
+  it('step 0 is the starting grid', () => {
+    const frame = buildReplayState(makeReplay(), 0);
+    expect(frame.players[0].position).toEqual({ x: 0, y: 0 });
+    expect(frame.players[1].position).toEqual({ x: 0, y: 1 });
+    expect(frame.players[0].trail).toEqual([{ x: 0, y: 0 }]);
+    expect(frame.turnOrder).toEqual([]);
+    expect(frame.round).toBe(1);
+  });
+
+  it('applies moves cumulatively and grows trails', () => {
+    const frame = buildReplayState(makeReplay(), 2);
+    expect(frame.players[0].position).toEqual({ x: 1, y: 0 });
+    expect(frame.players[1].position).toEqual({ x: 1, y: 1 });
+    expect(frame.players[0].trail).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+    ]);
+    expect(frame.players[1].isOffTrack).toBe(true);
+    expect(frame.turnOrder).toEqual(['replay:1']);
+  });
+
+  it('keeps a crashed car in place without extending its trail', () => {
+    const frame = buildReplayState(makeReplay(), 3);
+    expect(frame.players[0].position).toEqual({ x: 1, y: 0 });
+    expect(frame.players[0].trail).toHaveLength(2);
+    expect(frame.round).toBe(2);
+    expect(frame.turnOrder).toEqual(['replay:0']);
+  });
+
+  it('resets the trail when a new lap starts', () => {
+    const frame = buildReplayState(makeReplay(), 4);
+    expect(frame.players[1].lap).toBe(2);
+    expect(frame.players[1].trail).toEqual([{ x: 2, y: 1 }]);
+    expect(frame.players[1].isOffTrack).toBe(false);
+  });
+
+  it('clamps the step to the recording length', () => {
+    const replay = makeReplay();
+    expect(buildReplayState(replay, 99).players[1].position).toEqual({ x: 2, y: 1 });
+    expect(buildReplayState(replay, -5).players[0].position).toEqual({ x: 0, y: 0 });
   });
 });
 

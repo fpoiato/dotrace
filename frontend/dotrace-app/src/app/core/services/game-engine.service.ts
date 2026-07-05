@@ -12,6 +12,7 @@ import {
   canPlayerMove,
   createInitialState,
   createLobbyPlayer,
+  createRaceReplay,
   findCollisionOpponent,
   getTileAt,
   getValidMoves,
@@ -20,6 +21,7 @@ import {
   landingPosition,
   nextActiveTurnIndex,
   pushTrail,
+  recordReplayMove,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
@@ -135,6 +137,7 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      state.replay = createRaceReplay(state, sorted);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -189,6 +192,7 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    state.replay = createRaceReplay(state, sorted);
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -235,6 +239,12 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      recordReplayMove(state, senderId, {
+        round: state.round,
+        to: { ...from },
+        lap: player.lap,
+        crashed: true,
+      });
       this.afterMove(state);
       return;
     }
@@ -245,11 +255,20 @@ export class GameEngineService implements OnDestroy {
     player.position = landing;
     pushTrail(player, landing);
 
+    // Record for the post-match replay; lap/finish flags are patched below
+    // once the outcome of this move is known.
+    const replayRecord = recordReplayMove(state, senderId, {
+      round: state.round,
+      to: { ...landing },
+      lap: player.lap,
+    });
+
     if (tile === 'grass') {
       // Gravel trap: stop on the spot, kill momentum (gotcha #5 — only the
       // landing square matters for the off-track check).
       player.velocity = zeroVector();
       player.isOffTrack = true;
+      if (replayRecord) replayRecord.offTrack = true;
     } else {
       player.velocity = { ...vector };
       player.isOffTrack = false;
@@ -270,9 +289,11 @@ export class GameEngineService implements OnDestroy {
         player.lap += 1;
         player.passedCheckpoint = false;
         player.trail = [{ ...landing }];
+        if (replayRecord) replayRecord.lap = player.lap;
       } else {
         const pos = state.podium.length + 1;
         const now = Date.now();
+        if (replayRecord) replayRecord.finished = true;
         player.finishOrder = pos;
         player.finishRound = state.round;
         player.finishedAt = now;
@@ -480,6 +501,13 @@ export class GameEngineService implements OnDestroy {
     state.podium = state.podium.map((e) =>
       e.connectionId === oldConnectionId ? { ...e, connectionId: newConnectionId } : e
     );
+
+    // Keep the replay recording attributing future moves to the right car.
+    if (state.replay) {
+      for (const entry of state.replay.grid) {
+        if (entry.connectionId === oldConnectionId) entry.connectionId = newConnectionId;
+      }
+    }
 
     const idx = state.players.findIndex((p) => p.connectionId === oldConnectionId);
     const merged: Player = {

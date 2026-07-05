@@ -80,6 +80,49 @@ export interface PodiumEntry {
   position: number;
 }
 
+/**
+ * One recorded step of the race, for post-match replay.
+ * Kept compact (player index, no `from`) because the whole log is part of
+ * GameState and therefore rides along on every RELAY frame.
+ */
+export interface ReplayMove {
+  /** Index into RaceReplay.grid of the player who moved. */
+  player: number;
+  /** Racing round when the move was made. */
+  round: number;
+  /** Cell the car ended the move on (same cell as before on a crash). */
+  to: Vector2D;
+  /** Player's lap after this move resolved. */
+  lap: number;
+  /** Move ended in a collision with another car (stayed put, gear 0). */
+  crashed?: boolean;
+  /** Landing square was gravel (stopped, gear 0). */
+  offTrack?: boolean;
+  /** Player crossed the line and completed the race on this move. */
+  finished?: boolean;
+}
+
+/** A car on the starting grid, as it was when the green flag dropped. */
+export interface ReplayGridEntry {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  position: Vector2D;
+}
+
+/**
+ * Full race recording: starting grid + every move in chronological order.
+ * Lives inside GameState so RELAY keeps every client's copy in sync and
+ * host migration carries it over. Enables the post-match replay screen.
+ */
+export interface RaceReplay {
+  trackId: string;
+  totalLaps: number;
+  gameMode: GameMode;
+  grid: ReplayGridEntry[];
+  moves: ReplayMove[];
+}
+
 export interface GameState {
   phase: GamePhase;
   players: Player[];
@@ -97,6 +140,8 @@ export interface GameState {
   podium: PodiumEntry[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
+  /** Move-by-move recording for the post-match replay (host-recorded). */
+  replay?: RaceReplay;
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -500,6 +545,109 @@ export function isGameOver(state: GameState): boolean {
   if (state.podium.length >= PODIUM_SIZE) return true;
   const racing = state.players.filter((p) => p.finishOrder === undefined);
   return racing.length === 0 && state.turnOrder.length > 0;
+}
+
+/**
+ * Replay log cap — bounds RELAY payload size on very long races. When
+ * exceeded, the oldest moves are dropped; positions are absolute so
+ * playback of the surviving tail stays correct.
+ */
+export const MAX_REPLAY_MOVES = 1000;
+
+/** Start a fresh race recording from the cars as placed on the grid. */
+export function createRaceReplay(state: GameState, ordered: Player[]): RaceReplay {
+  return {
+    trackId: state.trackId,
+    totalLaps: state.totalLaps,
+    gameMode: state.gameMode,
+    grid: ordered.map((p) => ({
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      position: { ...p.position },
+    })),
+    moves: [],
+  };
+}
+
+/**
+ * Append one move to the race recording. Returns the stored record so the
+ * caller can flag lap/finish outcomes decided after the move lands.
+ */
+export function recordReplayMove(
+  state: GameState,
+  connectionId: string,
+  move: Omit<ReplayMove, 'player'>
+): ReplayMove | null {
+  const replay = state.replay;
+  if (!replay) return null;
+  const idx = replay.grid.findIndex((g) => g.connectionId === connectionId);
+  if (idx < 0) return null;
+  const record: ReplayMove = { player: idx, ...move };
+  replay.moves.push(record);
+  if (replay.moves.length > MAX_REPLAY_MOVES) {
+    replay.moves.shift();
+  }
+  return record;
+}
+
+/**
+ * Reconstruct the board after `step` moves of the recording as a synthetic
+ * GameState the track canvas can render directly. Player connectionIds are
+ * namespaced (`replay:<index>`) so the canvas treats every car as a
+ * spectator: no gear gauge, no tap targets, just cars and trails. The last
+ * mover is placed in turnOrder so the active-player ring follows the action.
+ */
+export function buildReplayState(replay: RaceReplay, step: number): GameState {
+  const applied = Math.max(0, Math.min(step, replay.moves.length));
+
+  const players: Player[] = replay.grid.map((entry, i) => ({
+    connectionId: `replay:${i}`,
+    nickname: entry.nickname,
+    color: entry.color,
+    isHost: false,
+    joinOrder: i,
+    status: 'approved',
+    position: { ...entry.position },
+    velocity: zeroVector(),
+    isOffTrack: false,
+    trail: [{ ...entry.position }],
+    lap: 1,
+  }));
+
+  let round = 1;
+  let lastMover = -1;
+  for (let i = 0; i < applied; i++) {
+    const move = replay.moves[i];
+    const player = players[move.player];
+    if (!player) continue;
+    if (move.lap > player.lap) {
+      // New lap: wipe the pen trail, exactly like the live race does.
+      player.trail = [];
+      player.lap = move.lap;
+    }
+    if (!move.crashed) {
+      player.position = { ...move.to };
+      player.trail.push({ ...move.to });
+    }
+    player.isOffTrack = move.offTrack === true;
+    round = move.round;
+    lastMover = move.player;
+  }
+
+  return {
+    phase: 'GAME_ROUND',
+    players,
+    hostId: '',
+    trackId: replay.trackId,
+    turnOrder: lastMover >= 0 ? [`replay:${lastMover}`] : [],
+    currentTurnIndex: 0,
+    round,
+    totalLaps: replay.totalLaps,
+    gameMode: replay.gameMode,
+    diceRolls: {},
+    podium: [],
+  };
 }
 
 /** Build a telemetry snapshot from the current game state. */
