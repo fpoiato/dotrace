@@ -8,11 +8,13 @@ import {
   GameState,
   Player,
   Vector2D,
+  buildReplayState,
   canPlayerMove,
   formatRaceTime,
   getTileAt,
   getValidMoves,
   landingPosition,
+  replayMoves,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
@@ -63,6 +65,13 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   showCelebration = false;
   padOptions: PadOption[] = [];
+  replayMode = false;
+  replayPlaying = false;
+  replayIndex = 0;
+  replayTotal = 0;
+  replayPreviewState: GameState | null = null;
+  private latestState: GameState | null = null;
+  private replayTimer: ReturnType<typeof setInterval> | null = null;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -76,9 +85,15 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
       this.game.state$.subscribe((state) => {
+        this.latestState = state;
         this.padOptions = this.buildPadOptions(state);
+        this.replayTotal = state ? replayMoves(state).length : 0;
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
+          this.replayIndex = Math.min(this.replayIndex, this.replayTotal);
+          this.refreshReplayState();
+        } else {
+          this.stopReplay();
         }
         // Host-migration fallback can reset the game to the lobby phase;
         // follow it so nobody is stranded on the game screen.
@@ -145,6 +160,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.stopReplay();
     this.subs.forEach((s) => s.unsubscribe());
   }
 
@@ -163,8 +179,107 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return formatRaceTime(player.finishedAt - state.raceStartedAt);
   }
 
+  renderState(state: GameState): GameState {
+    return this.replayMode && this.replayPreviewState ? this.replayPreviewState : state;
+  }
+
+  toggleReplay(): void {
+    if (this.replayPlaying) {
+      this.pauseReplay();
+    } else {
+      this.playReplay();
+    }
+  }
+
+  playReplay(): void {
+    if (!this.latestState || this.replayTotal === 0) return;
+    this.replayMode = true;
+    if (this.replayIndex >= this.replayTotal) {
+      this.replayIndex = 0;
+    }
+    this.refreshReplayState();
+    this.replayPlaying = true;
+    if (this.replayTimer) clearInterval(this.replayTimer);
+    this.replayTimer = setInterval(() => this.nextReplayStep(), 650);
+  }
+
+  pauseReplay(): void {
+    this.replayPlaying = false;
+    if (this.replayTimer) {
+      clearInterval(this.replayTimer);
+      this.replayTimer = null;
+    }
+  }
+
+  restartReplay(): void {
+    if (this.replayTotal === 0) return;
+    this.replayMode = true;
+    this.replayIndex = 0;
+    this.refreshReplayState();
+    if (this.replayPlaying) {
+      this.pauseReplay();
+      this.playReplay();
+    }
+  }
+
+  previousReplayStep(): void {
+    if (this.replayTotal === 0) return;
+    this.replayMode = true;
+    this.replayIndex = Math.max(0, this.replayIndex - 1);
+    this.refreshReplayState();
+    if (this.replayPlaying && this.replayIndex === 0) {
+      this.pauseReplay();
+    }
+  }
+
+  nextReplayStep(): void {
+    if (this.replayTotal === 0) return;
+    this.replayMode = true;
+    if (this.replayIndex >= this.replayTotal) {
+      this.pauseReplay();
+      return;
+    }
+    this.replayIndex += 1;
+    this.refreshReplayState();
+    if (this.replayIndex >= this.replayTotal) {
+      this.pauseReplay();
+    }
+  }
+
+  setReplayIndex(value: string | number): void {
+    if (this.replayTotal === 0) return;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.replayMode = true;
+    this.replayIndex = Math.max(0, Math.min(this.replayTotal, Math.round(parsed)));
+    this.refreshReplayState();
+  }
+
+  replayRound(): number {
+    const state = this.latestState;
+    if (!state || this.replayIndex === 0) return 1;
+    const moves = replayMoves(state);
+    return moves[Math.min(this.replayIndex, moves.length) - 1]?.round ?? state.round;
+  }
+
+  private refreshReplayState(): void {
+    if (!this.latestState || !this.replayMode) {
+      this.replayPreviewState = null;
+      return;
+    }
+    this.replayPreviewState = buildReplayState(this.latestState, this.replayIndex);
+  }
+
+  private stopReplay(): void {
+    this.pauseReplay();
+    this.replayMode = false;
+    this.replayIndex = 0;
+    this.replayPreviewState = null;
+  }
+
   backToMenu(): void {
     this.showCelebration = false;
+    this.stopReplay();
     this.game.reset();
     this.room.reset();
     this.ws.disconnect();

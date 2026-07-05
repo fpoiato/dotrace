@@ -21,7 +21,10 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
   buildRaceTelemetry,
+  buildReplayState,
   formatRaceTime,
+  recordReplayMove,
+  replayMoves,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -394,6 +397,72 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('race replay', () => {
+  function makeReplayState(): GameState {
+    const players = [
+      makePlayer({ connectionId: 'a', position: { x: 0, y: 0 }, color: '#f00' }),
+      makePlayer({ connectionId: 'b', position: { x: 0, y: 1 }, color: '#00f', isHost: false }),
+    ];
+    return {
+      phase: 'GAME_ROUND',
+      players,
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 1,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+      replayRounds: [],
+    };
+  }
+
+  it('records accepted moves in round buckets', () => {
+    const state = makeReplayState();
+    const first = state.players[0];
+    first.position = { x: 1, y: 0 };
+    first.velocity = { x: 1, y: 0 };
+    recordReplayMove(state, first, { x: 0, y: 0 }, first.position, first.velocity);
+
+    state.round = 2;
+    const second = state.players[1];
+    second.position = { x: 0, y: 2 };
+    second.velocity = { x: 0, y: 1 };
+    recordReplayMove(state, second, { x: 0, y: 1 }, second.position, second.velocity);
+
+    expect(state.replayRounds).toHaveLength(2);
+    expect(state.replayRounds?.[0].round).toBe(1);
+    expect(state.replayRounds?.[1].round).toBe(2);
+    expect(replayMoves(state).map((move) => move.sequence)).toEqual([0, 1]);
+  });
+
+  it('rebuilds board state at a replay step', () => {
+    const state = makeReplayState();
+    const first = state.players[0];
+    first.position = { x: 1, y: 0 };
+    first.velocity = { x: 1, y: 0 };
+    recordReplayMove(state, first, { x: 0, y: 0 }, first.position, first.velocity);
+
+    const second = state.players[1];
+    second.position = { x: 0, y: 2 };
+    second.velocity = { x: 0, y: 1 };
+    recordReplayMove(state, second, { x: 0, y: 1 }, second.position, second.velocity);
+
+    const start = buildReplayState(state, 0);
+    expect(start.players.find((p) => p.connectionId === 'a')?.position).toEqual({ x: 0, y: 0 });
+    expect(start.players.find((p) => p.connectionId === 'b')?.position).toEqual({ x: 0, y: 1 });
+
+    const firstStep = buildReplayState(state, 1);
+    expect(firstStep.players.find((p) => p.connectionId === 'a')?.position).toEqual({ x: 1, y: 0 });
+    expect(firstStep.players.find((p) => p.connectionId === 'b')?.position).toEqual({ x: 0, y: 1 });
+
+    const finalStep = buildReplayState(state, 2);
+    expect(finalStep.players.find((p) => p.connectionId === 'b')?.position).toEqual({ x: 0, y: 2 });
   });
 });
 

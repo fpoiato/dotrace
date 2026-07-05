@@ -55,7 +55,65 @@
         <p class="mb-2 text-center text-sm text-amber-400">{{ 'game.offTrack' | translate }}</p>
       }
 
-      <app-track-canvas [state]="state" />
+      @if (renderState(state); as boardState) {
+        <app-track-canvas [state]="boardState" />
+      }
+
+      @if (state.phase === 'GAME_OVER' && replayTotal > 0) {
+        <div class="mt-3 rounded-xl bg-slate-800/90 p-4 text-sm">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 class="font-bold text-white">{{ 'game.replay.title' | translate }}</h3>
+              <p class="text-xs text-slate-400">
+                {{ 'game.replay.round' | translate }} {{ replayRound() }} ·
+                {{ 'game.replay.move' | translate: { current: replayIndex, total: replayTotal } }}
+              </p>
+            </div>
+            <button
+              type="button"
+              (click)="toggleReplay()"
+              class="rounded-lg bg-orange-500 px-4 py-2 font-bold text-white active:bg-orange-600"
+            >
+              {{ (replayPlaying ? 'game.replay.pause' : 'game.replay.play') | translate }}
+            </button>
+          </div>
+
+          <input
+            type="range"
+            min="0"
+            [max]="replayTotal"
+            [value]="replayIndex"
+            (input)="setReplayIndex($any($event.target).value)"
+            class="w-full accent-orange-500"
+          />
+
+          <div class="mt-3 grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              (click)="previousReplayStep()"
+              [disabled]="replayIndex === 0"
+              class="rounded-lg bg-slate-900 px-3 py-2 font-bold text-white disabled:opacity-40"
+            >
+              {{ 'game.replay.prev' | translate }}
+            </button>
+            <button
+              type="button"
+              (click)="restartReplay()"
+              class="rounded-lg bg-slate-900 px-3 py-2 font-bold text-white"
+            >
+              {{ 'game.replay.restart' | translate }}
+            </button>
+            <button
+              type="button"
+              (click)="nextReplayStep()"
+              [disabled]="replayIndex === replayTotal"
+              class="rounded-lg bg-slate-900 px-3 py-2 font-bold text-white disabled:opacity-40"
+            >
+              {{ 'game.replay.next' | translate }}
+            </button>
+          </div>
+        </div>
+      }
 
       @if (state.phase === 'GAME_ROUND') {
         <div class="mx-auto mt-3 grid max-w-[17rem] grid-cols-3 gap-2">

@@ -80,6 +80,31 @@ export interface PodiumEntry {
   position: number;
 }
 
+export interface ReplayMove {
+  /** Global 0-based move order across the race. */
+  sequence: number;
+  /** 1-based racing round when this move was accepted. */
+  round: number;
+  playerId: string;
+  nickname: string;
+  color: string;
+  from: Vector2D;
+  to: Vector2D;
+  /** Velocity submitted by the player for this move. */
+  velocity: Vector2D;
+  /** Velocity after host rules are applied (crashes/gravel may zero it). */
+  resultingVelocity: Vector2D;
+  lap: number;
+  isOffTrack: boolean;
+  crashed?: boolean;
+  finishOrder?: number;
+}
+
+export interface ReplayRound {
+  round: number;
+  moves: ReplayMove[];
+}
+
 export interface GameState {
   phase: GamePhase;
   players: Player[];
@@ -95,6 +120,8 @@ export interface GameState {
   gameMode: GameMode;
   diceRolls: Record<string, number>;
   podium: PodiumEntry[];
+  /** Accepted moves grouped by racing round for post-match replay. */
+  replayRounds?: ReplayRound[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
 }
@@ -291,6 +318,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     gameMode: 'TURNS',
     diceRolls: {},
     podium: [],
+    replayRounds: [],
   };
 }
 
@@ -438,6 +466,132 @@ export function pushTrail(player: Player, point: Vector2D): void {
   if (player.trail.length > MAX_TRAIL_POINTS) {
     player.trail.shift();
   }
+}
+
+export function replayMoves(state: GameState): ReplayMove[] {
+  return (state.replayRounds ?? []).flatMap((round) => round.moves);
+}
+
+export function recordReplayMove(
+  state: GameState,
+  player: Player,
+  from: Vector2D,
+  to: Vector2D,
+  velocity: Vector2D,
+  crashed = false
+): ReplayMove {
+  state.replayRounds ??= [];
+  let round = state.replayRounds.find((r) => r.round === state.round);
+  if (!round) {
+    round = { round: state.round, moves: [] };
+    state.replayRounds.push(round);
+  }
+
+  const move: ReplayMove = {
+    sequence: replayMoves(state).length,
+    round: state.round,
+    playerId: player.connectionId,
+    nickname: player.nickname,
+    color: player.color,
+    from: { ...from },
+    to: { ...to },
+    velocity: { ...velocity },
+    resultingVelocity: { ...player.velocity },
+    lap: player.lap,
+    isOffTrack: player.isOffTrack,
+    crashed: crashed || undefined,
+    finishOrder: player.finishOrder,
+  };
+  round.moves.push(move);
+  return move;
+}
+
+export function replaceReplayPlayerId(
+  state: GameState,
+  oldConnectionId: string,
+  newConnectionId: string
+): void {
+  for (const round of state.replayRounds ?? []) {
+    for (const move of round.moves) {
+      if (move.playerId === oldConnectionId) {
+        move.playerId = newConnectionId;
+      }
+    }
+  }
+}
+
+export function buildReplayState(state: GameState, moveLimit: number): GameState {
+  const moves = replayMoves(state);
+  const clampedLimit = Math.max(0, Math.min(moveLimit, moves.length));
+  const starts = new Map<string, Vector2D>();
+  for (const move of moves) {
+    if (!starts.has(move.playerId)) {
+      starts.set(move.playerId, { ...move.from });
+    }
+  }
+
+  const players = state.players.map((p) => {
+    const start = starts.get(p.connectionId) ?? p.trail?.[0] ?? p.position;
+    return {
+      ...p,
+      position: { ...start },
+      velocity: zeroVector(),
+      isOffTrack: false,
+      trail: [{ ...start }],
+      lap: 1,
+      passedCheckpoint: false,
+      finishOrder: undefined,
+      finishRound: undefined,
+      finishedAt: undefined,
+    };
+  });
+
+  for (const move of moves) {
+    if (players.some((p) => p.connectionId === move.playerId)) continue;
+    players.push({
+      connectionId: move.playerId,
+      nickname: move.nickname,
+      color: move.color,
+      isHost: false,
+      joinOrder: players.length,
+      status: 'approved',
+      position: { ...move.from },
+      velocity: zeroVector(),
+      isOffTrack: false,
+      trail: [{ ...move.from }],
+      lap: 1,
+    });
+  }
+
+  const replayState: GameState = {
+    ...state,
+    phase: 'GAME_OVER',
+    players,
+    round: clampedLimit === 0 ? 1 : moves[clampedLimit - 1].round,
+    podium: [],
+  };
+
+  for (const move of moves.slice(0, clampedLimit)) {
+    const player = replayState.players.find((p) => p.connectionId === move.playerId);
+    if (!player) continue;
+    player.position = { ...move.to };
+    player.velocity = { ...move.resultingVelocity };
+    player.isOffTrack = move.isOffTrack;
+    player.lap = move.lap;
+    pushTrail(player, move.to);
+    if (move.finishOrder !== undefined) {
+      player.finishOrder = move.finishOrder;
+      player.finishRound = move.round;
+      replayState.podium.push({
+        connectionId: player.connectionId,
+        nickname: player.nickname,
+        position: move.finishOrder,
+      });
+    }
+  }
+
+  replayState.podium.sort((a, b) => a.position - b.position);
+  return replayState;
 }
 
 export function getTileAt(track: TrackDefinition, x: number, y: number): TileType | null {

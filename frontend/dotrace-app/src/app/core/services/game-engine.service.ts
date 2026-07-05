@@ -20,6 +20,8 @@ import {
   landingPosition,
   nextActiveTurnIndex,
   pushTrail,
+  recordReplayMove,
+  replaceReplayPlayerId,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
@@ -235,6 +237,7 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      recordReplayMove(state, player, from, from, vector, true);
       this.afterMove(state);
       return;
     }
@@ -263,6 +266,7 @@ export class GameEngineService implements OnDestroy {
     // after the far-side checkpoint, so the line can't be gamed on turn one.
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
+    let finishedThisMove = false;
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
       if (player.lap < state.totalLaps) {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
@@ -281,8 +285,14 @@ export class GameEngineService implements OnDestroy {
           nickname: player.nickname,
           position: pos,
         });
-        this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
+        finishedThisMove = true;
       }
+    }
+
+    recordReplayMove(state, player, from, landing, vector);
+
+    if (finishedThisMove) {
+      this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
     }
 
     if (isGameOver(state)) {
@@ -360,6 +370,7 @@ export class GameEngineService implements OnDestroy {
     clearTimeout(this.hostRecoveryTimer);
     this.hostRecoveryTimer = null;
     if (!state.gameMode) state.gameMode = 'TURNS';
+    state.replayRounds ??= [];
     const myId = this.myId;
     state.hostId = myId ?? state.hostId;
     for (const p of state.players) {
@@ -480,6 +491,7 @@ export class GameEngineService implements OnDestroy {
     state.podium = state.podium.map((e) =>
       e.connectionId === oldConnectionId ? { ...e, connectionId: newConnectionId } : e
     );
+    replaceReplayPlayerId(state, oldConnectionId, newConnectionId);
 
     const idx = state.players.findIndex((p) => p.connectionId === oldConnectionId);
     const merged: Player = {
@@ -518,6 +530,7 @@ export class GameEngineService implements OnDestroy {
     if (this.isHost) return;
     const state = relay.state;
     if (!state.gameMode) state.gameMode = 'TURNS';
+    state.replayRounds ??= [];
     this.emit(state);
   }
 
