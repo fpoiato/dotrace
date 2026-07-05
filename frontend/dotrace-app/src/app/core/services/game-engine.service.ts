@@ -25,6 +25,8 @@ import {
   segmentEntersRect,
   zeroVector,
   buildRaceTelemetry,
+  createRaceReplay,
+  recordReplayMove,
 } from '../models/ws-types';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
@@ -135,6 +137,7 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      state.replay = createRaceReplay(state);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -189,6 +192,7 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    state.replay = createRaceReplay(state);
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -235,6 +239,7 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      this.recordMove(state, player, from, true);
       this.afterMove(state);
       return;
     }
@@ -285,6 +290,8 @@ export class GameEngineService implements OnDestroy {
       }
     }
 
+    this.recordMove(state, player, from, false);
+
     if (isGameOver(state)) {
       state.phase = 'GAME_OVER';
       this.setStateAndRelay('GAME_OVER', state);
@@ -292,6 +299,22 @@ export class GameEngineService implements OnDestroy {
     }
 
     this.afterMove(state);
+  }
+
+  /** Append the just-applied move to the replay log (host only). */
+  private recordMove(state: GameState, player: Player, from: Vector2D, crashed: boolean): void {
+    if (!state.replay) return;
+    recordReplayMove(state.replay, {
+      round: state.round,
+      connectionId: player.connectionId,
+      from: { ...from },
+      to: { ...player.position },
+      velocity: { ...player.velocity },
+      lap: player.lap,
+      offTrack: player.isOffTrack,
+      crashed,
+      finished: player.finishOrder !== undefined,
+    });
   }
 
   private afterMove(state: GameState): void {

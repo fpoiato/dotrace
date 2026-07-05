@@ -22,6 +22,13 @@ import {
   segmentEntersRect,
   buildRaceTelemetry,
   formatRaceTime,
+  RaceReplay,
+  ReplayMove,
+  createRaceReplay,
+  recordReplayMove,
+  buildReplayFrames,
+  replayStepRound,
+  MAX_REPLAY_MOVES,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -394,6 +401,139 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('race replay', () => {
+  function baseState(): GameState {
+    return {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ connectionId: 'a', nickname: 'Ana', color: '#f00', position: { x: 0, y: 0 } }),
+        makePlayer({
+          connectionId: 'b',
+          nickname: 'Bia',
+          color: '#00f',
+          isHost: false,
+          position: { x: 0, y: 1 },
+        }),
+      ],
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 2,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+      raceStartedAt: 5_000,
+    };
+  }
+
+  function move(overrides: Partial<ReplayMove> = {}): ReplayMove {
+    return {
+      round: 1,
+      connectionId: 'a',
+      from: { x: 0, y: 0 },
+      to: { x: 1, y: 0 },
+      velocity: { x: 1, y: 0 },
+      lap: 1,
+      offTrack: false,
+      crashed: false,
+      finished: false,
+      ...overrides,
+    };
+  }
+
+  it('captures the starting grid and an empty move log', () => {
+    const replay = createRaceReplay(baseState());
+    expect(replay.trackId).toBe('test');
+    expect(replay.totalLaps).toBe(2);
+    expect(replay.startedAt).toBe(5_000);
+    expect(replay.moves).toHaveLength(0);
+    expect(replay.grid).toEqual([
+      { connectionId: 'a', nickname: 'Ana', color: '#f00', start: { x: 0, y: 0 } },
+      { connectionId: 'b', nickname: 'Bia', color: '#00f', start: { x: 0, y: 1 } },
+    ]);
+  });
+
+  it('deep-copies recorded moves so later mutation does not leak in', () => {
+    const replay = createRaceReplay(baseState());
+    const src = move();
+    recordReplayMove(replay, src);
+    src.to.x = 99;
+    expect(replay.moves[0].to.x).toBe(1);
+  });
+
+  it('caps the move log at MAX_REPLAY_MOVES, keeping the earliest', () => {
+    const replay = createRaceReplay(baseState());
+    for (let i = 0; i < MAX_REPLAY_MOVES + 10; i++) {
+      recordReplayMove(replay, move({ round: i + 1, to: { x: i, y: 0 } }));
+    }
+    expect(replay.moves).toHaveLength(MAX_REPLAY_MOVES);
+    expect(replay.moves[0].to.x).toBe(0);
+  });
+
+  it('reconstructs the starting grid at step 0', () => {
+    const replay = createRaceReplay(baseState());
+    recordReplayMove(replay, move());
+    const frames = buildReplayFrames(replay, 0);
+    expect(frames.map((f) => f.connectionId)).toEqual(['a', 'b']);
+    expect(frames[0].position).toEqual({ x: 0, y: 0 });
+    expect(frames[0].trail).toEqual([{ x: 0, y: 0 }]);
+    expect(frames[0].velocity).toEqual({ x: 0, y: 0 });
+  });
+
+  it('advances a car and extends its trail as moves are applied', () => {
+    const replay = createRaceReplay(baseState());
+    recordReplayMove(replay, move({ to: { x: 1, y: 0 }, velocity: { x: 1, y: 0 } }));
+    recordReplayMove(replay, move({ to: { x: 3, y: 0 }, velocity: { x: 2, y: 0 } }));
+    const frames = buildReplayFrames(replay, 2);
+    expect(frames[0].position).toEqual({ x: 3, y: 0 });
+    expect(frames[0].velocity).toEqual({ x: 2, y: 0 });
+    expect(frames[0].trail).toEqual([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 3, y: 0 }]);
+    // untouched car stays on the grid
+    expect(frames[1].position).toEqual({ x: 0, y: 1 });
+  });
+
+  it('resets the trail when a car starts a new lap', () => {
+    const replay = createRaceReplay(baseState());
+    recordReplayMove(replay, move({ to: { x: 1, y: 0 }, lap: 1 }));
+    recordReplayMove(replay, move({ to: { x: 2, y: 0 }, lap: 2 }));
+    const frames = buildReplayFrames(replay, 2);
+    expect(frames[0].lap).toBe(2);
+    expect(frames[0].trail).toEqual([{ x: 2, y: 0 }]);
+  });
+
+  it('does not extend the trail on a crash (car stays put)', () => {
+    const replay = createRaceReplay(baseState());
+    recordReplayMove(replay, move({ to: { x: 1, y: 0 } }));
+    recordReplayMove(
+      replay,
+      move({ from: { x: 1, y: 0 }, to: { x: 1, y: 0 }, velocity: { x: 0, y: 0 }, crashed: true })
+    );
+    const frames = buildReplayFrames(replay, 2);
+    expect(frames[0].position).toEqual({ x: 1, y: 0 });
+    expect(frames[0].trail).toEqual([{ x: 0, y: 0 }, { x: 1, y: 0 }]);
+  });
+
+  it('clamps the step to the recorded range', () => {
+    const replay = createRaceReplay(baseState());
+    recordReplayMove(replay, move({ to: { x: 1, y: 0 } }));
+    expect(buildReplayFrames(replay, -5)[0].position).toEqual({ x: 0, y: 0 });
+    expect(buildReplayFrames(replay, 999)[0].position).toEqual({ x: 1, y: 0 });
+  });
+
+  it('reports the round for a given step', () => {
+    const replay = createRaceReplay(baseState());
+    recordReplayMove(replay, move({ round: 1 }));
+    recordReplayMove(replay, move({ round: 2 }));
+    expect(replayStepRound(replay, 0)).toBe(1);
+    expect(replayStepRound(replay, 1)).toBe(1);
+    expect(replayStepRound(replay, 2)).toBe(2);
+    const empty: RaceReplay = createRaceReplay(baseState());
+    expect(replayStepRound(empty, 0)).toBe(1);
   });
 });
 

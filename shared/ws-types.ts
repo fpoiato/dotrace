@@ -97,6 +97,62 @@ export interface GameState {
   podium: PodiumEntry[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
+  /** Move-by-move recording of the race, for post-race replay. */
+  replay?: RaceReplay;
+}
+
+/** A single applied move, recorded so the race can be replayed afterwards. */
+export interface ReplayMove {
+  /** 1-based racing round in which the move was made. */
+  round: number;
+  connectionId: string;
+  /** Position before the move. */
+  from: Vector2D;
+  /** Position after the move (equals `from` on a crash). */
+  to: Vector2D;
+  /** Resulting velocity after the move (zeroed on a crash or gravel stop). */
+  velocity: Vector2D;
+  /** Lap the car is on after the move. */
+  lap: number;
+  /** The move ended on the grass (car stopped off-track). */
+  offTrack: boolean;
+  /** The move collided with another car (stayed put, momentum killed). */
+  crashed: boolean;
+  /** The move completed the final lap and finished the race for this car. */
+  finished: boolean;
+}
+
+/** A starting-grid slot captured when the green flag drops. */
+export interface ReplayGridSlot {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  start: Vector2D;
+}
+
+/** Full move-by-move record of a race, replayable once it ends. */
+export interface RaceReplay {
+  trackId: string;
+  totalLaps: number;
+  gameMode: GameMode;
+  /** Epoch ms when the race started. */
+  startedAt: number;
+  grid: ReplayGridSlot[];
+  moves: ReplayMove[];
+}
+
+/** A car's reconstructed state at some point during replay playback. */
+export interface ReplayFrame {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  position: Vector2D;
+  velocity: Vector2D;
+  lap: number;
+  offTrack: boolean;
+  finished: boolean;
+  /** Landing positions since the current lap started (the pen trail). */
+  trail: Vector2D[];
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -533,4 +589,90 @@ export function formatRaceTime(elapsedMs: number): string {
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Hard cap on recorded moves so the replay log (relayed inside GameState)
+ * stays bounded on long races. The earliest moves are kept.
+ */
+export const MAX_REPLAY_MOVES = 5000;
+
+/** Snapshot the starting grid and open an empty move log for replay capture. */
+export function createRaceReplay(state: GameState): RaceReplay {
+  return {
+    trackId: state.trackId,
+    totalLaps: state.totalLaps,
+    gameMode: state.gameMode,
+    startedAt: state.raceStartedAt ?? Date.now(),
+    grid: state.players.map((p) => ({
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      start: { ...p.position },
+    })),
+    moves: [],
+  };
+}
+
+/** Append a move to the replay log (deep-copied), respecting the cap. */
+export function recordReplayMove(replay: RaceReplay, move: ReplayMove): void {
+  if (replay.moves.length >= MAX_REPLAY_MOVES) return;
+  replay.moves.push({
+    ...move,
+    from: { ...move.from },
+    to: { ...move.to },
+    velocity: { ...move.velocity },
+  });
+}
+
+/**
+ * Reconstruct every car's state after applying the first `step` moves of a
+ * replay (step 0 = starting grid). Trails reset on each completed lap and a
+ * crash leaves the car in place, exactly like live play.
+ */
+export function buildReplayFrames(replay: RaceReplay, step: number): ReplayFrame[] {
+  const frames = new Map<string, ReplayFrame>();
+  const order: string[] = [];
+  for (const slot of replay.grid) {
+    order.push(slot.connectionId);
+    frames.set(slot.connectionId, {
+      connectionId: slot.connectionId,
+      nickname: slot.nickname,
+      color: slot.color,
+      position: { ...slot.start },
+      velocity: zeroVector(),
+      lap: 1,
+      offTrack: false,
+      finished: false,
+      trail: [{ ...slot.start }],
+    });
+  }
+
+  const count = Math.max(0, Math.min(Math.floor(step), replay.moves.length));
+  for (let i = 0; i < count; i++) {
+    const move = replay.moves[i];
+    const frame = frames.get(move.connectionId);
+    if (!frame) continue;
+    const lapAdvanced = move.lap > frame.lap;
+    frame.position = { ...move.to };
+    frame.velocity = { ...move.velocity };
+    frame.lap = move.lap;
+    frame.offTrack = move.offTrack;
+    frame.finished = move.finished;
+    if (lapAdvanced) {
+      // New lap: wipe the pen line so the sheet stays readable, as in play.
+      frame.trail = [{ ...move.to }];
+    } else if (!move.crashed) {
+      frame.trail.push({ ...move.to });
+    }
+  }
+
+  return order.map((id) => frames.get(id)!);
+}
+
+/** The round a given replay step belongs to (for the round indicator). */
+export function replayStepRound(replay: RaceReplay, step: number): number {
+  if (replay.moves.length === 0) return 1;
+  const idx = Math.max(0, Math.min(Math.floor(step), replay.moves.length) - 1);
+  return replay.moves[idx]?.round ?? 1;
 }
