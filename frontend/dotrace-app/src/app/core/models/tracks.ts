@@ -2,8 +2,12 @@ import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
 
 /**
  * Circuits are rasterized from a centerline polyline stamped with a round
- * brush, mimicking a marker pen on grid paper. Layouts approximate the
- * classic outlines of Monza, Monaco, Interlagos, Silverstone, Spa and Suzuka.
+ * brush, mimicking a marker pen on grid paper. Monza, Monaco, Interlagos and
+ * Silverstone approximate their real-world outlines; Spa is a stylised
+ * circuit with a deep chicane, and Suzuka is a snaking vector-race maze.
+ *
+ * Preview any layout in the terminal with:
+ *   npx tsx scripts/render-tracks.ts [trackId]
  */
 
 const GRID_W = 56;
@@ -233,75 +237,90 @@ const SILVERSTONE: CircuitSpec = {
 };
 
 /**
- * Spa-Francorchamps — clockwise: bottom start straight, Eau Rouge climb on
- * the right, Kemmel along the top, Les Combes chicane on the left, Pouhon
- * loop through the infield and Blanchimont back to the line.
+ * Spa-Francorchamps — clockwise: start straight along the bottom, a long
+ * flat-out climb up the right edge (Eau Rouge / Blanchimont spirit), Kemmel
+ * along the top, a deep Les Combes chicane dropping a full lane and back,
+ * the top-left corner, a Pouhon finger reaching into the infield and a
+ * La Source U-turn dropping back onto the line. Corridor walls are kept
+ * >= 3 cells so the gaps cannot be jumped at legal accelerations.
  */
 const SPA: CircuitSpec = {
   id: 'spa',
   nameKey: 'tracks.spa',
   centerline: [
-    { x: 16, y: 32 },
-    { x: 42, y: 32 },
-    { x: 50, y: 28 },
-    { x: 52, y: 20 },
-    { x: 48, y: 12 },
-    { x: 38, y: 6 },
-    { x: 22, y: 5 },
-    { x: 10, y: 8 },
-    { x: 6, y: 14 },
-    { x: 8, y: 20 },
-    { x: 14, y: 24 },
-    { x: 22, y: 28 },
-    { x: 16, y: 32 },
+    { x: 20, y: 29 },
+    { x: 40, y: 29 },
+    { x: 46, y: 28 },
+    { x: 49, y: 24 },
+    { x: 49, y: 9 },
+    { x: 46, y: 4 },
+    { x: 40, y: 4 },
+    { x: 33, y: 4 },
+    { x: 29, y: 12 },
+    { x: 24, y: 12 },
+    { x: 20, y: 4 },
+    { x: 13, y: 4 },
+    { x: 7, y: 6 },
+    { x: 5, y: 10 },
+    { x: 5, y: 17 },
+    { x: 9, y: 21 },
+    { x: 17, y: 21 },
+    { x: 21, y: 23 },
+    { x: 22, y: 26 },
+    { x: 20, y: 29 },
   ],
-  finish: { x0: 24, x1: 25, y0: 27, y1: 33 },
-  startLine: gridSlots(27, 2, [30, 32]),
+  finish: { x0: 24, x1: 25, y0: 26, y1: 32 },
+  startLine: gridSlots(28, 2, [28, 30]),
   arrows: [
-    { at: { x: 24.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 24.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 24.5, y: 25.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 24.5, y: 32.5 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 2, y0: 0, x1: 18, y1: 12 },
+  // Chicane floor only (not the island between the legs), so flying over
+  // the chicane mouth at the top never tags the checkpoint.
+  checkpoint: { x0: 24, y0: 10, x1: 32, y1: 14 },
 };
 
 /**
- * Suzuka — clockwise figure-eight: bottom start straight, esses climbing
- * through the left side, back straight along the top, 130R / Spoon sweep
- * on the right, crossover through the middle and back to the line.
+ * Suzuka — a marker-pen maze in the spirit of classic vector-race sheets:
+ * four long lanes snaking across the paper joined by hairpin U-turns, with
+ * a return corridor dropping down the left edge back to the start straight.
+ * The checkpoint sits mid-way along the top lane, which is only reachable
+ * by driving the full snake, so no wall-hop can shortcut the lap.
  */
 const SUZUKA: CircuitSpec = {
   id: 'suzuka',
   nameKey: 'tracks.suzuka',
+  // Lane rows are spaced so the wall between the two middle lanes is five
+  // cells thick: a car exiting the tall right hairpin can reach vy -4/-5,
+  // and anything thinner could be jumped to skip half the maze.
   centerline: [
-    { x: 12, y: 30 },
-    { x: 36, y: 30 },
-    { x: 44, y: 26 },
-    { x: 48, y: 20 },
-    { x: 46, y: 14 },
-    { x: 40, y: 9 },
-    { x: 30, y: 6 },
-    { x: 18, y: 7 },
-    { x: 10, y: 11 },
-    { x: 7, y: 17 },
-    { x: 9, y: 23 },
-    { x: 16, y: 27 },
-    { x: 24, y: 26 },
-    { x: 32, y: 22 },
-    { x: 38, y: 16 },
-    { x: 36, y: 11 },
-    { x: 28, y: 8 },
-    { x: 20, y: 10 },
-    { x: 14, y: 16 },
-    { x: 12, y: 22 },
-    { x: 12, y: 30 },
+    { x: 8, y: 29 },
+    { x: 46, y: 29 },
+    { x: 50, y: 27 },
+    { x: 50, y: 23 },
+    { x: 46, y: 21 },
+    { x: 14, y: 21 },
+    { x: 11, y: 19 },
+    { x: 11, y: 13 },
+    { x: 14, y: 11 },
+    { x: 46, y: 11 },
+    { x: 50, y: 9 },
+    { x: 50, y: 5 },
+    { x: 46, y: 3 },
+    { x: 8, y: 3 },
+    { x: 4, y: 7 },
+    { x: 4, y: 25 },
+    { x: 8, y: 29 },
   ],
-  finish: { x0: 22, x1: 23, y0: 27, y1: 33 },
-  startLine: gridSlots(25, 2, [29, 31]),
+  finish: { x0: 22, x1: 23, y0: 26, y1: 32 },
+  startLine: gridSlots(26, 2, [28, 30]),
   arrows: [
-    { at: { x: 22.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 22.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 22.5, y: 25.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 22.5, y: 32.5 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 38, y0: 4, x1: 52, y1: 18 },
+  // Middle of the top lane only. Too far above the second lane to be
+  // tagged by a wall-hop, and far from the left return corridor.
+  checkpoint: { x0: 20, y0: 1, x1: 34, y1: 5 },
 };
 
 export const TRACKS: TrackDefinition[] = [
