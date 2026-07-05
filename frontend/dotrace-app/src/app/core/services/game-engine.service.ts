@@ -285,6 +285,10 @@ export class GameEngineService implements OnDestroy {
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
+      const now = Date.now();
+      player.lapTimes = [...(player.lapTimes ?? []), now];
+      player.lapRounds = [...(player.lapRounds ?? []), state.round];
+
       if (player.lap < state.totalLaps) {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
         // so the sheet stays readable on the next tour.
@@ -293,7 +297,6 @@ export class GameEngineService implements OnDestroy {
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
-        const now = Date.now();
         player.finishOrder = pos;
         player.finishRound = state.round;
         player.finishedAt = now;
@@ -534,6 +537,8 @@ export class GameEngineService implements OnDestroy {
       merged.finishOrder = state.players[idx].finishOrder;
       merged.finishRound = state.players[idx].finishRound;
       merged.finishedAt = state.players[idx].finishedAt;
+      merged.lapTimes = state.players[idx].lapTimes;
+      merged.lapRounds = state.players[idx].lapRounds;
       state.players[idx] = merged;
     } else {
       state.players.push(merged);
