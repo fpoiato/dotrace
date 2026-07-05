@@ -1,0 +1,85 @@
+@if (entries$ | async; as entries) {
+  @if (entries.length > 0) {
+    @if (expanded) {
+      <div class="rounded-xl bg-slate-800/90 text-sm">
+        <div class="border-b border-slate-700 px-4 py-3 font-semibold text-slate-200">
+          {{ 'game.leaderboard' | translate }}
+        </div>
+        <ul class="divide-y divide-slate-700/80">
+          @for (entry of entries; track entry.connectionId) {
+            <li class="px-4 py-3">
+              <div class="flex items-center gap-3">
+                <span class="w-6 shrink-0 text-center font-bold text-orange-400">
+                  {{ rankBadge(entry.rank, entry.finishOrder) }}
+                </span>
+                <span class="h-3 w-3 shrink-0 rounded-full" [style.background]="entry.color"></span>
+                <span class="min-w-0 flex-1 truncate font-medium text-white">{{ entry.nickname }}</span>
+                <span class="shrink-0 font-mono text-xs text-slate-400">
+                  {{ 'game.lap' | translate }} {{ entry.lap }}/{{ entry.totalLaps }}
+                </span>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 pl-9 font-mono text-xs text-slate-400">
+                <span>
+                  {{ 'game.lastLap' | translate }}:
+                  <span class="text-slate-200">{{ lapTimeLabel(entry) }}</span>
+                </span>
+                @if (entry.bestLapMs !== undefined) {
+                  <span>
+                    {{ 'game.bestLap' | translate }}:
+                    <span class="text-emerald-400">{{ formatRaceTime(entry.bestLapMs) }}</span>
+                  </span>
+                }
+                @if (entry.finishOrder !== undefined && entry.totalTimeMs !== undefined) {
+                  <span>
+                    {{ 'game.totalTime' | translate }}:
+                    <span class="text-orange-300">{{ formatRaceTime(entry.totalTimeMs) }}</span>
+                  </span>
+                } @else if (entry.currentLapMs !== undefined) {
+                  <span>
+                    {{ 'game.currentLap' | translate }}:
+                    <span class="text-slate-200">{{ formatRaceTime(entry.currentLapMs) }}</span>
+                  </span>
+                }
+              </div>
+              @if (entry.lapTimes.length > 0) {
+                <div class="mt-2 flex flex-wrap gap-1.5 pl-9">
+                  @for (lapMs of entry.lapTimes; track $index) {
+                    <span class="rounded-md bg-slate-900/80 px-2 py-0.5 font-mono text-[10px] text-slate-400">
+                      L{{ $index + 1 }} {{ formatRaceTime(lapMs) }}
+                    </span>
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      </div>
+    } @else {
+      <details class="rounded-xl bg-slate-800/80 text-sm">
+        <summary class="cursor-pointer px-4 py-3 font-medium text-slate-300">
+          {{ 'game.leaderboard' | translate }}
+        </summary>
+        <ul class="space-y-1 border-t border-slate-700 px-4 py-2 font-mono text-xs">
+          @for (entry of entries; track entry.connectionId) {
+            <li class="flex items-center justify-between gap-2 py-1">
+              <span class="flex min-w-0 items-center gap-2">
+                <span class="w-4 shrink-0 text-center font-bold text-orange-400">
+                  {{ rankBadge(entry.rank, entry.finishOrder) }}
+                </span>
+                <span class="h-2.5 w-2.5 shrink-0 rounded-full" [style.background]="entry.color"></span>
+                <span class="truncate text-slate-300">{{ entry.nickname }}</span>
+              </span>
+              <span class="shrink-0 text-slate-500">
+                L{{ entry.lap }}/{{ entry.totalLaps }}
+                · {{ lapTimeLabel(entry) }}
+                @if (entry.bestLapMs !== undefined) {
+                  · ⭐ {{ formatRaceTime(entry.bestLapMs) }}
+                }
+              </span>
+            </li>
+          }
+        </ul>
+      </details>
+    }
+  }
+}

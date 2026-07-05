@@ -19,6 +19,7 @@ import { RoomService } from '../../core/services/room.service';
 import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
+import { LeaderboardComponent } from './leaderboard.component';
 import { MiniMapComponent } from './mini-map.component';
 import { TrackCanvasComponent } from './track-canvas.component';
 
@@ -46,7 +47,7 @@ const PAD_GLYPHS: Record<string, string> = {
 @Component({
   selector: 'app-game-room',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent],
+  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LeaderboardComponent, LoadingSpinnerComponent],
   templateUrl: './game-room.component.html',
 })
 export class GameRoomComponent implements OnInit, OnDestroy {

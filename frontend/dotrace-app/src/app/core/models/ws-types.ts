@@ -65,6 +65,10 @@ export interface Player {
   finishedAt?: number;
   /** Racing round when the player finished (turn-based race time). */
   finishRound?: number;
+  /** Completed lap times in ms (each lap from stripe to stripe). */
+  lapTimes?: number[];
+  /** Epoch ms when the current lap started (reset at each lap crossing). */
+  lapStartAt?: number;
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
@@ -103,12 +107,30 @@ export interface GameState {
 export interface PlayerTelemetry {
   connectionId: string;
   nickname: string;
+  color: string;
   position: Vector2D;
   velocity: Vector2D;
   lap: number;
+  lapTimes: number[];
+  currentLapMs?: number;
   finishOrder?: number;
   finishRound?: number;
   finishedAt?: number;
+}
+
+/** Sorted standings row for the live / post-race leaderboard. */
+export interface LeaderboardEntry {
+  rank: number;
+  connectionId: string;
+  nickname: string;
+  color: string;
+  lap: number;
+  totalLaps: number;
+  lapTimes: number[];
+  currentLapMs?: number;
+  bestLapMs?: number;
+  finishOrder?: number;
+  totalTimeMs?: number;
 }
 
 /** Host-authoritative race snapshot (positions + elapsed time). */
@@ -517,14 +539,95 @@ export function buildRaceTelemetry(
     players: state.players.map((p) => ({
       connectionId: p.connectionId,
       nickname: p.nickname,
+      color: p.color,
       position: { ...p.position },
       velocity: { ...p.velocity },
       lap: p.lap,
+      lapTimes: p.lapTimes ?? [],
+      currentLapMs: currentLapElapsedMs(p, now),
       finishOrder: p.finishOrder,
       finishRound: p.finishRound,
       finishedAt: p.finishedAt,
     })),
   };
+}
+
+/** Reset lap timing when the green flag drops. */
+export function initPlayerLapTiming(player: Player, raceStartedAt: number): void {
+  player.lapTimes = [];
+  player.lapStartAt = raceStartedAt;
+}
+
+/** Record a completed lap time and start the next lap clock. */
+export function recordLapCrossing(player: Player, now = Date.now()): number | undefined {
+  if (!player.lapStartAt) return undefined;
+  const lapMs = Math.max(0, now - player.lapStartAt);
+  player.lapTimes = [...(player.lapTimes ?? []), lapMs];
+  player.lapStartAt = now;
+  return lapMs;
+}
+
+/** Elapsed ms on the player's current lap (0 if not started). */
+export function currentLapElapsedMs(player: Player, now = Date.now()): number | undefined {
+  if (player.finishOrder !== undefined || !player.lapStartAt) return undefined;
+  return Math.max(0, now - player.lapStartAt);
+}
+
+/** Best completed lap time, if any. */
+export function bestLapMs(lapTimes: number[]): number | undefined {
+  if (lapTimes.length === 0) return undefined;
+  return Math.min(...lapTimes);
+}
+
+/** Total elapsed race time for a finished player. */
+export function totalRaceTimeMs(player: Player, raceStartedAt?: number): number | undefined {
+  if (player.finishedAt && raceStartedAt) {
+    return player.finishedAt - raceStartedAt;
+  }
+  const laps = player.lapTimes ?? [];
+  if (laps.length === 0) return undefined;
+  const current = currentLapElapsedMs(player);
+  return laps.reduce((a, b) => a + b, 0) + (current ?? 0);
+}
+
+/**
+ * Build sorted leaderboard standings from game state.
+ * Finished drivers first (by finish order), then active drivers by lap
+ * progress and current-lap pace.
+ */
+export function buildLeaderboard(state: GameState, now = Date.now()): LeaderboardEntry[] {
+  const rows = state.players.map((p) => {
+    const lapTimes = p.lapTimes ?? [];
+    const currentLapMs = currentLapElapsedMs(p, now);
+    return {
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      lap: p.lap,
+      totalLaps: state.totalLaps,
+      lapTimes,
+      currentLapMs,
+      bestLapMs: bestLapMs(lapTimes),
+      finishOrder: p.finishOrder,
+      totalTimeMs: totalRaceTimeMs(p, state.raceStartedAt),
+      joinOrder: p.joinOrder,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.finishOrder !== undefined && b.finishOrder !== undefined) {
+      return a.finishOrder - b.finishOrder;
+    }
+    if (a.finishOrder !== undefined) return -1;
+    if (b.finishOrder !== undefined) return 1;
+    if (b.lap !== a.lap) return b.lap - a.lap;
+    return a.joinOrder - b.joinOrder;
+  });
+
+  return rows.map((row, idx) => {
+    const { joinOrder: _joinOrder, ...entry } = row;
+    return { ...entry, rank: idx + 1 };
+  });
 }
 
 /** Format elapsed race time as m:ss. */

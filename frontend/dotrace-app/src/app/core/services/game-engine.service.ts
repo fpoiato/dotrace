@@ -15,11 +15,13 @@ import {
   findCollisionOpponent,
   getTileAt,
   getValidMoves,
+  initPlayerLapTiming,
   isGameOver,
   isTimedMode,
   landingPosition,
   nextActiveTurnIndex,
   pushTrail,
+  recordLapCrossing,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
@@ -135,6 +137,9 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      for (const p of state.players) {
+        initPlayerLapTiming(p, state.raceStartedAt);
+      }
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -189,6 +194,9 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    for (const p of state.players) {
+      initPlayerLapTiming(p, state.raceStartedAt);
+    }
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -264,18 +272,19 @@ export class GameEngineService implements OnDestroy {
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
+      const now = Date.now();
       if (player.lap < state.totalLaps) {
-        // Lap done, more to go: rearm the checkpoint and erase the pen trail
-        // so the sheet stays readable on the next tour.
+        recordLapCrossing(player, now);
         player.lap += 1;
         player.passedCheckpoint = false;
         player.trail = [{ ...landing }];
       } else {
+        recordLapCrossing(player, now);
         const pos = state.podium.length + 1;
-        const now = Date.now();
         player.finishOrder = pos;
         player.finishRound = state.round;
         player.finishedAt = now;
+        player.lapStartAt = undefined;
         state.podium.push({
           connectionId: player.connectionId,
           nickname: player.nickname,
@@ -502,6 +511,8 @@ export class GameEngineService implements OnDestroy {
       merged.finishOrder = state.players[idx].finishOrder;
       merged.finishRound = state.players[idx].finishRound;
       merged.finishedAt = state.players[idx].finishedAt;
+      merged.lapTimes = state.players[idx].lapTimes;
+      merged.lapStartAt = state.players[idx].lapStartAt;
       state.players[idx] = merged;
     } else {
       state.players.push(merged);

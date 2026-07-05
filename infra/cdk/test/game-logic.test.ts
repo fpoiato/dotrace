@@ -21,7 +21,12 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
   buildRaceTelemetry,
+  buildLeaderboard,
   formatRaceTime,
+  initPlayerLapTiming,
+  recordLapCrossing,
+  bestLapMs,
+  currentLapElapsedMs,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -394,6 +399,78 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('lap timing and leaderboard', () => {
+  it('initializes lap timing at race start', () => {
+    const player = makePlayer();
+    initPlayerLapTiming(player, 10_000);
+    expect(player.lapTimes).toEqual([]);
+    expect(player.lapStartAt).toBe(10_000);
+  });
+
+  it('records lap crossings and resets the lap clock', () => {
+    const player = makePlayer();
+    initPlayerLapTiming(player, 10_000);
+    const lap1 = recordLapCrossing(player, 25_000);
+    expect(lap1).toBe(15_000);
+    expect(player.lapTimes).toEqual([15_000]);
+    expect(player.lapStartAt).toBe(25_000);
+    const lap2 = recordLapCrossing(player, 40_000);
+    expect(lap2).toBe(15_000);
+    expect(player.lapTimes).toEqual([15_000, 15_000]);
+  });
+
+  it('computes best lap and current lap elapsed', () => {
+    const player = makePlayer({ lapStartAt: 5_000 });
+    expect(currentLapElapsedMs(player, 12_000)).toBe(7_000);
+    player.lapTimes = [20_000, 18_000, 22_000];
+    expect(bestLapMs(player.lapTimes)).toBe(18_000);
+  });
+
+  it('builds sorted leaderboard with lap times', () => {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({
+          connectionId: 'a',
+          nickname: 'Ana',
+          joinOrder: 0,
+          lap: 2,
+          lapTimes: [30_000],
+          lapStartAt: 50_000,
+        }),
+        makePlayer({
+          connectionId: 'b',
+          nickname: 'Bob',
+          joinOrder: 1,
+          isHost: false,
+          lap: 2,
+          finishOrder: 1,
+          finishedAt: 55_000,
+          lapTimes: [28_000, 27_000],
+        }),
+      ],
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b'],
+      currentTurnIndex: 0,
+      round: 5,
+      totalLaps: 2,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [{ connectionId: 'b', nickname: 'Bob', position: 1 }],
+      raceStartedAt: 1_000,
+    };
+
+    const board = buildLeaderboard(state, 60_000);
+    expect(board[0].nickname).toBe('Bob');
+    expect(board[0].totalTimeMs).toBe(54_000);
+    expect(board[0].bestLapMs).toBe(27_000);
+    expect(board[1].nickname).toBe('Ana');
+    expect(board[1].currentLapMs).toBe(10_000);
+    expect(board[1].bestLapMs).toBe(30_000);
   });
 });
 
