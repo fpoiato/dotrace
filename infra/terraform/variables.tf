@@ -39,16 +39,6 @@ variable "github_repo" {
   default = "dotrace"
 }
 
-variable "github_branch" {
-  type    = string
-  default = "main"
-}
-
-variable "codestar_connection_name" {
-  type    = string
-  default = "testproject-github"
-}
-
 variable "tf_state_bucket" {
   type    = string
   default = "contact-game-terraform-state-986873053420"

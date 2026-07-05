@@ -60,24 +60,22 @@ In the private repo `fpoiato/dotrace`, set:
 
 - `AWS_ROLE_ARN` — value of `github_actions_role_arn` from Terraform
 
-The pipeline sources code through the existing CodeStar connection
-`testproject-github`. That connection's **AWS Connector for GitHub** app must
-have access to this repo: go to
-[github.com/settings/installations](https://github.com/settings/installations)
-→ AWS Connector for GitHub → Configure → add `fpoiato/dotrace` to the
-repository list. Until then the Source stage fails with
-`No Branch [main] found`.
+The pipeline sources code from an S3 zip uploaded by GitHub Actions
+(`source/source.zip` in the pipeline artifacts bucket) — no CodeStar/GitHub
+connection is required.
 
 ### 3. CDK + frontend via CodePipeline
 
 Every **push to `main`** runs the GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
 
 1. **Test** — `npm test`, `cdk synth`, Angular production build
-2. **Deploy** — starts `dotrace-game-pipeline` and waits until the CodeBuild stage finishes (CDK deploy → S3 sync → CloudFront invalidation)
+2. **Deploy** — uploads the checked-out source as a zip to S3, starts
+   `dotrace-game-pipeline`, and waits until the CodeBuild stage finishes
+   (CDK deploy → S3 sync → CloudFront invalidation)
 
 Pull requests to `main` run tests only (no deploy).
 
-Manual pipeline trigger:
+Manual pipeline trigger (re-deploys the last uploaded source zip):
 
 ```bash
 aws codepipeline start-pipeline-execution --name dotrace-game-pipeline --region us-east-1 --profile nandopoiato
