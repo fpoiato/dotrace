@@ -530,7 +530,7 @@ export function buildReplayState(state: GameState, moveLimit: number): GameState
     }
   }
 
-  const players = state.players.map((p) => {
+  const players: Player[] = state.players.map((p): Player => {
     const start = starts.get(p.connectionId) ?? p.trail?.[0] ?? p.position;
     return {
       ...p,
