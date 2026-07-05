@@ -80,6 +80,28 @@ export interface PodiumEntry {
   position: number;
 }
 
+/** One recorded move for post-race replay. seq=0 entries mark starting positions. */
+export interface MoveRecord {
+  /** 0-based sequence number; 0 = starting positions before the first move. */
+  seq: number;
+  /** Race round when the move was made (0 for starting positions). */
+  round: number;
+  connectionId: string;
+  position: Vector2D;
+  velocity: Vector2D;
+  isOffTrack: boolean;
+  lap: number;
+}
+
+/** Maximum number of move records stored in the replay log. */
+export const MAX_REPLAY_MOVES = 2000;
+
+export function pushReplayMove(state: GameState, record: Omit<MoveRecord, 'seq'>): void {
+  if (!state.replayLog) state.replayLog = [];
+  if (state.replayLog.length >= MAX_REPLAY_MOVES) return;
+  state.replayLog.push({ seq: state.replayLog.length, ...record });
+}
+
 export interface GameState {
   phase: GamePhase;
   players: Player[];
@@ -97,6 +119,8 @@ export interface GameState {
   podium: PodiumEntry[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
+  /** Move-by-move log for post-race replay. Populated by the host; relayed with final state. */
+  replayLog?: MoveRecord[];
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -291,6 +315,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     gameMode: 'TURNS',
     diceRolls: {},
     podium: [],
+    replayLog: [],
   };
 }
 

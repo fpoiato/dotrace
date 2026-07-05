@@ -142,14 +142,27 @@
             }
           </ol>
         }
+        @if (!showReplay && (state.replayLog?.length ?? 0) > 0) {
+          <button
+            type="button"
+            (click)="openReplay()"
+            class="mt-4 min-h-12 w-full rounded-xl bg-black/20 text-base font-bold text-white active:bg-black/30"
+          >
+            🎬 {{ 'game.replay' | translate }}
+          </button>
+        }
         <button
           type="button"
           (click)="backToMenu()"
-          class="mt-6 min-h-14 w-full rounded-xl bg-slate-900 text-lg font-bold text-white"
+          class="mt-3 min-h-14 w-full rounded-xl bg-slate-900 text-lg font-bold text-white"
         >
           {{ 'game.backMenu' | translate }}
         </button>
       </div>
+
+      @if (showReplay) {
+        <app-replay-viewer [state]="state" (closed)="closeReplay()" />
+      }
     }
 
     @if (state.phase === 'LOBBY') {
