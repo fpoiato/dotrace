@@ -20,6 +20,7 @@ import {
   landingPosition,
   nextActiveTurnIndex,
   pushTrail,
+  recordMove,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
@@ -198,6 +199,8 @@ export class GameEngineService implements OnDestroy {
     ordered: Player[]
   ): void {
     if (!track) return;
+    // Fresh race, fresh replay: log every grid placement as round 0.
+    state.moveLog = [];
     ordered.forEach((player, idx) => {
       const start = track.startLine[idx % track.startLine.length];
       player.position = { ...start };
@@ -206,6 +209,7 @@ export class GameEngineService implements OnDestroy {
       player.passedCheckpoint = false;
       player.trail = [{ ...start }];
       player.lap = 1;
+      recordMove(state, { playerId: player.connectionId, to: { ...start }, round: 0 });
     });
   }
 
@@ -235,6 +239,7 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      recordMove(state, { playerId: senderId, to: from, round: state.round, crashed: true });
       this.afterMove(state);
       return;
     }
@@ -244,6 +249,7 @@ export class GameEngineService implements OnDestroy {
 
     player.position = landing;
     pushTrail(player, landing);
+    recordMove(state, { playerId: senderId, to: { ...landing }, round: state.round });
 
     if (tile === 'grass') {
       // Gravel trap: stop on the spot, kill momentum (gotcha #5 — only the
@@ -360,6 +366,7 @@ export class GameEngineService implements OnDestroy {
     clearTimeout(this.hostRecoveryTimer);
     this.hostRecoveryTimer = null;
     if (!state.gameMode) state.gameMode = 'TURNS';
+    if (!state.moveLog) state.moveLog = [];
     const myId = this.myId;
     state.hostId = myId ?? state.hostId;
     for (const p of state.players) {
@@ -481,6 +488,11 @@ export class GameEngineService implements OnDestroy {
       e.connectionId === oldConnectionId ? { ...e, connectionId: newConnectionId } : e
     );
 
+    // Keep the replay attached to the rejoined player under their new id.
+    state.moveLog = (state.moveLog ?? []).map((m) =>
+      m.playerId === oldConnectionId ? { ...m, playerId: newConnectionId } : m
+    );
+
     const idx = state.players.findIndex((p) => p.connectionId === oldConnectionId);
     const merged: Player = {
       ...player,
@@ -518,6 +530,7 @@ export class GameEngineService implements OnDestroy {
     if (this.isHost) return;
     const state = relay.state;
     if (!state.gameMode) state.gameMode = 'TURNS';
+    if (!state.moveLog) state.moveLog = [];
     this.emit(state);
   }
 

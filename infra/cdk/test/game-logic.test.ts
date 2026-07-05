@@ -22,6 +22,11 @@ import {
   segmentEntersRect,
   buildRaceTelemetry,
   formatRaceTime,
+  recordMove,
+  buildReplayCars,
+  MAX_MOVE_LOG,
+  MoveRecord,
+  createInitialState,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -175,6 +180,7 @@ describe('turn order', () => {
       totalLaps: 1,
       gameMode: 'TURNS',
       diceRolls: {},
+      moveLog: [],
       podium: [],
     };
   }
@@ -210,6 +216,7 @@ describe('game over conditions', () => {
       totalLaps: 1,
       gameMode: 'TURNS',
       diceRolls: {},
+      moveLog: [],
       podium: [
         { connectionId: 'x', nickname: 'X', position: 1 },
         { connectionId: 'y', nickname: 'Y', position: 2 },
@@ -231,6 +238,7 @@ describe('game over conditions', () => {
       totalLaps: 1,
       gameMode: 'TURNS',
       diceRolls: {},
+      moveLog: [],
       podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
     };
     expect(isGameOver(state)).toBe(true);
@@ -248,6 +256,7 @@ describe('game over conditions', () => {
       totalLaps: 1,
       gameMode: 'TURNS',
       diceRolls: {},
+      moveLog: [],
       podium: [{ connectionId: 'c2', nickname: 'Bia', position: 1 }],
     };
     expect(isGameOver(state)).toBe(false);
@@ -265,6 +274,7 @@ describe('game over conditions', () => {
       totalLaps: 1,
       gameMode: 'TIMED',
       diceRolls: {},
+      moveLog: [],
       podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
     };
     expect(isGameOver(state)).toBe(true);
@@ -283,6 +293,7 @@ describe('canPlayerMove', () => {
     totalLaps: 1,
     gameMode: 'TURNS',
     diceRolls: {},
+    moveLog: [],
     podium: [],
   };
 
@@ -360,6 +371,7 @@ describe('race telemetry', () => {
       totalLaps: 2,
       gameMode: 'TURNS',
       diceRolls: {},
+      moveLog: [],
       podium: [],
       raceStartedAt: 1_000,
     };
@@ -385,6 +397,7 @@ describe('race telemetry', () => {
       totalLaps: 1,
       gameMode: 'TURNS',
       diceRolls: {},
+      moveLog: [],
       podium: [],
     };
     expect(buildRaceTelemetry(state)).toBeNull();
@@ -394,6 +407,91 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('move log and replay', () => {
+  function makeState(): GameState {
+    return createInitialState([makePlayer()], 'c1');
+  }
+
+  it('starts every race with an empty move log', () => {
+    expect(makeState().moveLog).toEqual([]);
+  });
+
+  it('records moves in play order', () => {
+    const state = makeState();
+    recordMove(state, { playerId: 'a', to: { x: 1, y: 1 }, round: 0 });
+    recordMove(state, { playerId: 'a', to: { x: 2, y: 1 }, round: 1 });
+    expect(state.moveLog).toHaveLength(2);
+    expect(state.moveLog[1].to).toEqual({ x: 2, y: 1 });
+  });
+
+  it('caps the log by dropping the oldest records', () => {
+    const state = makeState();
+    for (let i = 0; i < MAX_MOVE_LOG + 5; i++) {
+      recordMove(state, { playerId: 'a', to: { x: i, y: 0 }, round: i });
+    }
+    expect(state.moveLog).toHaveLength(MAX_MOVE_LOG);
+    expect(state.moveLog[0].round).toBe(5);
+  });
+
+  it('reconstructs positions, velocities and trails from the log', () => {
+    const log: MoveRecord[] = [
+      { playerId: 'a', to: { x: 0, y: 0 }, round: 0 },
+      { playerId: 'b', to: { x: 0, y: 1 }, round: 0 },
+      { playerId: 'a', to: { x: 1, y: 0 }, round: 1 },
+      { playerId: 'b', to: { x: 2, y: 1 }, round: 1 },
+      { playerId: 'a', to: { x: 3, y: 0 }, round: 2 },
+    ];
+
+    const cars = buildReplayCars(log, log.length);
+    const a = cars.find((c) => c.playerId === 'a')!;
+    const b = cars.find((c) => c.playerId === 'b')!;
+
+    expect(a.position).toEqual({ x: 3, y: 0 });
+    expect(a.velocity).toEqual({ x: 2, y: 0 });
+    expect(a.trail).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 3, y: 0 },
+    ]);
+    expect(b.position).toEqual({ x: 2, y: 1 });
+    expect(b.velocity).toEqual({ x: 2, y: 0 });
+  });
+
+  it('replays only the first N moves when scrubbing', () => {
+    const log: MoveRecord[] = [
+      { playerId: 'a', to: { x: 0, y: 0 }, round: 0 },
+      { playerId: 'a', to: { x: 1, y: 0 }, round: 1 },
+      { playerId: 'a', to: { x: 3, y: 0 }, round: 2 },
+    ];
+    const [car] = buildReplayCars(log, 2);
+    expect(car.position).toEqual({ x: 1, y: 0 });
+    expect(car.trail).toHaveLength(2);
+  });
+
+  it('keeps a crashed car in place and kills its momentum', () => {
+    const log: MoveRecord[] = [
+      { playerId: 'a', to: { x: 0, y: 0 }, round: 0 },
+      { playerId: 'a', to: { x: 2, y: 0 }, round: 1 },
+      { playerId: 'a', to: { x: 2, y: 0 }, round: 2, crashed: true },
+    ];
+    const [car] = buildReplayCars(log, log.length);
+    expect(car.position).toEqual({ x: 2, y: 0 });
+    expect(car.velocity).toEqual({ x: 0, y: 0 });
+    // A crash leaves no new dot on the pen trail.
+    expect(car.trail).toHaveLength(2);
+  });
+
+  it('treats the first surviving record as a placement on truncated logs', () => {
+    const log: MoveRecord[] = [
+      { playerId: 'a', to: { x: 4, y: 2 }, round: 7 },
+      { playerId: 'a', to: { x: 6, y: 2 }, round: 8 },
+    ];
+    const [car] = buildReplayCars(log, log.length);
+    expect(car.trail[0]).toEqual({ x: 4, y: 2 });
+    expect(car.velocity).toEqual({ x: 2, y: 0 });
   });
 });
 

@@ -97,6 +97,8 @@ export interface GameState {
   podium: PodiumEntry[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
+  /** Every move of the race in play order — fuels the post-race replay. */
+  moveLog: MoveRecord[];
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -117,6 +119,28 @@ export interface RaceTelemetrySnapshot {
   round: number;
   elapsedMs: number;
   players: PlayerTelemetry[];
+}
+
+/**
+ * One recorded move for the post-race replay. Kept intentionally small:
+ * the log is part of GameState and rides along on every RELAY.
+ */
+export interface MoveRecord {
+  playerId: string;
+  /** Landing square (equals the previous square when the move was a crash). */
+  to: Vector2D;
+  /** Racing round the move happened in (0 = starting-grid placement). */
+  round: number;
+  /** Move ended in a collision: the car stayed put and lost all momentum. */
+  crashed?: boolean;
+}
+
+/** Reconstructed car state after applying part of the move log. */
+export interface ReplayCar {
+  playerId: string;
+  position: Vector2D;
+  velocity: Vector2D;
+  trail: Vector2D[];
 }
 
 export type ClientAction =
@@ -291,6 +315,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     gameMode: 'TURNS',
     diceRolls: {},
     podium: [],
+    moveLog: [],
   };
 }
 
@@ -500,6 +525,52 @@ export function isGameOver(state: GameState): boolean {
   if (state.podium.length >= PODIUM_SIZE) return true;
   const racing = state.players.filter((p) => p.finishOrder === undefined);
   return racing.length === 0 && state.turnOrder.length > 0;
+}
+
+/**
+ * Move log cap — bounds RELAY payload size on marathon races. When the cap
+ * is hit the oldest records fall off and the replay simply starts mid-race.
+ */
+export const MAX_MOVE_LOG = 1200;
+
+export function recordMove(state: GameState, record: MoveRecord): void {
+  if (!state.moveLog) state.moveLog = [];
+  state.moveLog.push(record);
+  if (state.moveLog.length > MAX_MOVE_LOG) {
+    state.moveLog.shift();
+  }
+}
+
+/**
+ * Reconstruct every car's position, velocity and full pen trail after the
+ * first `upTo` records of the move log. A player's first record acts as
+ * their placement (velocity 0, trail restarted), so a truncated log still
+ * replays cleanly from wherever it begins.
+ */
+export function buildReplayCars(moveLog: MoveRecord[], upTo: number): ReplayCar[] {
+  const cars = new Map<string, ReplayCar>();
+  const count = Math.max(0, Math.min(upTo, moveLog.length));
+  for (let i = 0; i < count; i++) {
+    const rec = moveLog[i];
+    const car = cars.get(rec.playerId);
+    if (!car) {
+      cars.set(rec.playerId, {
+        playerId: rec.playerId,
+        position: { ...rec.to },
+        velocity: zeroVector(),
+        trail: [{ ...rec.to }],
+      });
+      continue;
+    }
+    if (rec.crashed) {
+      car.velocity = zeroVector();
+      continue;
+    }
+    car.velocity = { x: rec.to.x - car.position.x, y: rec.to.y - car.position.y };
+    car.position = { ...rec.to };
+    car.trail.push({ ...rec.to });
+  }
+  return [...cars.values()];
 }
 
 /** Build a telemetry snapshot from the current game state. */

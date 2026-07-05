@@ -8,6 +8,7 @@ import {
   GameState,
   Player,
   Vector2D,
+  buildReplayCars,
   canPlayerMove,
   formatRaceTime,
   getTileAt,
@@ -63,6 +64,20 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   showCelebration = false;
   padOptions: PadOption[] = [];
+
+  // ------------------------------------------------------------ replay
+  showReplay = false;
+  replayPlaying = false;
+  replaySpeed: 1 | 2 | 4 = 1;
+  replayIndex = 0;
+  /** First scrubbable frame: all cars placed on the grid. */
+  replayMin = 0;
+  replayTotal = 0;
+  replayState: GameState | null = null;
+  /** Frozen final state the replay is reconstructed from. */
+  private replayBase: GameState | null = null;
+  private replayTimer: ReturnType<typeof setInterval> | null = null;
+  private static readonly REPLAY_TICK_MS = 600;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -146,6 +161,126 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.forEach((s) => s.unsubscribe());
+    this.stopReplayTimer();
+  }
+
+  /** There is a replay worth watching once at least one real move was made. */
+  hasReplay(state: GameState): boolean {
+    return (state.moveLog ?? []).some((m) => m.round > 0);
+  }
+
+  /** What the main canvas shows: the replay frame while replaying, else live state. */
+  canvasState(state: GameState): GameState {
+    return this.showReplay && this.replayState ? this.replayState : state;
+  }
+
+  startReplay(state: GameState): void {
+    const log = state.moveLog ?? [];
+    if (log.length === 0) return;
+    this.replayBase = structuredClone(state);
+    this.replayTotal = log.length;
+    const firstMove = log.findIndex((m) => m.round > 0);
+    this.replayMin = firstMove === -1 ? log.length : firstMove;
+    this.replayIndex = this.replayMin;
+    this.showReplay = true;
+    this.renderReplayFrame();
+    this.playReplay();
+  }
+
+  closeReplay(): void {
+    this.stopReplayTimer();
+    this.showReplay = false;
+    this.replayState = null;
+    this.replayBase = null;
+  }
+
+  toggleReplayPlay(): void {
+    if (this.replayPlaying) {
+      this.stopReplayTimer();
+    } else {
+      if (this.replayIndex >= this.replayTotal) {
+        this.replayIndex = this.replayMin;
+        this.renderReplayFrame();
+      }
+      this.playReplay();
+    }
+  }
+
+  restartReplay(): void {
+    this.replayIndex = this.replayMin;
+    this.renderReplayFrame();
+    this.playReplay();
+  }
+
+  cycleReplaySpeed(): void {
+    this.replaySpeed = this.replaySpeed === 1 ? 2 : this.replaySpeed === 2 ? 4 : 1;
+    if (this.replayPlaying) this.playReplay();
+  }
+
+  seekReplay(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    this.replayIndex = Math.min(this.replayTotal, Math.max(this.replayMin, value));
+    this.renderReplayFrame();
+  }
+
+  /** Racing round of the move currently on screen. */
+  replayRound(): number {
+    const log = this.replayBase?.moveLog ?? [];
+    return log[Math.min(log.length, this.replayIndex) - 1]?.round ?? 0;
+  }
+
+  private playReplay(): void {
+    this.stopReplayTimer();
+    this.replayPlaying = true;
+    this.replayTimer = setInterval(() => {
+      if (this.replayIndex >= this.replayTotal) {
+        this.stopReplayTimer();
+        return;
+      }
+      this.replayIndex++;
+      this.renderReplayFrame();
+    }, GameRoomComponent.REPLAY_TICK_MS / this.replaySpeed);
+  }
+
+  private stopReplayTimer(): void {
+    if (this.replayTimer) {
+      clearInterval(this.replayTimer);
+      this.replayTimer = null;
+    }
+    this.replayPlaying = false;
+  }
+
+  /**
+   * Rebuild the board as it looked after `replayIndex` moves and emit a new
+   * state reference so the canvas re-renders.
+   */
+  private renderReplayFrame(): void {
+    const base = this.replayBase;
+    if (!base) return;
+    const log = base.moveLog ?? [];
+    const frame = structuredClone(base);
+    frame.phase = 'GAME_OVER';
+    const cars = new Map(
+      buildReplayCars(log, this.replayIndex).map((c) => [c.playerId, c])
+    );
+    for (const player of frame.players) {
+      const car = cars.get(player.connectionId);
+      if (car) {
+        player.position = car.position;
+        player.velocity = car.velocity;
+        player.trail = car.trail;
+      } else {
+        // Not on the board yet at this point of the replay: park the car at
+        // its first known square with a clean sheet.
+        const first = log.find((m) => m.playerId === player.connectionId);
+        if (first) {
+          player.position = { ...first.to };
+          player.trail = [];
+        }
+        player.velocity = { x: 0, y: 0 };
+      }
+    }
+    this.replayState = frame;
   }
 
   currentPlayerName(): string {
@@ -164,6 +299,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   backToMenu(): void {
+    this.closeReplay();
     this.showCelebration = false;
     this.game.reset();
     this.room.reset();
