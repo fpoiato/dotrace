@@ -65,6 +65,16 @@ export interface Player {
   finishedAt?: number;
   /** Racing round when the player finished (turn-based race time). */
   finishRound?: number;
+  /**
+   * Epoch ms timestamp recorded at each lap completion (index 0 = lap 1).
+   * Length equals laps completed; grows to totalLaps when the player finishes.
+   */
+  lapTimes?: number[];
+  /**
+   * Round number recorded at each lap completion (index 0 = lap 1).
+   * Meaningful in TURNS mode; mirrors lapTimes but in round units.
+   */
+  lapRounds?: number[];
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
