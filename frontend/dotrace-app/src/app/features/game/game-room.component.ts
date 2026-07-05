@@ -223,10 +223,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.renderReplayFrame();
   }
 
-  /** Racing round of the move currently on screen. */
+  /** Racing round of the move currently on screen (grid placements count as round 1). */
   replayRound(): number {
     const log = this.replayBase?.moveLog ?? [];
-    return log[Math.min(log.length, this.replayIndex) - 1]?.round ?? 0;
+    return Math.max(1, log[Math.min(log.length, this.replayIndex) - 1]?.round ?? 1);
   }
 
   private playReplay(): void {
