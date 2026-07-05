@@ -233,75 +233,75 @@ const SILVERSTONE: CircuitSpec = {
 };
 
 /**
- * Spa-Francorchamps — clockwise: bottom start straight, Eau Rouge climb on
- * the right, Kemmel along the top, Les Combes chicane on the left, Pouhon
- * loop through the infield and Blanchimont back to the line.
+ * Spa-Francorchamps — clockwise flowing kidney: bottom start straight, La
+ * Source hairpin up the right, the Eau Rouge / Raidillon S, Kemmel along the
+ * top, a long Les Combes sweep down the left and back to the line. Drawn as a
+ * single clean ring (no self-crossing corridors).
  */
 const SPA: CircuitSpec = {
   id: 'spa',
   nameKey: 'tracks.spa',
   centerline: [
-    { x: 16, y: 32 },
-    { x: 42, y: 32 },
-    { x: 50, y: 28 },
-    { x: 52, y: 20 },
-    { x: 48, y: 12 },
-    { x: 38, y: 6 },
-    { x: 22, y: 5 },
-    { x: 10, y: 8 },
-    { x: 6, y: 14 },
-    { x: 8, y: 20 },
-    { x: 14, y: 24 },
-    { x: 22, y: 28 },
-    { x: 16, y: 32 },
+    { x: 11, y: 31 },
+    { x: 39, y: 32 },
+    { x: 47, y: 31 },
+    { x: 51, y: 26 },
+    { x: 48, y: 22 },
+    { x: 50, y: 17 },
+    { x: 49, y: 11 },
+    { x: 44, y: 6 },
+    { x: 33, y: 5 },
+    { x: 22, y: 6 },
+    { x: 14, y: 10 },
+    { x: 9, y: 16 },
+    { x: 8, y: 23 },
+    { x: 10, y: 28 },
+    { x: 11, y: 31 },
   ],
-  finish: { x0: 24, x1: 25, y0: 27, y1: 33 },
+  finish: { x0: 24, x1: 25, y0: 28, y1: 35 },
   startLine: gridSlots(27, 2, [30, 32]),
   arrows: [
-    { at: { x: 24.5, y: 26.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 24.5, y: 29.5 }, dir: { x: 1, y: 0 } },
     { at: { x: 24.5, y: 33.5 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 2, y0: 0, x1: 18, y1: 12 },
+  checkpoint: { x0: 28, y0: 2, x1: 48, y1: 9 },
 };
 
 /**
- * Suzuka — clockwise figure-eight: bottom start straight, esses climbing
- * through the left side, back straight along the top, 130R / Spoon sweep
- * on the right, crossover through the middle and back to the line.
+ * Suzuka — clockwise. The real circuit's signature is its figure-eight
+ * crossover; a fat-brush corridor can't literally cross itself without
+ * merging into a blob, so the layout evokes it with an hourglass "waist":
+ * a lower-right loop and an upper-left loop pinch toward the centre, joined by
+ * a narrow neck. Bottom start straight, the Esses climbing on the right, the
+ * top straight, and a sweeping return down the left.
  */
 const SUZUKA: CircuitSpec = {
   id: 'suzuka',
   nameKey: 'tracks.suzuka',
   centerline: [
-    { x: 12, y: 30 },
-    { x: 36, y: 30 },
-    { x: 44, y: 26 },
-    { x: 48, y: 20 },
-    { x: 46, y: 14 },
-    { x: 40, y: 9 },
-    { x: 30, y: 6 },
-    { x: 18, y: 7 },
-    { x: 10, y: 11 },
-    { x: 7, y: 17 },
-    { x: 9, y: 23 },
-    { x: 16, y: 27 },
-    { x: 24, y: 26 },
-    { x: 32, y: 22 },
-    { x: 38, y: 16 },
-    { x: 36, y: 11 },
-    { x: 28, y: 8 },
-    { x: 20, y: 10 },
-    { x: 14, y: 16 },
-    { x: 12, y: 22 },
-    { x: 12, y: 30 },
+    { x: 12, y: 31 },
+    { x: 30, y: 32 },
+    { x: 40, y: 30 },
+    { x: 47, y: 25 },
+    { x: 46, y: 18 },
+    { x: 37, y: 15 },
+    { x: 41, y: 10 },
+    { x: 40, y: 5 },
+    { x: 28, y: 4 },
+    { x: 15, y: 6 },
+    { x: 9, y: 12 },
+    { x: 15, y: 17 },
+    { x: 22, y: 21 },
+    { x: 19, y: 27 },
+    { x: 12, y: 31 },
   ],
-  finish: { x0: 22, x1: 23, y0: 27, y1: 33 },
-  startLine: gridSlots(25, 2, [29, 31]),
+  finish: { x0: 24, x1: 25, y0: 28, y1: 35 },
+  startLine: gridSlots(27, 2, [30, 32]),
   arrows: [
-    { at: { x: 22.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 22.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 24.5, y: 29.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 24.5, y: 33.5 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 38, y0: 4, x1: 52, y1: 18 },
+  checkpoint: { x0: 20, y0: 2, x1: 40, y1: 8 },
 };
 
 export const TRACKS: TrackDefinition[] = [
