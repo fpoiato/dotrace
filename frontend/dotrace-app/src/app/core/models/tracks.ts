@@ -233,75 +233,83 @@ const SILVERSTONE: CircuitSpec = {
 };
 
 /**
- * Spa-Francorchamps — clockwise: bottom start straight, Eau Rouge climb on
- * the right, Kemmel along the top, Les Combes chicane on the left, Pouhon
- * loop through the infield and Blanchimont back to the line.
+ * Spa-Francorchamps — clockwise: main straight, La Source right-hand
+ * hairpin at the far right, Eau Rouge valley then Raidillon climb, long
+ * Kemmel straight across the top, Les Combes chicane top-left, Malmedy /
+ * Rivage sweep, Pouhon left-hander, Blanchimont sweep back to the line.
  */
 const SPA: CircuitSpec = {
   id: 'spa',
   nameKey: 'tracks.spa',
   centerline: [
-    { x: 16, y: 32 },
-    { x: 42, y: 32 },
-    { x: 50, y: 28 },
-    { x: 52, y: 20 },
-    { x: 48, y: 12 },
-    { x: 38, y: 6 },
-    { x: 22, y: 5 },
-    { x: 10, y: 8 },
-    { x: 6, y: 14 },
-    { x: 8, y: 20 },
-    { x: 14, y: 24 },
-    { x: 22, y: 28 },
-    { x: 16, y: 32 },
+    { x: 16, y: 32 },  // pit exit / S/F start
+    { x: 34, y: 32 },  // main straight
+    { x: 44, y: 29 },  // braking for La Source
+    { x: 51, y: 23 },  // La Source right-hand entry
+    { x: 52, y: 16 },  // La Source apex (hairpin turn)
+    { x: 49, y: 10 },  // Eau Rouge valley
+    { x: 44, y: 5 },   // Raidillon top
+    { x: 36, y: 3 },   // Kemmel straight (right)
+    { x: 22, y: 3 },   // Kemmel straight (left)
+    { x: 12, y: 6 },   // Les Combes approach
+    { x: 7, y: 11 },   // Les Combes chicane
+    { x: 4, y: 18 },   // Malmedy / Rivage
+    { x: 5, y: 25 },   // Pouhon left-hander
+    { x: 11, y: 30 },  // Fagnes / Blanchimont
+    { x: 13, y: 31 },  // Blanchimont sweep
+    { x: 16, y: 32 },  // Bus Stop / back to start
   ],
-  finish: { x0: 24, x1: 25, y0: 27, y1: 33 },
-  startLine: gridSlots(27, 2, [30, 32]),
+  finish: { x0: 22, x1: 23, y0: 29, y1: 35 },
+  startLine: gridSlots(25, 2, [30, 32]),
   arrows: [
-    { at: { x: 24.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 24.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 22.5, y: 28.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 22.5, y: 35.4 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 2, y0: 0, x1: 18, y1: 12 },
+  checkpoint: { x0: 38, y0: 0, x1: 54, y1: 12 },
 };
 
 /**
- * Suzuka — clockwise figure-eight: bottom start straight, esses climbing
- * through the left side, back straight along the top, 130R / Spoon sweep
- * on the right, crossover through the middle and back to the line.
+ * Suzuka — clockwise figure-eight: S/F straight bottom-right, T1/T2 sweeping
+ * right, iconic esses climbing through the upper-right, Spoon/back-straight
+ * across the top, 130R sweeping left, west hairpin, figure-eight crossover
+ * back through the middle, inner Degner chicane and Dunlop hairpin, S-section
+ * returning to the line.
  */
 const SUZUKA: CircuitSpec = {
   id: 'suzuka',
   nameKey: 'tracks.suzuka',
   centerline: [
-    { x: 12, y: 30 },
-    { x: 36, y: 30 },
-    { x: 44, y: 26 },
-    { x: 48, y: 20 },
-    { x: 46, y: 14 },
-    { x: 40, y: 9 },
-    { x: 30, y: 6 },
-    { x: 18, y: 7 },
-    { x: 10, y: 11 },
-    { x: 7, y: 17 },
-    { x: 9, y: 23 },
-    { x: 16, y: 27 },
-    { x: 24, y: 26 },
-    { x: 32, y: 22 },
-    { x: 38, y: 16 },
-    { x: 36, y: 11 },
-    { x: 28, y: 8 },
-    { x: 20, y: 10 },
-    { x: 14, y: 16 },
-    { x: 12, y: 22 },
-    { x: 12, y: 30 },
+    { x: 26, y: 32 },  // start / S/F
+    { x: 40, y: 32 },  // S/F straight
+    { x: 49, y: 27 },  // T1 right turn
+    { x: 52, y: 20 },  // T2 sweeping right
+    { x: 50, y: 13 },  // esses (S1)
+    { x: 47, y: 6 },   // esses (S2) climbing
+    { x: 38, y: 3 },   // Spoon / back straight top-right
+    { x: 26, y: 2 },   // back straight top
+    { x: 15, y: 5 },   // 130R approach
+    { x: 7, y: 12 },   // 130R sweep
+    { x: 4, y: 19 },   // west hairpin
+    { x: 7, y: 26 },   // hairpin exit, heading right
+    { x: 18, y: 29 },  // approaching figure-eight crossover
+    { x: 24, y: 27 },  // figure-eight crossover
+    { x: 31, y: 22 },  // inner section right
+    { x: 37, y: 16 },  // Degner chicane entry
+    { x: 40, y: 10 },  // Degner curves
+    { x: 36, y: 5 },   // Degner exit
+    { x: 27, y: 6 },   // Dunlop hairpin
+    { x: 19, y: 12 },  // Dunlop exit
+    { x: 17, y: 20 },  // S-section return
+    { x: 21, y: 28 },  // figure-eight crossover (inner return)
+    { x: 26, y: 32 },  // back to start
   ],
-  finish: { x0: 22, x1: 23, y0: 27, y1: 33 },
-  startLine: gridSlots(25, 2, [29, 31]),
+  finish: { x0: 30, x1: 31, y0: 29, y1: 35 },
+  startLine: gridSlots(33, 2, [30, 32]),
   arrows: [
-    { at: { x: 22.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 22.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 30.5, y: 27.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 30.5, y: 35.4 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 38, y0: 4, x1: 52, y1: 18 },
+  checkpoint: { x0: 40, y0: 0, x1: 54, y1: 14 },
 };
 
 export const TRACKS: TrackDefinition[] = [
