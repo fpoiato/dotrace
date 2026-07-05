@@ -23,6 +23,7 @@ import {
   buildRaceTelemetry,
   formatRaceTime,
 } from '../../../shared/ws-types';
+import { TRACKS } from '../../../shared/tracks';
 
 function makeTrack(): TrackDefinition {
   // 6x4: all track except a grass border on the right column.
@@ -118,6 +119,41 @@ describe('valid move enumeration', () => {
     const track = makeTrack();
     const moves = getValidMoves(player, track, [player, parked]);
     expect(moves.some((m) => m.landing.x === 3 && m.landing.y === 2)).toBe(true);
+  });
+});
+
+describe('track catalog', () => {
+  it('includes all selectable circuits', () => {
+    expect(TRACKS.map((track) => track.id)).toEqual([
+      'monza',
+      'monaco',
+      'interlagos',
+      'spa',
+      'silverstone',
+      'suzuka',
+    ]);
+  });
+
+  it('has playable grid definitions', () => {
+    const ids = new Set<string>();
+
+    for (const track of TRACKS) {
+      expect(ids.has(track.id)).toBe(false);
+      ids.add(track.id);
+
+      expect(track.grid).toHaveLength(track.height);
+      expect(track.grid.every((row) => row.length === track.width)).toBe(true);
+      expect(track.grid.flat().filter((tile) => tile === 'finish').length).toBeGreaterThan(0);
+      expect(track.startLine).toHaveLength(12);
+
+      for (const slot of track.startLine) {
+        expect(slot.x).toBeGreaterThanOrEqual(0);
+        expect(slot.x).toBeLessThan(track.width);
+        expect(slot.y).toBeGreaterThanOrEqual(0);
+        expect(slot.y).toBeLessThan(track.height);
+        expect(track.grid[slot.y][slot.x]).not.toBe('grass');
+      }
+    }
   });
 });
 
