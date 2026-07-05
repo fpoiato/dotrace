@@ -19,6 +19,7 @@
   "lobby.startRace": "Start Race",
   "lobby.startPractice": "Start Practice",
   "lobby.selectTrack": "Select track",
+  "lobby.selectTrackPlaceholder": "Tap to choose a track",
   "lobby.laps": "Laps",
   "lobby.gameMode": "Game mode",
   "lobby.mode.TURNS": "Turns",
@@ -66,6 +67,7 @@
   "howto.6.body": "Go all the way around the circuit and cross the orange stripe to close a lap. Complete every lap to finish the race.",
   "common.loading": "Loading…",
   "common.error": "Something went wrong",
+  "common.close": "Close",
   "common.copied": "Copied!",
   "common.host": "Host"
 }

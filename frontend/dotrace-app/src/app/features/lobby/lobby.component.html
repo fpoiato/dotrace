@@ -16,19 +16,11 @@
     @if (room.isHost) {
       <p class="mb-4 text-sm text-orange-300">{{ 'lobby.youAreHost' | translate }}</p>
 
-      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
-      <div class="mb-6 grid grid-cols-1 gap-3">
-        @for (track of tracks; track track.id) {
-          <button
-            type="button"
-            (click)="selectTrack(track.id)"
-            class="min-h-14 rounded-xl border-2 px-4 text-left font-semibold transition"
-            [class]="selectedTrackId === track.id ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
-          >
-            {{ track.nameKey | translate }}
-          </button>
-        }
-      </div>
+      <app-track-picker
+        [tracks]="tracks"
+        [selectedTrackId]="selectedTrackId"
+        (trackSelected)="selectTrack($event)"
+      />
 
       <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.laps' | translate }}</h2>
       <div class="mb-6 grid grid-cols-3 gap-3">
