@@ -1,0 +1,43 @@
+<div class="overflow-hidden rounded-xl bg-slate-800/80">
+  <table class="w-full text-left text-xs">
+    <thead class="border-b border-slate-700 text-[0.65rem] uppercase tracking-wide text-slate-500">
+      <tr>
+        <th class="px-2 py-2 font-semibold">#</th>
+        <th class="px-2 py-2 font-semibold">{{ 'leaderboard.driver' | translate }}</th>
+        <th class="px-2 py-2 text-center font-semibold">{{ 'game.lap' | translate }}</th>
+        <th class="px-2 py-2 text-right font-semibold">{{ 'leaderboard.best' | translate }}</th>
+        <th class="px-2 py-2 text-right font-semibold">{{ 'leaderboard.last' | translate }}</th>
+        @if (!compact) {
+          <th class="px-2 py-2 text-right font-semibold">{{ 'leaderboard.total' | translate }}</th>
+        }
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-700/60">
+      @for (entry of entries; track entry.connectionId; let i = $index) {
+        <tr [ngClass]="entry.finished ? 'bg-slate-900/40' : ''">
+          <td class="px-2 py-2 text-center font-bold text-slate-300">{{ medal(entry, i) }}</td>
+          <td class="px-2 py-2">
+            <span class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full" [style.background]="entry.color"></span>
+              <span class="truncate">{{ entry.nickname }}</span>
+            </span>
+          </td>
+          <td class="px-2 py-2 text-center font-mono text-slate-400">
+            {{ entry.lap }}/{{ state.totalLaps }}
+          </td>
+          <td class="px-2 py-2 text-right font-mono text-emerald-300">
+            {{ entry.bestLapMs !== undefined ? formatLapTime(entry.bestLapMs) : '—' }}
+          </td>
+          <td class="px-2 py-2 text-right font-mono text-slate-300">
+            {{ entry.lastLapMs !== undefined ? formatLapTime(entry.lastLapMs) : '—' }}
+          </td>
+          @if (!compact) {
+            <td class="px-2 py-2 text-right font-mono text-slate-400">
+              {{ entry.finished && entry.totalMs !== undefined ? formatRaceTime(entry.totalMs) : '—' }}
+            </td>
+          }
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

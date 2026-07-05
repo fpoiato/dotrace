@@ -75,6 +75,7 @@ export class RoomService {
       isOffTrack: p.isOffTrack ?? false,
       trail: p.trail ?? [],
       lap: p.lap ?? 1,
+      lapTimes: p.lapTimes ?? [],
     };
   }
 
@@ -111,6 +112,7 @@ export class RoomService {
                   isOffTrack: false,
                   trail: [],
                   lap: 1,
+                  lapTimes: [],
                 },
               ]);
               done();
@@ -162,6 +164,7 @@ export class RoomService {
                   isOffTrack: false,
                   trail: [],
                   lap: 1,
+                  lapTimes: [],
                 },
               ]);
               done();
@@ -215,6 +218,7 @@ export class RoomService {
                 isOffTrack: false,
                 trail: [],
                 lap: 1,
+                lapTimes: [],
               };
               this.pendingSubject.next([
                 ...this.pendingSubject.value.filter((x) => x.connectionId !== p.connectionId),

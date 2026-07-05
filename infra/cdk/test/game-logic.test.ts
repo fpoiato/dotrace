@@ -22,6 +22,10 @@ import {
   segmentEntersRect,
   buildRaceTelemetry,
   formatRaceTime,
+  bestLapMs,
+  lastLapMs,
+  formatLapTime,
+  buildLeaderboard,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -394,6 +398,73 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('lap times', () => {
+  it('reports the best (fastest) completed lap', () => {
+    expect(bestLapMs({ lapTimes: [] })).toBeUndefined();
+    expect(bestLapMs({ lapTimes: [30_000, 25_500, 41_000] })).toBe(25_500);
+  });
+
+  it('reports the most recent completed lap', () => {
+    expect(lastLapMs({ lapTimes: [] })).toBeUndefined();
+    expect(lastLapMs({ lapTimes: [30_000, 25_500, 41_000] })).toBe(41_000);
+  });
+
+  it('formats short laps with tenths and long laps as m:ss.d', () => {
+    expect(formatLapTime(0)).toBe('0.0s');
+    expect(formatLapTime(12_340)).toBe('12.3s');
+    expect(formatLapTime(62_500)).toBe('1:02.5');
+  });
+});
+
+describe('leaderboard', () => {
+  function makeLeaderboardState(): GameState {
+    return {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ connectionId: 'a', nickname: 'Ana', lap: 2, lapTimes: [40_000] }),
+        makePlayer({
+          connectionId: 'b',
+          nickname: 'Bia',
+          isHost: false,
+          lap: 3,
+          lapTimes: [30_000, 28_000, 35_000],
+          finishOrder: 1,
+          finishedAt: 100_000,
+        }),
+        makePlayer({ connectionId: 'c', nickname: 'Cid', isHost: false, lap: 2, lapTimes: [38_000] }),
+      ],
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b', 'c'],
+      currentTurnIndex: 0,
+      round: 5,
+      totalLaps: 3,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [{ connectionId: 'b', nickname: 'Bia', position: 1 }],
+      raceStartedAt: 1_000,
+    };
+  }
+
+  it('ranks finishers first, then racers by laps completed and best lap', () => {
+    const board = buildLeaderboard(makeLeaderboardState(), 61_000);
+    expect(board.map((e) => e.connectionId)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('exposes best/last lap and finish total time', () => {
+    const board = buildLeaderboard(makeLeaderboardState(), 61_000);
+    const bia = board[0];
+    expect(bia.finished).toBe(true);
+    expect(bia.bestLapMs).toBe(28_000);
+    expect(bia.lastLapMs).toBe(35_000);
+    expect(bia.totalMs).toBe(99_000);
+    const cid = board[1];
+    expect(cid.finished).toBe(false);
+    expect(cid.bestLapMs).toBe(38_000);
+    expect(cid.totalMs).toBe(60_000);
   });
 });
 

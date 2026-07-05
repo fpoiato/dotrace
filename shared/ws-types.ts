@@ -57,6 +57,10 @@ export interface Player {
   trail: Vector2D[];
   /** Current lap, 1-based. */
   lap: number;
+  /** Duration (ms) of each completed lap, in lap order. */
+  lapTimes: number[];
+  /** Epoch ms when the current lap began (green flag or previous lap close). */
+  lapStartedAt?: number;
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
   diceRoll?: number;
@@ -106,6 +110,8 @@ export interface PlayerTelemetry {
   position: Vector2D;
   velocity: Vector2D;
   lap: number;
+  lapTimes: number[];
+  bestLapMs?: number;
   finishOrder?: number;
   finishRound?: number;
   finishedAt?: number;
@@ -272,6 +278,7 @@ export function createLobbyPlayer(
     isOffTrack: false,
     trail: [],
     lap: 1,
+    lapTimes: [],
   };
 }
 
@@ -520,11 +527,85 @@ export function buildRaceTelemetry(
       position: { ...p.position },
       velocity: { ...p.velocity },
       lap: p.lap,
+      lapTimes: [...(p.lapTimes ?? [])],
+      bestLapMs: bestLapMs(p),
       finishOrder: p.finishOrder,
       finishRound: p.finishRound,
       finishedAt: p.finishedAt,
     })),
   };
+}
+
+/** Fastest completed lap (ms) for a player, or undefined if none finished. */
+export function bestLapMs(player: Pick<Player, 'lapTimes'>): number | undefined {
+  const times = player.lapTimes ?? [];
+  if (times.length === 0) return undefined;
+  return Math.min(...times);
+}
+
+/** Most recently completed lap (ms) for a player, or undefined if none. */
+export function lastLapMs(player: Pick<Player, 'lapTimes'>): number | undefined {
+  const times = player.lapTimes ?? [];
+  return times.length > 0 ? times[times.length - 1] : undefined;
+}
+
+/** One row of the race leaderboard. */
+export interface LeaderboardEntry {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  /** Current lap, 1-based. */
+  lap: number;
+  /** Laps fully completed so far. */
+  lapsCompleted: number;
+  finished: boolean;
+  finishOrder?: number;
+  bestLapMs?: number;
+  lastLapMs?: number;
+  /** Total race time (ms) — final for finishers, live elapsed otherwise. */
+  totalMs?: number;
+}
+
+/**
+ * Build the race standings, ordered best-first. Finishers rank by their
+ * finish order; everyone still racing follows, sorted by laps completed
+ * (further ahead first) and then by their fastest lap.
+ */
+export function buildLeaderboard(state: GameState, now = Date.now()): LeaderboardEntry[] {
+  const started = state.raceStartedAt;
+  const entries: LeaderboardEntry[] = state.players.map((p) => {
+    const finished = p.finishOrder !== undefined;
+    const totalMs =
+      started === undefined
+        ? undefined
+        : finished && p.finishedAt !== undefined
+          ? p.finishedAt - started
+          : Math.max(0, now - started);
+    return {
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      lap: p.lap,
+      lapsCompleted: p.lapTimes?.length ?? 0,
+      finished,
+      finishOrder: p.finishOrder,
+      bestLapMs: bestLapMs(p),
+      lastLapMs: lastLapMs(p),
+      totalMs,
+    };
+  });
+
+  return entries.sort((a, b) => {
+    if (a.finished && b.finished) {
+      return (a.finishOrder ?? 0) - (b.finishOrder ?? 0);
+    }
+    if (a.finished !== b.finished) return a.finished ? -1 : 1;
+    if (b.lapsCompleted !== a.lapsCompleted) return b.lapsCompleted - a.lapsCompleted;
+    const aBest = a.bestLapMs ?? Number.POSITIVE_INFINITY;
+    const bBest = b.bestLapMs ?? Number.POSITIVE_INFINITY;
+    if (aBest !== bBest) return aBest - bBest;
+    return a.nickname.localeCompare(b.nickname);
+  });
 }
 
 /** Format elapsed race time as m:ss. */
@@ -533,4 +614,20 @@ export function formatRaceTime(elapsedMs: number): string {
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Format a lap time with tenth-of-a-second precision. Short laps read as
+ * "12.3s"; laps over a minute read as "1:02.3".
+ */
+export function formatLapTime(ms: number): string {
+  const totalMs = Math.max(0, Math.round(ms));
+  const totalSec = Math.floor(totalMs / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  const tenths = Math.floor((totalMs % 1000) / 100);
+  if (min > 0) {
+    return `${min}:${sec.toString().padStart(2, '0')}.${tenths}`;
+  }
+  return `${sec}.${tenths}s`;
 }
