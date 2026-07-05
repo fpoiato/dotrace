@@ -27,15 +27,22 @@ resource "aws_iam_role_policy" "github_actions" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action = [
-        "codepipeline:StartPipelineExecution",
-        "codepipeline:GetPipeline",
-        "codepipeline:GetPipelineState",
-        "codepipeline:GetPipelineExecution",
-      ]
-      Resource = aws_codepipeline.dotrace.arn
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "codepipeline:StartPipelineExecution",
+          "codepipeline:GetPipeline",
+          "codepipeline:GetPipelineState",
+          "codepipeline:GetPipelineExecution",
+        ]
+        Resource = aws_codepipeline.dotrace.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.pipeline_artifacts.arn}/source/*"
+      },
+    ]
   })
 }
