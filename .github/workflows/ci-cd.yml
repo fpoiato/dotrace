@@ -15,10 +15,6 @@ env:
   AWS_REGION: us-east-1
   PIPELINE_NAME: dotrace-game-pipeline
 
-concurrency:
-  group: deploy-main
-  cancel-in-progress: false
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -52,6 +48,9 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-main
+      cancel-in-progress: false
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -87,6 +86,16 @@ jobs:
                 | .stageName][0] // empty')
             if [ -n "$FAILED_STAGE" ]; then
               echo "Deployment failed in stage: $FAILED_STAGE"
+              echo "Action details for failed stage:"
+              echo "$STATE" | jq -r --arg stage "$FAILED_STAGE" '
+                .stageStates[]
+                | select(.stageName == $stage)
+                | .actionStates[]
+                | "  action=\(.actionName)"
+                  + " status=\(.latestExecution.status // "n/a")"
+                  + (if .latestExecution.errorDetails
+                     then " error=[\(.latestExecution.errorDetails.code // "?")] \(.latestExecution.errorDetails.message // "?")"
+                     else "" end)'
               exit 1
             fi
 
