@@ -219,7 +219,8 @@ export interface SelectTrackAction {
 export type PlayerGameAction = SubmitMoveAction | SelectTrackAction;
 
 export const MAX_PLAYERS = 12;
-export const MIN_PLAYERS = 2;
+// A lone host may start a race as solo practice mode.
+export const MIN_PLAYERS = 1;
 export const LAP_OPTIONS = [1, 2, 3] as const;
 export const ROOM_CODE_LENGTH = 5;
 export const PODIUM_SIZE = 3;

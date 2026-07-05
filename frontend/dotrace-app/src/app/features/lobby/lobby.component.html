@@ -120,16 +120,16 @@
     }
 
     @if (room.isHost) {
-      @if (((players$ | async)?.length ?? 0) < minPlayers) {
-        <p class="mb-2 text-center text-sm text-amber-400">{{ 'lobby.minPlayers' | translate }}</p>
+      @if (((players$ | async)?.length ?? 0) <= 1) {
+        <p class="mb-2 text-center text-sm text-sky-400">{{ 'lobby.practiceHint' | translate }}</p>
       }
       <button
         type="button"
         (click)="startRace()"
-        [disabled]="!selectedTrackId || (((players$ | async)?.length ?? 0) < minPlayers)"
+        [disabled]="!selectedTrackId"
         class="min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
       >
-        {{ 'lobby.startRace' | translate }}
+        {{ (((players$ | async)?.length ?? 0) <= 1 ? 'lobby.startPractice' : 'lobby.startRace') | translate }}
       </button>
     }
   </div>
