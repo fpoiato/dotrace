@@ -13,7 +13,7 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
 | `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
 | `pipeline/` | CodeBuild buildspec |
-| `.github/workflows/` | CI + OIDC pipeline trigger |
+| `.github/workflows/` | CI/CD on push to `main` (`ci-cd.yml`) |
 
 ## Prerequisites
 
