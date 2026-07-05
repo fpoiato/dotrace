@@ -298,7 +298,7 @@ const SUZUKA: CircuitSpec = {
     { x: 44, y: 27 },
   ],
   finish: { x0: 36, x1: 37, y0: 24, y1: 31 },
-  startLine: gridSlots(34, -2, [27, 29]),
+  startLine: gridSlots(34, -2, [27, 28]),
   arrows: [
     { at: { x: 36.5, y: 22.5 }, dir: { x: -1, y: 0 } },
     { at: { x: 36.5, y: 32.5 }, dir: { x: -1, y: 0 } },
