@@ -37,6 +37,13 @@ interface ScoredMove {
 
 const UNREACHABLE = Number.POSITIVE_INFINITY;
 
+/**
+ * Cost of one grass step in the distance field. Much larger than a track
+ * step (1) so the field never routes through grass by choice, but finite so
+ * an off-track car always has a gradient back to the racing surface.
+ */
+const GRASS_STEP_COST = 50;
+
 export class BotBrain {
   /** Distance fields keyed by `${trackId}:${goal}` — BFS is computed once per goal. */
   private readonly fieldCache = new Map<string, number[][]>();
@@ -118,7 +125,7 @@ export class BotBrain {
     field: number[][]
   ): number {
     let score = field[landing.y]?.[landing.x] ?? UNREACHABLE;
-    if (score === UNREACHABLE) score = 10_000; // reachable grid but off the racing surface
+    if (score === UNREACHABLE) score = 100_000; // isolated cell with no path to the goal
 
     // Gravel trap costs a full stop next turn — strongly discourage it.
     if (landsOnGrass) score += 500;
@@ -146,10 +153,11 @@ export class BotBrain {
   }
 
   /**
-   * BFS over drivable cells (track + finish) from the goal outward, so each
-   * cell holds its step-distance to the goal. Goal is the far-side checkpoint
-   * until the car has passed it, then the finish stripe — matching the lap
-   * validity gate enforced by the host.
+   * Weighted flood fill from the goal outward, so each cell holds its cost
+   * to reach the goal. Track/finish cells cost 1 per step; grass cells cost
+   * GRASS_STEP_COST, giving a car stranded off-track a gradient back to the
+   * racing surface. Goal is the far-side checkpoint until the car has passed
+   * it, then the finish stripe — matching the lap gate enforced by the host.
    */
   private distanceField(track: TrackDefinition, passedCheckpoint: boolean): number[][] {
     const goal = passedCheckpoint || !track.checkpoint ? 'finish' : 'checkpoint';
@@ -181,7 +189,8 @@ export class BotBrain {
       }
     }
 
-    // 8-connected flood fill: cars move diagonally, so distance is Chebyshev-ish.
+    // 8-connected SPFA relaxation: cars move diagonally, so distance is
+    // Chebyshev-ish; cells may be re-queued when a cheaper path is found.
     for (let head = 0; head < queue.length; head++) {
       const { x, y } = queue[head];
       const d = field[y][x];
@@ -189,9 +198,9 @@ export class BotBrain {
         for (let nx = x - 1; nx <= x + 1; nx++) {
           if (nx === x && ny === y) continue;
           if (nx < 0 || nx >= track.width || ny < 0 || ny >= track.height) continue;
-          if (track.grid[ny][nx] === 'grass') continue;
-          if (field[ny][nx] <= d + 1) continue;
-          field[ny][nx] = d + 1;
+          const stepCost = track.grid[ny][nx] === 'grass' ? GRASS_STEP_COST : 1;
+          if (field[ny][nx] <= d + stepCost) continue;
+          field[ny][nx] = d + stepCost;
           queue.push({ x: nx, y: ny });
         }
       }
