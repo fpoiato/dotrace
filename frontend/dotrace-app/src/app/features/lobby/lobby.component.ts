@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode, MIN_PLAYERS } from '../../core/models/ws-types';
+import { GAME_MODES, GameMode } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -26,7 +26,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly players$ = this.room.players$;
   readonly pending$ = this.room.pending$;
   readonly tracks = TRACKS;
-  readonly minPlayers = MIN_PLAYERS;
 
   selectedTrackId = '';
   selectedLaps = 1;

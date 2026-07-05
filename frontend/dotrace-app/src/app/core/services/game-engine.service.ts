@@ -125,13 +125,16 @@ export class GameEngineService implements OnDestroy {
 
     const track = getTrackById(trackId)!;
 
-    if (isTimedMode(state)) {
+    // Timed races and solo practice skip grid qualifying: there is no
+    // starting order to decide, so the race begins immediately.
+    if (isTimedMode(state) || state.players.length === 1) {
       const sorted = [...state.players].sort((a, b) => a.joinOrder - b.joinOrder);
       this.placePlayersOnStartLine(state, track, sorted);
       state.turnOrder = sorted.map((p) => p.connectionId);
       state.currentTurnIndex = 0;
       state.round = 1;
       state.phase = 'GAME_ROUND';
+      state.raceStartedAt = Date.now();
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
