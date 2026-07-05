@@ -22,7 +22,8 @@ import {
   pushTrail,
   rollDice,
   segmentCrossesFinish,
-  segmentEntersRect,
+  advanceCheckpoints,
+  allCheckpointsPassed,
   zeroVector,
   buildRaceTelemetry,
 } from '../models/ws-types';
@@ -203,7 +204,7 @@ export class GameEngineService implements OnDestroy {
       player.position = { ...start };
       player.velocity = zeroVector();
       player.isOffTrack = false;
-      player.passedCheckpoint = false;
+      player.checkpointsPassed = 0;
       player.trail = [{ ...start }];
       player.lap = 1;
     });
@@ -255,20 +256,25 @@ export class GameEngineService implements OnDestroy {
       player.isOffTrack = false;
     }
 
-    if (track.checkpoint && !player.passedCheckpoint) {
-      player.passedCheckpoint = segmentEntersRect(from, landing, track.checkpoint);
-    }
+    player.checkpointsPassed = advanceCheckpoints(
+      track,
+      player.checkpointsPassed ?? 0,
+      from,
+      landing
+    );
 
     // Crossing the stripe (even flying over it) closes the lap — but only
-    // after the far-side checkpoint, so the line can't be gamed on turn one.
+    // after every gate has been taken in order, so the line can't be gamed
+    // on turn one and maze walls can't be cut.
     const crossedFinish =
-      player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
+      allCheckpointsPassed(track, player.checkpointsPassed) &&
+      segmentCrossesFinish(track, from, landing);
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
       if (player.lap < state.totalLaps) {
-        // Lap done, more to go: rearm the checkpoint and erase the pen trail
+        // Lap done, more to go: rearm the gates and erase the pen trail
         // so the sheet stays readable on the next tour.
         player.lap += 1;
-        player.passedCheckpoint = false;
+        player.checkpointsPassed = 0;
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
@@ -497,7 +503,7 @@ export class GameEngineService implements OnDestroy {
       merged.isOffTrack = state.players[idx].isOffTrack;
       merged.trail = state.players[idx].trail ?? [];
       merged.lap = state.players[idx].lap ?? 1;
-      merged.passedCheckpoint = state.players[idx].passedCheckpoint;
+      merged.checkpointsPassed = state.players[idx].checkpointsPassed;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;
       merged.finishRound = state.players[idx].finishRound;

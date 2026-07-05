@@ -77,6 +77,17 @@ export class MiniMapComponent implements OnChanges {
         }
       }
     }
+    for (const gate of track.checkpoints ?? []) {
+      if (!gate.color) continue;
+      ctx.fillStyle = gate.color;
+      for (let y = Math.max(0, gate.y0); y <= Math.min(track.height - 1, gate.y1); y++) {
+        for (let x = Math.max(0, gate.x0); x <= Math.min(track.width - 1, gate.x1); x++) {
+          if (track.grid[y][x] === 'track') {
+            ctx.fillRect(x * s, y * s, s, s);
+          }
+        }
+      }
+    }
   }
 
   private drawTrails(ctx: CanvasRenderingContext2D, state: GameState, s: number): void {

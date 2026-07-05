@@ -19,6 +19,8 @@ export interface CheckpointRect {
   y0: number;
   x1: number;
   y1: number;
+  /** When set, the gate is painted on the track as a colored stripe. */
+  color?: string;
 }
 
 export interface TrackArrow {
@@ -36,11 +38,11 @@ export interface TrackDefinition {
   /** Race-direction arrows drawn next to the start stripe. */
   arrows: TrackArrow[];
   /**
-   * Zone (usually the far side of the circuit) a car must have visited before
-   * landing on the finish stripe counts as completing the lap. Prevents
-   * "finishing" by reversing over the line on turn one.
+   * Ordered gates a car must pass (in sequence) before crossing the finish
+   * stripe counts as completing the lap. Prevents "finishing" by reversing
+   * over the line on turn one and blocks wall-cut shortcuts on maze layouts.
    */
-  checkpoint?: CheckpointRect;
+  checkpoints?: CheckpointRect[];
 }
 
 export interface Player {
@@ -57,8 +59,8 @@ export interface Player {
   trail: Vector2D[];
   /** Current lap, 1-based. */
   lap: number;
-  /** Set once the car has passed the far-side checkpoint (lap validity gate). */
-  passedCheckpoint?: boolean;
+  /** How many of the track's ordered checkpoint gates the car has passed this lap. */
+  checkpointsPassed?: number;
   diceRoll?: number;
   finishOrder?: number;
   /** Wall-clock finish time (epoch ms). Set when the player completes the race. */
@@ -428,6 +430,30 @@ export function segmentEntersRect(
     if (x >= rect.x0 && x <= rect.x1 && y >= rect.y0 && y <= rect.y1) return true;
   }
   return false;
+}
+
+/**
+ * Advance a car's checkpoint progress after a move. Gates must be taken in
+ * order; a single fast move may sweep several consecutive gates at once.
+ * Returns the updated count of gates passed this lap.
+ */
+export function advanceCheckpoints(
+  track: TrackDefinition,
+  passed: number,
+  from: Vector2D,
+  to: Vector2D
+): number {
+  const gates = track.checkpoints ?? [];
+  let count = Math.max(0, passed);
+  while (count < gates.length && segmentEntersRect(from, to, gates[count])) {
+    count++;
+  }
+  return count;
+}
+
+/** Whether the car has collected every gate required to validate the lap. */
+export function allCheckpointsPassed(track: TrackDefinition, passed: number): boolean {
+  return passed >= (track.checkpoints?.length ?? 0);
 }
 
 /** Trail history cap — bounds RELAY payload size on long races. */

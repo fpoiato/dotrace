@@ -518,6 +518,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.drawPaper(ctx, track);
     this.drawGrass(ctx, track);
     this.drawFinishStripe(ctx, track);
+    this.drawCheckpointGates(ctx, track);
     this.drawInkBoundaries(ctx, track);
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
@@ -561,6 +562,24 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       for (let x = 0; x < track.width; x++) {
         if (track.grid[y][x] === 'finish') {
           ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+        }
+      }
+    }
+  }
+
+  /** Colored dotted stripes across the corridor: the ordered lap gates. */
+  private drawCheckpointGates(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+    for (const gate of track.checkpoints ?? []) {
+      if (!gate.color) continue;
+      for (let y = Math.max(0, gate.y0); y <= Math.min(track.height - 1, gate.y1); y++) {
+        for (let x = Math.max(0, gate.x0); x <= Math.min(track.width - 1, gate.x1); x++) {
+          if (track.grid[y][x] !== 'track') continue;
+          ctx.fillStyle = gate.color;
+          ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(x * CELL + CELL / 2, y * CELL + CELL / 2, CELL / 6, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
     }

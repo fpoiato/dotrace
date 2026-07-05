@@ -1,9 +1,11 @@
-import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
+import { CheckpointRect, TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
 
 /**
  * Circuits are rasterized from a centerline polyline stamped with a round
- * brush, mimicking a marker pen on grid paper. Layouts approximate the
- * classic outlines of Monza, Monaco, Interlagos, Silverstone, Spa and Suzuka.
+ * brush, mimicking a marker pen on grid paper. Monza, Monaco, Interlagos and
+ * Silverstone approximate the classic outlines; Spa-Francorchamps is a
+ * stylized rendition of the real lap, and Suzuka is a Vector-Racer style
+ * maze whose colored gates must be swept in order.
  */
 
 const GRID_W = 56;
@@ -66,6 +68,16 @@ function gridSlots(firstCol: number, colStep: number, rows: [number, number]): V
   return slots;
 }
 
+/** Twelve staggered grid slots for a vertical start straight. */
+function gridSlotsVertical(firstRow: number, rowStep: number, cols: [number, number]): Vector2D[] {
+  const slots: Vector2D[] = [];
+  for (let i = 0; i < 6; i++) {
+    const y = firstRow + i * rowStep;
+    slots.push({ x: cols[0], y }, { x: cols[1], y });
+  }
+  return slots;
+}
+
 interface CircuitSpec {
   id: string;
   nameKey: string;
@@ -73,7 +85,7 @@ interface CircuitSpec {
   finish: { x0: number; x1: number; y0: number; y1: number };
   startLine: Vector2D[];
   arrows: TrackArrow[];
-  checkpoint: { x0: number; y0: number; x1: number; y1: number };
+  checkpoints: CheckpointRect[];
 }
 
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
@@ -88,7 +100,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     grid,
     startLine: spec.startLine,
     arrows: spec.arrows,
-    checkpoint: spec.checkpoint,
+    checkpoints: spec.checkpoints,
   };
 }
 
@@ -121,7 +133,7 @@ const MONZA: CircuitSpec = {
     { at: { x: 28.5, y: 27.5 }, dir: { x: 1, y: 0 } },
     { at: { x: 28.5, y: 35.4 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 3, y0: 1, x1: 20, y1: 12 },
+  checkpoints: [{ x0: 3, y0: 1, x1: 20, y1: 12 }],
 };
 
 /**
@@ -157,7 +169,7 @@ const MONACO: CircuitSpec = {
     { at: { x: 30.5, y: 15.5 }, dir: { x: -1, y: 0 } },
     { at: { x: 30.5, y: 26.5 }, dir: { x: -1, y: 0 } },
   ],
-  checkpoint: { x0: 42, y0: 4, x1: 54, y1: 18 },
+  checkpoints: [{ x0: 42, y0: 4, x1: 54, y1: 18 }],
 };
 
 /**
@@ -197,7 +209,7 @@ const INTERLAGOS: CircuitSpec = {
     { at: { x: 30.5, y: 1.2 }, dir: { x: -1, y: 0 } },
     { at: { x: 30.5, y: 10.5 }, dir: { x: -1, y: 0 } },
   ],
-  checkpoint: { x0: 44, y0: 12, x1: 54, y1: 28 },
+  checkpoints: [{ x0: 44, y0: 12, x1: 54, y1: 28 }],
 };
 
 /**
@@ -229,79 +241,122 @@ const SILVERSTONE: CircuitSpec = {
     { at: { x: 26.5, y: 26.5 }, dir: { x: 1, y: 0 } },
     { at: { x: 26.5, y: 33.5 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 12, y0: 0, x1: 42, y1: 10 },
+  checkpoints: [{ x0: 12, y0: 0, x1: 42, y1: 10 }],
 };
 
 /**
- * Spa-Francorchamps — clockwise: bottom start straight, Eau Rouge climb on
- * the right, Kemmel along the top, Les Combes chicane on the left, Pouhon
- * loop through the infield and Blanchimont back to the line.
+ * Spa-Francorchamps — clockwise. Vertical start straight on the left heading
+ * north into La Source, the Eau Rouge dip, the long Kemmel straight across
+ * the top, Les Combes chicane at the top-right, Rivage bulge down the right
+ * flank, the Pouhon double-left sweeping to the bottom, Fagnes / Stavelot
+ * wiggles and the Bus Stop kink back onto the line. Three colored gates
+ * (Kemmel, Rivage, Stavelot) must be taken in order to validate the lap.
  */
 const SPA: CircuitSpec = {
   id: 'spa',
   nameKey: 'tracks.spa',
   centerline: [
-    { x: 16, y: 32 },
-    { x: 42, y: 32 },
-    { x: 50, y: 28 },
-    { x: 52, y: 20 },
-    { x: 48, y: 12 },
-    { x: 38, y: 6 },
-    { x: 22, y: 5 },
-    { x: 10, y: 8 },
-    { x: 6, y: 14 },
-    { x: 8, y: 20 },
-    { x: 14, y: 24 },
-    { x: 22, y: 28 },
-    { x: 16, y: 32 },
+    { x: 6, y: 26 },
+    { x: 6, y: 8 },
+    { x: 7.5, y: 4.5 }, // La Source
+    { x: 11, y: 4 },
+    { x: 14.5, y: 7 }, // Eau Rouge dip
+    { x: 18, y: 4 }, // Raidillon crest
+    { x: 40, y: 4 }, // Kemmel straight
+    { x: 44.5, y: 4.5 }, // Les Combes right-left
+    { x: 42, y: 9.5 },
+    { x: 47, y: 12 }, // Malmedy
+    { x: 50.5, y: 15.5 }, // Rivage
+    { x: 50.5, y: 19 },
+    { x: 47, y: 23.5 }, // Pouhon double left
+    { x: 41.5, y: 28 },
+    { x: 36.5, y: 29.5 },
+    { x: 32, y: 25.5 }, // Fagnes right-left
+    { x: 27.5, y: 29.5 },
+    { x: 22, y: 30.5 }, // Stavelot
+    { x: 16.5, y: 30.5 },
+    { x: 13, y: 31 }, // Bus Stop left-right
+    { x: 10.5, y: 27.5 },
+    { x: 6, y: 26 },
   ],
-  finish: { x0: 24, x1: 25, y0: 27, y1: 33 },
-  startLine: gridSlots(27, 2, [30, 32]),
+  finish: { x0: 4, x1: 8, y0: 20, y1: 21 },
+  startLine: gridSlotsVertical(18, -2, [5, 7]),
   arrows: [
-    { at: { x: 24.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 24.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 3.2, y: 20.5 }, dir: { x: 0, y: -1 } },
+    { at: { x: 9.8, y: 20.5 }, dir: { x: 0, y: -1 } },
   ],
-  checkpoint: { x0: 2, y0: 0, x1: 18, y1: 12 },
+  checkpoints: [
+    { x0: 28, y0: 1, x1: 28, y1: 7, color: '#ef4444' }, // Kemmel
+    { x0: 46, y0: 19, x1: 54, y1: 19, color: '#f59e0b' }, // Rivage exit
+    { x0: 20, y0: 27, x1: 20, y1: 34, color: '#22c55e' }, // Stavelot
+  ],
 };
 
 /**
- * Suzuka — clockwise figure-eight: bottom start straight, esses climbing
- * through the left side, back straight along the top, 130R / Spoon sweep
- * on the right, crossover through the middle and back to the line.
+ * Suzuka — reimagined as a Vector-Racer style maze on grid paper: the start
+ * straight runs westward along the top, then the corridor snakes through six
+ * vertical alleys (two of them with esses) separated by thin walls, climbs
+ * the right edge and returns along the top to the line. Six colored gates —
+ * one per alley — must be swept in order, so cutting a wall never pays off.
  */
 const SUZUKA: CircuitSpec = {
   id: 'suzuka',
   nameKey: 'tracks.suzuka',
   centerline: [
-    { x: 12, y: 30 },
-    { x: 36, y: 30 },
-    { x: 44, y: 26 },
-    { x: 48, y: 20 },
-    { x: 46, y: 14 },
-    { x: 40, y: 9 },
-    { x: 30, y: 6 },
-    { x: 18, y: 7 },
-    { x: 10, y: 11 },
-    { x: 7, y: 17 },
-    { x: 9, y: 23 },
-    { x: 16, y: 27 },
-    { x: 24, y: 26 },
-    { x: 32, y: 22 },
-    { x: 38, y: 16 },
-    { x: 36, y: 11 },
-    { x: 28, y: 8 },
-    { x: 20, y: 10 },
-    { x: 14, y: 16 },
-    { x: 12, y: 22 },
-    { x: 12, y: 30 },
+    { x: 26, y: 4 }, // stripe on the top straight, heading west
+    { x: 10, y: 4 },
+    { x: 5.5, y: 5.5 }, // top-left corner
+    { x: 4, y: 9 },
+    { x: 4, y: 26 }, // alley 1 down
+    { x: 5, y: 29 }, // bottom U-turn
+    { x: 8.5, y: 30 },
+    { x: 12, y: 29 },
+    { x: 13, y: 26 },
+    { x: 13, y: 16 }, // alley 2 up
+    { x: 14, y: 13 }, // top U-turn
+    { x: 17.5, y: 12 },
+    { x: 21, y: 13 },
+    { x: 22, y: 16 },
+    { x: 20.5, y: 20 }, // alley 3: esses down
+    { x: 23.5, y: 24 },
+    { x: 22, y: 27 },
+    { x: 23, y: 29.5 }, // bottom U-turn
+    { x: 26.5, y: 30 },
+    { x: 30, y: 29 },
+    { x: 31, y: 26 },
+    { x: 31, y: 16 }, // alley 4 up
+    { x: 32, y: 13 }, // top U-turn
+    { x: 35.5, y: 12 },
+    { x: 39, y: 13 },
+    { x: 40, y: 16 },
+    { x: 41.5, y: 20 }, // alley 5: esses down
+    { x: 38.5, y: 24 },
+    { x: 40, y: 27 },
+    { x: 41, y: 29.5 }, // bottom U-turn
+    { x: 44.5, y: 30 },
+    { x: 48, y: 29 },
+    { x: 49, y: 26 },
+    { x: 49, y: 8 }, // alley 6: right edge all the way up
+    { x: 47.5, y: 5 }, // top-right corner
+    { x: 44, y: 4 },
+    { x: 26, y: 4 }, // back west along the top straight
   ],
-  finish: { x0: 22, x1: 23, y0: 27, y1: 33 },
-  startLine: gridSlots(25, 2, [29, 31]),
+  finish: { x0: 26, x1: 27, y0: 2, y1: 6 },
+  startLine: gridSlots(24, -2, [3, 5]),
   arrows: [
-    { at: { x: 22.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 22.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 26.5, y: 1.1 }, dir: { x: -1, y: 0 } },
+    { at: { x: 26.5, y: 7.6 }, dir: { x: -1, y: 0 } },
   ],
-  checkpoint: { x0: 38, y0: 4, x1: 52, y1: 18 },
+  // Each gate sits at the ENTRY of its alley (relative to race direction),
+  // so cutting a wall always lands you past the gate and forces a backtrack.
+  checkpoints: [
+    { x0: 2, y0: 13, x1: 6, y1: 13, color: '#ef4444' }, // alley 1 (downhill)
+    { x0: 11, y0: 24, x1: 15, y1: 24, color: '#ec4899' }, // alley 2 (uphill)
+    { x0: 19, y0: 16, x1: 26, y1: 16, color: '#a855f7' }, // alley 3 (downhill)
+    { x0: 29, y0: 24, x1: 33, y1: 24, color: '#f59e0b' }, // alley 4 (uphill)
+    { x0: 37, y0: 16, x1: 44, y1: 16, color: '#84cc16' }, // alley 5 (downhill)
+    { x0: 47, y0: 24, x1: 51, y1: 24, color: '#0ea5e9' }, // alley 6 (uphill)
+  ],
 };
 
 export const TRACKS: TrackDefinition[] = [

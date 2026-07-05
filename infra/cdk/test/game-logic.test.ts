@@ -20,9 +20,13 @@ import {
   segmentCrossesCell,
   segmentCrossesFinish,
   segmentEntersRect,
+  advanceCheckpoints,
+  allCheckpointsPassed,
   buildRaceTelemetry,
   formatRaceTime,
+  getTileAt,
 } from '../../../shared/ws-types';
+import { TRACKS } from '../../../shared/tracks';
 
 function makeTrack(): TrackDefinition {
   // 6x4: all track except a grass border on the right column.
@@ -332,6 +336,92 @@ describe('finish line crossing', () => {
     const rect = { x0: 2, y0: 0, x1: 2, y1: 3 };
     expect(segmentEntersRect({ x: 0, y: 1 }, { x: 4, y: 1 }, rect)).toBe(true);
     expect(segmentEntersRect({ x: 0, y: 0 }, { x: 1, y: 3 }, rect)).toBe(false);
+  });
+});
+
+describe('ordered checkpoint gates', () => {
+  function gatedTrack(): TrackDefinition {
+    const t = makeTrack();
+    t.checkpoints = [
+      { x0: 1, y0: 0, x1: 1, y1: 3 },
+      { x0: 3, y0: 0, x1: 3, y1: 3 },
+    ];
+    return t;
+  }
+
+  it('advances only through the next gate in sequence', () => {
+    const track = gatedTrack();
+    // Crossing gate 2 first does not count.
+    expect(advanceCheckpoints(track, 0, { x: 2, y: 1 }, { x: 4, y: 1 })).toBe(0);
+    // Crossing gate 1 counts.
+    expect(advanceCheckpoints(track, 0, { x: 0, y: 1 }, { x: 2, y: 1 })).toBe(1);
+    // Then gate 2 counts.
+    expect(advanceCheckpoints(track, 1, { x: 2, y: 1 }, { x: 4, y: 1 })).toBe(2);
+  });
+
+  it('sweeps several consecutive gates in one fast move', () => {
+    const track = gatedTrack();
+    expect(advanceCheckpoints(track, 0, { x: 0, y: 1 }, { x: 4, y: 1 })).toBe(2);
+  });
+
+  it('validates the lap only after every gate', () => {
+    const track = gatedTrack();
+    expect(allCheckpointsPassed(track, 0)).toBe(false);
+    expect(allCheckpointsPassed(track, 1)).toBe(false);
+    expect(allCheckpointsPassed(track, 2)).toBe(true);
+  });
+
+  it('treats tracks without gates as always validated', () => {
+    expect(allCheckpointsPassed(makeTrack(), 0)).toBe(true);
+  });
+});
+
+describe('shipped track integrity', () => {
+  it.each(TRACKS.map((t) => [t.id, t] as const))('%s is well-formed', (_id, track) => {
+    // Twelve start slots, all on drivable asphalt.
+    expect(track.startLine).toHaveLength(12);
+    for (const slot of track.startLine) {
+      expect(['track', 'finish']).toContain(getTileAt(track, slot.x, slot.y));
+    }
+
+    // A finish stripe exists.
+    const finishTiles = track.grid.flat().filter((t) => t === 'finish').length;
+    expect(finishTiles).toBeGreaterThan(0);
+
+    // Every checkpoint gate spans at least one drivable cell.
+    for (const gate of track.checkpoints ?? []) {
+      let road = 0;
+      for (let y = gate.y0; y <= gate.y1; y++) {
+        for (let x = gate.x0; x <= gate.x1; x++) {
+          const tile = getTileAt(track, x, y);
+          if (tile === 'track' || tile === 'finish') road++;
+        }
+      }
+      expect(road).toBeGreaterThan(0);
+    }
+
+    // The whole ribbon is one connected corridor.
+    const isRoad = (x: number, y: number): boolean => {
+      const t = getTileAt(track, x, y);
+      return t === 'track' || t === 'finish';
+    };
+    const seen = new Set<string>();
+    const start = track.startLine[0];
+    const queue = [[start.x, start.y]];
+    seen.add(`${start.x},${start.y}`);
+    while (queue.length) {
+      const [x, y] = queue.pop()!;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (isRoad(nx, ny) && !seen.has(`${nx},${ny}`)) {
+          seen.add(`${nx},${ny}`);
+          queue.push([nx, ny]);
+        }
+      }
+    }
+    const roadTotal = track.grid.flat().filter((t) => t !== 'grass').length;
+    expect(seen.size).toBe(roadTotal);
   });
 });
 
