@@ -9,11 +9,12 @@ import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { HowToPlayComponent } from '../../shared/how-to-play.component';
+import { TrackPickerComponent } from '../../shared/track-picker.component';
 
 @Component({
   selector: 'app-lobby',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, HowToPlayComponent],
+  imports: [AsyncPipe, TranslateModule, HowToPlayComponent, TrackPickerComponent],
   templateUrl: './lobby.component.html',
 })
 export class LobbyComponent implements OnInit, OnDestroy {

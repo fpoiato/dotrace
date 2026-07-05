@@ -18,6 +18,7 @@
   "lobby.reject": "Recusar",
   "lobby.startRace": "Iniciar Corrida",
   "lobby.selectTrack": "Escolher pista",
+  "lobby.selectTrackPlaceholder": "Toque para escolher uma pista",
   "lobby.laps": "Voltas",
   "lobby.gameMode": "Modo de jogo",
   "lobby.mode.TURNS": "Turnos",
@@ -65,6 +66,7 @@
   "howto.6.body": "Dê a volta completa no circuito e cruze a faixa laranja para fechar a volta. Complete todas as voltas para terminar a corrida.",
   "common.loading": "Carregando…",
   "common.error": "Algo deu errado",
+  "common.close": "Fechar",
   "common.copied": "Copiado!",
   "common.host": "Host"
 }
