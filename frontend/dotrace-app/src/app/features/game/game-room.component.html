@@ -115,41 +115,14 @@
     }
 
     @if (state.phase === 'GAME_OVER' || showCelebration) {
-      <div class="celebrate mt-6 rounded-2xl bg-gradient-to-br from-orange-600 to-yellow-500 p-6 text-center shadow-lg">
-        <h2 class="text-2xl font-black text-white">{{ 'game.raceOver' | translate }} 🏁</h2>
-        @if (state.gameMode === 'TIMED' && state.podium.length === 1) {
-          <p class="mt-2 text-lg font-bold text-white">
-            🏆 {{ state.podium[0].nickname }}
-            @if (finishTime(state, state.podium[0].connectionId); as time) {
-              <span class="ml-2 text-sm font-normal text-white/70">⏱ {{ time }}</span>
-            }
-          </p>
-        } @else {
-          <h3 class="mt-4 text-lg font-semibold text-white/90">{{ 'game.podium' | translate }}</h3>
-          <ol class="mt-3 space-y-2">
-            @for (entry of state.podium; track entry.connectionId) {
-              <li class="rounded-xl bg-black/20 px-4 py-3 text-lg font-bold text-white">
-                @switch (entry.position) {
-                  @case (1) { 🥇 }
-                  @case (2) { 🥈 }
-                  @case (3) { 🥉 }
-                }
-                {{ entry.nickname }}
-                @if (finishTime(state, entry.connectionId); as time) {
-                  <span class="ml-2 text-sm font-normal text-white/70">⏱ {{ time }}</span>
-                }
-              </li>
-            }
-          </ol>
-        }
-        <button
-          type="button"
-          (click)="backToMenu()"
-          class="mt-6 min-h-14 w-full rounded-xl bg-slate-900 text-lg font-bold text-white"
-        >
-          {{ 'game.backMenu' | translate }}
-        </button>
-      </div>
+      <app-leaderboard [state]="state" />
+      <button
+        type="button"
+        (click)="backToMenu()"
+        class="mt-4 min-h-14 w-full rounded-xl bg-slate-800 text-lg font-bold text-white"
+      >
+        {{ 'game.backMenu' | translate }}
+      </button>
     }
 
     @if (state.phase === 'LOBBY') {
