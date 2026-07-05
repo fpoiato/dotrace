@@ -6,6 +6,7 @@ import { Subscription } from 'rxjs';
 import { getTrackById } from '../../core/models/tracks';
 import {
   GameState,
+  LapTime,
   Player,
   Vector2D,
   canPlayerMove,
@@ -63,6 +64,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   showCelebration = false;
   padOptions: PadOption[] = [];
+  elapsedMs = 0;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -75,6 +77,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
+      this.telemetry.elapsedMs$.subscribe((elapsed) => {
+        this.elapsedMs = elapsed;
+      }),
       this.game.state$.subscribe((state) => {
         this.padOptions = this.buildPadOptions(state);
         if (state?.phase === 'GAME_OVER') {
@@ -161,6 +166,68 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const player = state.players.find((p) => p.connectionId === connectionId);
     if (!player?.finishedAt || !state.raceStartedAt) return null;
     return formatRaceTime(player.finishedAt - state.raceStartedAt);
+  }
+
+  leaderboard(state: GameState): Player[] {
+    return [...state.players].sort((a, b) => {
+      if (a.finishOrder !== undefined && b.finishOrder !== undefined) {
+        return a.finishOrder - b.finishOrder;
+      }
+      if (a.finishOrder !== undefined) return -1;
+      if (b.finishOrder !== undefined) return 1;
+
+      const lapDelta = this.completedLapCount(b) - this.completedLapCount(a);
+      if (lapDelta !== 0) return lapDelta;
+
+      const checkpointDelta = Number(!!b.passedCheckpoint) - Number(!!a.passedCheckpoint);
+      if (checkpointDelta !== 0) return checkpointDelta;
+
+      return a.joinOrder - b.joinOrder;
+    });
+  }
+
+  rankLabel(player: Player, index: number): string {
+    return `#${player.finishOrder ?? index + 1}`;
+  }
+
+  lapProgress(player: Player, state: GameState): string {
+    const lap = player.finishOrder === undefined ? player.lap : state.totalLaps;
+    return `${Math.min(lap, state.totalLaps)}/${state.totalLaps}`;
+  }
+
+  completedLapTimes(player: Player): LapTime[] {
+    return player.lapTimes ?? [];
+  }
+
+  currentLapTime(state: GameState, player: Player): string {
+    if (player.finishOrder !== undefined) return '—';
+    const raceStartedAt = state.raceStartedAt;
+    if (!raceStartedAt) return '—';
+    const lapStartedAt = player.currentLapStartedAt ?? raceStartedAt;
+    const now = raceStartedAt + this.elapsedMs;
+    return formatRaceTime(Math.max(0, now - lapStartedAt));
+  }
+
+  lastLapTime(player: Player): string {
+    const last = this.completedLapTimes(player).at(-1);
+    return last ? formatRaceTime(last.elapsedMs) : '—';
+  }
+
+  bestLapTime(player: Player): string {
+    const best = this.completedLapTimes(player).reduce<number | null>(
+      (min, lap) => (min === null ? lap.elapsedMs : Math.min(min, lap.elapsedMs)),
+      null
+    );
+    return best === null ? '—' : formatRaceTime(best);
+  }
+
+  totalRaceTime(state: GameState, player: Player): string {
+    if (!state.raceStartedAt || !player.finishedAt) return '—';
+    return formatRaceTime(player.finishedAt - state.raceStartedAt);
+  }
+
+  private completedLapCount(player: Player): number {
+    return player.finishOrder !== undefined ? Number.MAX_SAFE_INTEGER : this.completedLapTimes(player).length;
   }
 
   backToMenu(): void {

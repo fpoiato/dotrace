@@ -43,6 +43,13 @@ export interface TrackDefinition {
   checkpoint?: CheckpointRect;
 }
 
+export interface LapTime {
+  /** 1-based lap number this split belongs to. */
+  lap: number;
+  /** Elapsed time for this lap in milliseconds. */
+  elapsedMs: number;
+}
+
 export interface Player {
   connectionId: string;
   nickname: string;
@@ -57,6 +64,10 @@ export interface Player {
   trail: Vector2D[];
   /** Current lap, 1-based. */
   lap: number;
+  /** Completed lap split times. */
+  lapTimes?: LapTime[];
+  /** Epoch ms when the current lap began. */
+  currentLapStartedAt?: number;
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
   diceRoll?: number;
@@ -106,6 +117,8 @@ export interface PlayerTelemetry {
   position: Vector2D;
   velocity: Vector2D;
   lap: number;
+  lapTimes: LapTime[];
+  currentLapElapsedMs?: number;
   finishOrder?: number;
   finishRound?: number;
   finishedAt?: number;
@@ -272,6 +285,7 @@ export function createLobbyPlayer(
     isOffTrack: false,
     trail: [],
     lap: 1,
+    lapTimes: [],
   };
 }
 
@@ -281,7 +295,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     .sort((a, b) => a.joinOrder - b.joinOrder);
   return {
     phase: 'LOBBY',
-    players: approved.map((p) => ({ ...p })),
+    players: approved.map((p) => ({ ...p, lapTimes: [...(p.lapTimes ?? [])] })),
     hostId,
     trackId: '',
     turnOrder: [],
@@ -292,6 +306,22 @@ export function createInitialState(players: Player[], hostId: string): GameState
     diceRolls: {},
     podium: [],
   };
+}
+
+export function recordLapTime(player: Player, state: Pick<GameState, 'raceStartedAt'>, now = Date.now()): LapTime {
+  const lap = player.lap;
+  const startedAt = player.currentLapStartedAt ?? state.raceStartedAt ?? now;
+  const split = { lap, elapsedMs: Math.max(0, now - startedAt) };
+  const lapTimes = [...(player.lapTimes ?? [])];
+  const existingIndex = lapTimes.findIndex((entry) => entry.lap === lap);
+  if (existingIndex >= 0) {
+    lapTimes[existingIndex] = split;
+  } else {
+    lapTimes.push(split);
+  }
+  player.lapTimes = lapTimes;
+  player.currentLapStartedAt = now;
+  return split;
 }
 
 export function isTimedMode(state: GameState): boolean {
@@ -514,16 +544,22 @@ export function buildRaceTelemetry(
     timestamp: now,
     round: state.round,
     elapsedMs: Math.max(0, now - state.raceStartedAt),
-    players: state.players.map((p) => ({
-      connectionId: p.connectionId,
-      nickname: p.nickname,
-      position: { ...p.position },
-      velocity: { ...p.velocity },
-      lap: p.lap,
-      finishOrder: p.finishOrder,
-      finishRound: p.finishRound,
-      finishedAt: p.finishedAt,
-    })),
+    players: state.players.map((p) => {
+      const lapStartedAt = p.currentLapStartedAt ?? state.raceStartedAt!;
+      return {
+        connectionId: p.connectionId,
+        nickname: p.nickname,
+        position: { ...p.position },
+        velocity: { ...p.velocity },
+        lap: p.lap,
+        lapTimes: [...(p.lapTimes ?? [])],
+        currentLapElapsedMs:
+          p.finishOrder === undefined ? Math.max(0, now - lapStartedAt) : undefined,
+        finishOrder: p.finishOrder,
+        finishRound: p.finishRound,
+        finishedAt: p.finishedAt,
+      };
+    }),
   };
 }
 

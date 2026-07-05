@@ -15,6 +15,7 @@ import {
   isGameOver,
   isValidGearChange,
   nextActiveTurnIndex,
+  recordLapTime,
   rollDice,
   generateRoomCode,
   segmentCrossesCell,
@@ -345,11 +346,26 @@ describe('gear', () => {
 });
 
 describe('race telemetry', () => {
+  it('records lap splits from the active lap start time', () => {
+    const player = makePlayer({ lap: 2, currentLapStartedAt: 10_000 });
+    const split = recordLapTime(player, { raceStartedAt: 1_000 }, 55_000);
+
+    expect(split).toEqual({ lap: 2, elapsedMs: 45_000 });
+    expect(player.lapTimes).toEqual([{ lap: 2, elapsedMs: 45_000 }]);
+    expect(player.currentLapStartedAt).toBe(55_000);
+  });
+
   it('builds a snapshot with player positions and elapsed time', () => {
     const state: GameState = {
       phase: 'GAME_ROUND',
       players: [
-        makePlayer({ connectionId: 'a', position: { x: 3, y: 5 }, lap: 2 }),
+        makePlayer({
+          connectionId: 'a',
+          position: { x: 3, y: 5 },
+          lap: 2,
+          lapTimes: [{ lap: 1, elapsedMs: 20_000 }],
+          currentLapStartedAt: 21_000,
+        }),
         makePlayer({ connectionId: 'b', position: { x: 10, y: 2 }, lap: 1, isHost: false }),
       ],
       hostId: 'a',
@@ -370,6 +386,8 @@ describe('race telemetry', () => {
     expect(snap!.round).toBe(4);
     expect(snap!.players).toHaveLength(2);
     expect(snap!.players[0].position).toEqual({ x: 3, y: 5 });
+    expect(snap!.players[0].lapTimes).toEqual([{ lap: 1, elapsedMs: 20_000 }]);
+    expect(snap!.players[0].currentLapElapsedMs).toBe(40_000);
     expect(snap!.players[1].position).toEqual({ x: 10, y: 2 });
   });
 
