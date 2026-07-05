@@ -6,8 +6,8 @@ import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
  * classic outlines of Monza, Monaco, Interlagos, Silverstone, Spa and Suzuka.
  */
 
-const GRID_W = 56;
-const GRID_H = 36;
+const DEFAULT_GRID_W = 56;
+const DEFAULT_GRID_H = 36;
 const BRUSH_RADIUS = 2.3; // corridor ≈ 5 cells wide
 
 function emptyGrid(w: number, h: number): TileType[][] {
@@ -69,6 +69,9 @@ function gridSlots(firstCol: number, colStep: number, rows: [number, number]): V
 interface CircuitSpec {
   id: string;
   nameKey: string;
+  width?: number;
+  height?: number;
+  radius?: number;
   centerline: Vector2D[];
   finish: { x0: number; x1: number; y0: number; y1: number };
   startLine: Vector2D[];
@@ -77,14 +80,16 @@ interface CircuitSpec {
 }
 
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
-  const grid = emptyGrid(GRID_W, GRID_H);
-  carvePolyline(grid, spec.centerline);
+  const width = spec.width ?? DEFAULT_GRID_W;
+  const height = spec.height ?? DEFAULT_GRID_H;
+  const grid = emptyGrid(width, height);
+  carvePolyline(grid, spec.centerline, spec.radius ?? BRUSH_RADIUS);
   stampFinish(grid, spec.finish.x0, spec.finish.x1, spec.finish.y0, spec.finish.y1);
   return {
     id: spec.id,
     nameKey: spec.nameKey,
-    width: GRID_W,
-    height: GRID_H,
+    width,
+    height,
     grid,
     startLine: spec.startLine,
     arrows: spec.arrows,
@@ -233,27 +238,35 @@ const SILVERSTONE: CircuitSpec = {
 };
 
 /**
- * Spa-Francorchamps — clockwise: bottom start straight, Eau Rouge climb on
- * the right, Kemmel along the top, Les Combes chicane on the left, Pouhon
- * loop through the infield and Blanchimont back to the line.
+ * Spa-Francorchamps — clockwise: long start straight, tight La Source-style
+ * return, Eau Rouge / Raidillon kink to Kemmel, Les Combes, the Pouhon sweep
+ * and a fast Blanchimont run back to the line.
  */
 const SPA: CircuitSpec = {
   id: 'spa',
   nameKey: 'tracks.spa',
+  radius: 2.0,
   centerline: [
-    { x: 16, y: 32 },
-    { x: 42, y: 32 },
-    { x: 50, y: 28 },
-    { x: 52, y: 20 },
-    { x: 48, y: 12 },
-    { x: 38, y: 6 },
-    { x: 22, y: 5 },
-    { x: 10, y: 8 },
+    { x: 18, y: 31 },
+    { x: 34, y: 31 },
+    { x: 44, y: 29 },
+    { x: 50, y: 24 },
+    { x: 51, y: 18 },
+    { x: 46, y: 13 },
+    { x: 49, y: 8 },
+    { x: 42, y: 5 },
+    { x: 29, y: 4 },
+    { x: 15, y: 5 },
+    { x: 8, y: 9 },
     { x: 6, y: 14 },
-    { x: 8, y: 20 },
-    { x: 14, y: 24 },
-    { x: 22, y: 28 },
-    { x: 16, y: 32 },
+    { x: 12, y: 18 },
+    { x: 21, y: 18 },
+    { x: 29, y: 14 },
+    { x: 35, y: 17 },
+    { x: 32, y: 22 },
+    { x: 23, y: 25 },
+    { x: 15, y: 28 },
+    { x: 18, y: 31 },
   ],
   finish: { x0: 24, x1: 25, y0: 27, y1: 33 },
   startLine: gridSlots(27, 2, [30, 32]),
@@ -261,47 +274,84 @@ const SPA: CircuitSpec = {
     { at: { x: 24.5, y: 26.5 }, dir: { x: 1, y: 0 } },
     { at: { x: 24.5, y: 33.5 }, dir: { x: 1, y: 0 } },
   ],
-  checkpoint: { x0: 2, y0: 0, x1: 18, y1: 12 },
+  checkpoint: { x0: 40, y0: 3, x1: 54, y1: 15 },
 };
 
 /**
- * Suzuka — clockwise figure-eight: bottom start straight, esses climbing
- * through the left side, back straight along the top, 130R / Spoon sweep
- * on the right, crossover through the middle and back to the line.
+ * Suzuka — clockwise portrait sketch inspired by a hand-drawn vector-racing
+ * sheet: stacked hairpins, a compact top loop, mid-course esses, and a long
+ * lower U-turn before climbing back to the stripe.
  */
 const SUZUKA: CircuitSpec = {
   id: 'suzuka',
   nameKey: 'tracks.suzuka',
+  width: 30,
+  height: 66,
+  radius: 1.9,
   centerline: [
-    { x: 12, y: 30 },
-    { x: 36, y: 30 },
-    { x: 44, y: 26 },
-    { x: 48, y: 20 },
-    { x: 46, y: 14 },
-    { x: 40, y: 9 },
-    { x: 30, y: 6 },
-    { x: 18, y: 7 },
-    { x: 10, y: 11 },
+    { x: 5, y: 7 },
+    { x: 5, y: 17 },
+    { x: 8, y: 22 },
+    { x: 15, y: 22 },
+    { x: 21, y: 18 },
+    { x: 23, y: 11 },
+    { x: 21, y: 5 },
+    { x: 15, y: 4 },
+    { x: 11, y: 7 },
+    { x: 11, y: 16 },
+    { x: 14, y: 22 },
+    { x: 21, y: 25 },
+    { x: 23, y: 32 },
+    { x: 21, y: 39 },
+    { x: 17, y: 42 },
+    { x: 14, y: 39 },
+    { x: 15, y: 31 },
+    { x: 12, y: 26 },
+    { x: 8, y: 26 },
+    { x: 5, y: 31 },
+    { x: 5, y: 39 },
+    { x: 8, y: 44 },
+    { x: 13, y: 45 },
+    { x: 15, y: 50 },
+    { x: 15, y: 57 },
+    { x: 18, y: 61 },
+    { x: 23, y: 59 },
+    { x: 24, y: 51 },
+    { x: 22, y: 44 },
+    { x: 18, y: 42 },
+    { x: 14, y: 45 },
+    { x: 13, y: 53 },
+    { x: 10, y: 58 },
+    { x: 6, y: 55 },
+    { x: 5, y: 47 },
+    { x: 4, y: 39 },
+    { x: 4, y: 29 },
+    { x: 7, y: 24 },
+    { x: 10, y: 21 },
+    { x: 8, y: 15 },
+    { x: 8, y: 8 },
+    { x: 5, y: 7 },
+  ],
+  finish: { x0: 3, x1: 8, y0: 6, y1: 7 },
+  startLine: [
+    { x: 4, y: 9 },
+    { x: 6, y: 9 },
+    { x: 4, y: 11 },
+    { x: 6, y: 11 },
+    { x: 4, y: 13 },
+    { x: 6, y: 13 },
+    { x: 4, y: 15 },
+    { x: 6, y: 15 },
+    { x: 5, y: 17 },
     { x: 7, y: 17 },
-    { x: 9, y: 23 },
-    { x: 16, y: 27 },
-    { x: 24, y: 26 },
-    { x: 32, y: 22 },
-    { x: 38, y: 16 },
-    { x: 36, y: 11 },
-    { x: 28, y: 8 },
-    { x: 20, y: 10 },
-    { x: 14, y: 16 },
-    { x: 12, y: 22 },
-    { x: 12, y: 30 },
+    { x: 7, y: 19 },
+    { x: 9, y: 19 },
   ],
-  finish: { x0: 22, x1: 23, y0: 27, y1: 33 },
-  startLine: gridSlots(25, 2, [29, 31]),
   arrows: [
-    { at: { x: 22.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 22.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 2.4, y: 6.8 }, dir: { x: 0, y: 1 } },
+    { at: { x: 8.8, y: 6.8 }, dir: { x: 0, y: 1 } },
   ],
-  checkpoint: { x0: 38, y0: 4, x1: 52, y1: 18 },
+  checkpoint: { x0: 17, y0: 47, x1: 29, y1: 65 },
 };
 
 export const TRACKS: TrackDefinition[] = [
