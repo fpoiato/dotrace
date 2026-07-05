@@ -25,6 +25,7 @@ import {
   segmentEntersRect,
   zeroVector,
   buildRaceTelemetry,
+  closeLap,
 } from '../models/ws-types';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
@@ -135,6 +136,7 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      this.armLapClocks(state);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -189,7 +191,16 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    this.armLapClocks(state);
     this.setStateAndRelay('GRID_ORDER_DONE', state);
+  }
+
+  /** Every lap clock starts on the green flag. */
+  private armLapClocks(state: GameState): void {
+    for (const p of state.players) {
+      p.lapStartedAt = state.raceStartedAt;
+      p.lapTimes = [];
+    }
   }
 
   private placePlayersOnStartLine(
@@ -267,12 +278,14 @@ export class GameEngineService implements OnDestroy {
       if (player.lap < state.totalLaps) {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
         // so the sheet stays readable on the next tour.
+        closeLap(player);
         player.lap += 1;
         player.passedCheckpoint = false;
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
         const now = Date.now();
+        closeLap(player, now);
         player.finishOrder = pos;
         player.finishRound = state.round;
         player.finishedAt = now;
@@ -498,6 +511,8 @@ export class GameEngineService implements OnDestroy {
       merged.trail = state.players[idx].trail ?? [];
       merged.lap = state.players[idx].lap ?? 1;
       merged.passedCheckpoint = state.players[idx].passedCheckpoint;
+      merged.lapStartedAt = state.players[idx].lapStartedAt;
+      merged.lapTimes = state.players[idx].lapTimes;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;
       merged.finishRound = state.players[idx].finishRound;

@@ -59,6 +59,10 @@ export interface Player {
   lap: number;
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
+  /** Epoch ms when the current lap started (host wall clock). */
+  lapStartedAt?: number;
+  /** Completed lap durations in ms; index 0 = lap 1. */
+  lapTimes?: number[];
   diceRoll?: number;
   finishOrder?: number;
   /** Wall-clock finish time (epoch ms). Set when the player completes the race. */
@@ -106,9 +110,29 @@ export interface PlayerTelemetry {
   position: Vector2D;
   velocity: Vector2D;
   lap: number;
+  lapTimes?: number[];
   finishOrder?: number;
   finishRound?: number;
   finishedAt?: number;
+}
+
+/** Row on the live/final leaderboard, ranked best to worst. */
+export interface LeaderboardEntry {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  rank: number;
+  /** Current lap (1-based) for racers, last lap for finishers. */
+  lap: number;
+  lapsCompleted: number;
+  /** Completed lap durations in ms; index 0 = lap 1. */
+  lapTimes: number[];
+  bestLapMs?: number;
+  lastLapMs?: number;
+  /** Total race time in ms (finished players only). */
+  totalMs?: number;
+  finishOrder?: number;
+  hasFastestLap: boolean;
 }
 
 /** Host-authoritative race snapshot (positions + elapsed time). */
@@ -520,6 +544,7 @@ export function buildRaceTelemetry(
       position: { ...p.position },
       velocity: { ...p.velocity },
       lap: p.lap,
+      lapTimes: p.lapTimes ? [...p.lapTimes] : undefined,
       finishOrder: p.finishOrder,
       finishRound: p.finishRound,
       finishedAt: p.finishedAt,
@@ -533,4 +558,76 @@ export function formatRaceTime(elapsedMs: number): string {
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+/** Format a lap duration as m:ss.t (tenths of a second). */
+export function formatLapTime(lapMs: number): string {
+  const clamped = Math.max(0, lapMs);
+  const totalSec = Math.floor(clamped / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  const tenths = Math.floor((clamped % 1000) / 100);
+  return `${min}:${sec.toString().padStart(2, '0')}.${tenths}`;
+}
+
+/** Record the just-completed lap's duration and rearm the lap clock. */
+export function closeLap(player: Player, now = Date.now()): void {
+  if (player.lapStartedAt === undefined) return;
+  if (!player.lapTimes) player.lapTimes = [];
+  player.lapTimes.push(Math.max(0, now - player.lapStartedAt));
+  player.lapStartedAt = now;
+}
+
+export function bestLapMs(lapTimes: number[]): number | undefined {
+  return lapTimes.length > 0 ? Math.min(...lapTimes) : undefined;
+}
+
+/**
+ * Rank players for the leaderboard: finishers first (by finish order), then
+ * racers by progress (laps completed, checkpoint passed, join order).
+ */
+export function buildLeaderboard(state: GameState): LeaderboardEntry[] {
+  const ranked = [...state.players].sort((a, b) => {
+    const aFinished = a.finishOrder !== undefined;
+    const bFinished = b.finishOrder !== undefined;
+    if (aFinished !== bFinished) return aFinished ? -1 : 1;
+    if (aFinished && bFinished) return a.finishOrder! - b.finishOrder!;
+    if (b.lap !== a.lap) return b.lap - a.lap;
+    const aCheck = a.passedCheckpoint ? 1 : 0;
+    const bCheck = b.passedCheckpoint ? 1 : 0;
+    if (bCheck !== aCheck) return bCheck - aCheck;
+    return a.joinOrder - b.joinOrder;
+  });
+
+  const entries = ranked.map((p, idx): LeaderboardEntry => {
+    const lapTimes = p.lapTimes ?? [];
+    const totalMs =
+      p.finishedAt !== undefined && state.raceStartedAt !== undefined
+        ? Math.max(0, p.finishedAt - state.raceStartedAt)
+        : undefined;
+    return {
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      rank: idx + 1,
+      lap: p.lap,
+      lapsCompleted: lapTimes.length,
+      lapTimes: [...lapTimes],
+      bestLapMs: bestLapMs(lapTimes),
+      lastLapMs: lapTimes.length > 0 ? lapTimes[lapTimes.length - 1] : undefined,
+      totalMs,
+      finishOrder: p.finishOrder,
+      hasFastestLap: false,
+    };
+  });
+
+  const fastest = Math.min(
+    ...entries.filter((e) => e.bestLapMs !== undefined).map((e) => e.bestLapMs!)
+  );
+  if (Number.isFinite(fastest)) {
+    for (const e of entries) {
+      e.hasFastestLap = e.bestLapMs === fastest;
+    }
+  }
+  return entries;
 }
