@@ -200,10 +200,112 @@ const INTERLAGOS: CircuitSpec = {
   checkpoint: { x0: 44, y0: 12, x1: 54, y1: 28 },
 };
 
+/**
+ * Silverstone — clockwise ring: long bottom start straight running left to
+ * right, a fast right-hand sweep, the Maggotts/Becketts kink up top, then the
+ * tight left flank (Village/Loop side) dropping back down to the line.
+ */
+const SILVERSTONE: CircuitSpec = {
+  id: 'silverstone',
+  nameKey: 'tracks.silverstone',
+  centerline: [
+    { x: 11, y: 32 },
+    { x: 45, y: 32 },
+    { x: 51, y: 28 },
+    { x: 52, y: 22 },
+    { x: 47, y: 18 },
+    { x: 41, y: 20 },
+    { x: 36, y: 16 },
+    { x: 40, y: 10 },
+    { x: 33, y: 6 },
+    { x: 20, y: 5 },
+    { x: 10, y: 7 },
+    { x: 5, y: 14 },
+    { x: 6, y: 22 },
+    { x: 9, y: 28 },
+    { x: 11, y: 32 },
+  ],
+  finish: { x0: 27, x1: 28, y0: 29, y1: 35 },
+  startLine: gridSlots(30, 2, [31, 33]),
+  arrows: [
+    { at: { x: 27.5, y: 27.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 27.5, y: 35.4 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 18, y0: 1, x1: 40, y1: 11 },
+};
+
+/**
+ * Suzuka — anticlockwise: top start straight running right to left, sweeping
+ * left curve down the west side, bottom straight, then the right flank with a
+ * pinched Degner-style kink climbing back up to the line.
+ */
+const SUZUKA: CircuitSpec = {
+  id: 'suzuka',
+  nameKey: 'tracks.suzuka',
+  centerline: [
+    { x: 48, y: 6 },
+    { x: 16, y: 6 },
+    { x: 8, y: 10 },
+    { x: 5, y: 18 },
+    { x: 8, y: 26 },
+    { x: 16, y: 31 },
+    { x: 30, y: 32 },
+    { x: 40, y: 30 },
+    { x: 44, y: 24 },
+    { x: 39, y: 19 },
+    { x: 44, y: 14 },
+    { x: 50, y: 11 },
+    { x: 48, y: 6 },
+  ],
+  finish: { x0: 30, x1: 31, y0: 2, y1: 9 },
+  startLine: gridSlots(28, -2, [4, 6]),
+  arrows: [
+    { at: { x: 30.5, y: 1.2 }, dir: { x: -1, y: 0 } },
+    { at: { x: 30.5, y: 10.5 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 20, y0: 28, x1: 44, y1: 34 },
+};
+
+/**
+ * Spa-Francorchamps — anticlockwise flowing loop: bottom start straight
+ * running right to left, up the left flank, a rolling top run (Kemmel side)
+ * across to the right, and the long right sweep (Blanchimont) back down.
+ */
+const SPA: CircuitSpec = {
+  id: 'spa',
+  nameKey: 'tracks.spa',
+  centerline: [
+    { x: 45, y: 32 },
+    { x: 12, y: 32 },
+    { x: 6, y: 27 },
+    { x: 5, y: 20 },
+    { x: 8, y: 13 },
+    { x: 15, y: 9 },
+    { x: 24, y: 8 },
+    { x: 30, y: 12 },
+    { x: 37, y: 9 },
+    { x: 45, y: 6 },
+    { x: 51, y: 11 },
+    { x: 52, y: 19 },
+    { x: 49, y: 26 },
+    { x: 45, y: 32 },
+  ],
+  finish: { x0: 30, x1: 31, y0: 29, y1: 35 },
+  startLine: gridSlots(28, -2, [31, 33]),
+  arrows: [
+    { at: { x: 30.5, y: 27.5 }, dir: { x: -1, y: 0 } },
+    { at: { x: 30.5, y: 35.4 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 22, y0: 4, x1: 46, y1: 12 },
+};
+
 export const TRACKS: TrackDefinition[] = [
   buildCircuit(MONZA),
   buildCircuit(MONACO),
   buildCircuit(INTERLAGOS),
+  buildCircuit(SILVERSTONE),
+  buildCircuit(SUZUKA),
+  buildCircuit(SPA),
 ];
 
 export function getTrackById(id: string): TrackDefinition | undefined {
