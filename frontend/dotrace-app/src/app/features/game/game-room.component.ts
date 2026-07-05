@@ -20,6 +20,7 @@ import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
 import { MiniMapComponent } from './mini-map.component';
+import { RaceLeaderboardComponent } from './race-leaderboard.component';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 interface PadOption {
@@ -46,7 +47,14 @@ const PAD_GLYPHS: Record<string, string> = {
 @Component({
   selector: 'app-game-room',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent],
+  imports: [
+    AsyncPipe,
+    TranslateModule,
+    TrackCanvasComponent,
+    MiniMapComponent,
+    RaceLeaderboardComponent,
+    LoadingSpinnerComponent,
+  ],
   templateUrl: './game-room.component.html',
 })
 export class GameRoomComponent implements OnInit, OnDestroy {

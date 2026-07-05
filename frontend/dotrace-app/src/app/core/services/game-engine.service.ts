@@ -20,6 +20,7 @@ import {
   landingPosition,
   nextActiveTurnIndex,
   pushTrail,
+  recordLapTime,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
@@ -206,6 +207,7 @@ export class GameEngineService implements OnDestroy {
       player.passedCheckpoint = false;
       player.trail = [{ ...start }];
       player.lap = 1;
+      player.lapTimesMs = [];
     });
   }
 
@@ -264,6 +266,7 @@ export class GameEngineService implements OnDestroy {
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
     if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
+      recordLapTime(player, state.raceStartedAt, Date.now());
       if (player.lap < state.totalLaps) {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
         // so the sheet stays readable on the next tour.
@@ -490,6 +493,7 @@ export class GameEngineService implements OnDestroy {
       isOffTrack: player.isOffTrack ?? false,
       trail: player.trail ?? [],
       lap: player.lap ?? 1,
+      lapTimesMs: player.lapTimesMs ?? [],
     };
     if (idx >= 0) {
       merged.position = state.players[idx].position;
@@ -497,6 +501,7 @@ export class GameEngineService implements OnDestroy {
       merged.isOffTrack = state.players[idx].isOffTrack;
       merged.trail = state.players[idx].trail ?? [];
       merged.lap = state.players[idx].lap ?? 1;
+      merged.lapTimesMs = state.players[idx].lapTimesMs ?? [];
       merged.passedCheckpoint = state.players[idx].passedCheckpoint;
       merged.diceRoll = state.players[idx].diceRoll;
       merged.finishOrder = state.players[idx].finishOrder;

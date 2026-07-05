@@ -22,6 +22,11 @@ import {
   segmentEntersRect,
   buildRaceTelemetry,
   formatRaceTime,
+  formatLapTime,
+  recordLapTime,
+  bestLapMs,
+  buildLeaderboard,
+  fastestLapOf,
 } from '../../../shared/ws-types';
 
 function makeTrack(): TrackDefinition {
@@ -394,6 +399,114 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('lap times', () => {
+  it('records the first lap relative to the green flag', () => {
+    const player = makePlayer();
+    recordLapTime(player, 10_000, 71_500);
+    expect(player.lapTimesMs).toEqual([61_500]);
+  });
+
+  it('records later laps relative to the previous lap crossing', () => {
+    const player = makePlayer({ lapTimesMs: [60_000] });
+    recordLapTime(player, 10_000, 100_000);
+    expect(player.lapTimesMs).toEqual([60_000, 30_000]);
+  });
+
+  it('does nothing when the race has no start timestamp', () => {
+    const player = makePlayer();
+    recordLapTime(player, undefined, 50_000);
+    expect(player.lapTimesMs).toEqual([]);
+  });
+
+  it('tolerates legacy players without a lapTimesMs array', () => {
+    const player = makePlayer();
+    delete player.lapTimesMs;
+    recordLapTime(player, 1_000, 31_000);
+    expect(player.lapTimesMs).toEqual([30_000]);
+  });
+
+  it('finds the best lap', () => {
+    expect(bestLapMs([62_000, 55_400, 58_100])).toBe(55_400);
+    expect(bestLapMs([])).toBeNull();
+    expect(bestLapMs(undefined)).toBeNull();
+  });
+
+  it('formats lap times with tenths', () => {
+    expect(formatLapTime(0)).toBe('0:00.0');
+    expect(formatLapTime(61_540)).toBe('1:01.5');
+    expect(formatLapTime(125_990)).toBe('2:05.9');
+  });
+});
+
+describe('leaderboard', () => {
+  function makeState(): GameState {
+    return {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ connectionId: 'a', nickname: 'Ana', joinOrder: 0, lap: 1, lapTimesMs: [] }),
+        makePlayer({
+          connectionId: 'b',
+          nickname: 'Bia',
+          joinOrder: 1,
+          isHost: false,
+          lap: 2,
+          lapTimesMs: [58_000],
+        }),
+        makePlayer({
+          connectionId: 'c',
+          nickname: 'Caio',
+          joinOrder: 2,
+          isHost: false,
+          lap: 2,
+          lapTimesMs: [52_000, 49_500],
+          finishOrder: 1,
+          finishedAt: 111_500,
+        }),
+      ],
+      hostId: 'a',
+      trackId: 'test',
+      turnOrder: ['a', 'b', 'c'],
+      currentTurnIndex: 0,
+      round: 9,
+      totalLaps: 2,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [{ connectionId: 'c', nickname: 'Caio', position: 1 }],
+      raceStartedAt: 10_000,
+    };
+  }
+
+  it('ranks finishers first, then racers by lap progress', () => {
+    const entries = buildLeaderboard(makeState());
+    expect(entries.map((e) => e.connectionId)).toEqual(['c', 'b', 'a']);
+    expect(entries.map((e) => e.rank)).toEqual([1, 2, 3]);
+  });
+
+  it('breaks lap ties with the far-side checkpoint', () => {
+    const state = makeState();
+    state.players[0].lap = 2;
+    state.players[0].passedCheckpoint = true;
+    const entries = buildLeaderboard(state);
+    expect(entries.map((e) => e.connectionId)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('computes total time for finishers and best lap per player', () => {
+    const entries = buildLeaderboard(makeState());
+    const caio = entries.find((e) => e.connectionId === 'c')!;
+    expect(caio.totalTimeMs).toBe(101_500);
+    expect(caio.bestLapMs).toBe(49_500);
+    const ana = entries.find((e) => e.connectionId === 'a')!;
+    expect(ana.totalTimeMs).toBeNull();
+    expect(ana.bestLapMs).toBeNull();
+  });
+
+  it('finds the overall fastest lap', () => {
+    const entries = buildLeaderboard(makeState());
+    expect(fastestLapOf(entries)).toEqual({ connectionId: 'c', timeMs: 49_500 });
+    expect(fastestLapOf([])).toBeNull();
   });
 });
 

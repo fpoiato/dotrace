@@ -57,6 +57,8 @@ export interface Player {
   trail: Vector2D[];
   /** Current lap, 1-based. */
   lap: number;
+  /** Duration of each completed lap in ms, in lap order. */
+  lapTimesMs?: number[];
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
   diceRoll?: number;
@@ -106,6 +108,7 @@ export interface PlayerTelemetry {
   position: Vector2D;
   velocity: Vector2D;
   lap: number;
+  lapTimesMs?: number[];
   finishOrder?: number;
   finishRound?: number;
   finishedAt?: number;
@@ -117,6 +120,22 @@ export interface RaceTelemetrySnapshot {
   round: number;
   elapsedMs: number;
   players: PlayerTelemetry[];
+}
+
+/** One row of the lap-time leaderboard (live standings or final results). */
+export interface LeaderboardEntry {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  /** 1-based standing position. */
+  rank: number;
+  /** Current lap for racers; last lap for finishers. */
+  lap: number;
+  lapTimesMs: number[];
+  bestLapMs: number | null;
+  /** Total race time (finishedAt − raceStartedAt); null while still racing. */
+  totalTimeMs: number | null;
+  finishOrder?: number;
 }
 
 export type ClientAction =
@@ -272,6 +291,7 @@ export function createLobbyPlayer(
     isOffTrack: false,
     trail: [],
     lap: 1,
+    lapTimesMs: [],
   };
 }
 
@@ -520,6 +540,7 @@ export function buildRaceTelemetry(
       position: { ...p.position },
       velocity: { ...p.velocity },
       lap: p.lap,
+      lapTimesMs: [...(p.lapTimesMs ?? [])],
       finishOrder: p.finishOrder,
       finishRound: p.finishRound,
       finishedAt: p.finishedAt,
@@ -533,4 +554,74 @@ export function formatRaceTime(elapsedMs: number): string {
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+/** Format a lap time as m:ss.t (tenths — laps deserve more precision). */
+export function formatLapTime(elapsedMs: number): string {
+  const ms = Math.max(0, elapsedMs);
+  const tenths = Math.floor((ms % 1000) / 100);
+  return `${formatRaceTime(ms)}.${tenths}`;
+}
+
+/**
+ * Close the current lap on the player's stopwatch: the lap started either at
+ * the green flag or when the previous lap was completed.
+ */
+export function recordLapTime(player: Player, raceStartedAt: number | undefined, now: number): void {
+  if (!raceStartedAt) return;
+  const laps = player.lapTimesMs ?? (player.lapTimesMs = []);
+  const previousMs = laps.reduce((sum, t) => sum + t, 0);
+  laps.push(Math.max(0, now - raceStartedAt - previousMs));
+}
+
+export function bestLapMs(lapTimesMs: number[] | undefined): number | null {
+  if (!lapTimesMs || lapTimesMs.length === 0) return null;
+  return Math.min(...lapTimesMs);
+}
+
+/**
+ * Build the lap-time leaderboard. Finishers rank first (by finish order);
+ * racers still on track follow, ordered by progress (lap, then checkpoint,
+ * then distance covered this race as a tie-breaker).
+ */
+export function buildLeaderboard(state: GameState): LeaderboardEntry[] {
+  const progressScore = (p: Player): number =>
+    p.lap * 10 + (p.passedCheckpoint ? 5 : 0);
+
+  const sorted = [...state.players].sort((a, b) => {
+    if (a.finishOrder !== undefined && b.finishOrder !== undefined) {
+      return a.finishOrder - b.finishOrder;
+    }
+    if (a.finishOrder !== undefined) return -1;
+    if (b.finishOrder !== undefined) return 1;
+    const progress = progressScore(b) - progressScore(a);
+    if (progress !== 0) return progress;
+    return a.joinOrder - b.joinOrder;
+  });
+
+  return sorted.map((p, idx) => ({
+    connectionId: p.connectionId,
+    nickname: p.nickname,
+    color: p.color,
+    rank: idx + 1,
+    lap: p.lap,
+    lapTimesMs: [...(p.lapTimesMs ?? [])],
+    bestLapMs: bestLapMs(p.lapTimesMs),
+    totalTimeMs:
+      p.finishedAt !== undefined && state.raceStartedAt !== undefined
+        ? Math.max(0, p.finishedAt - state.raceStartedAt)
+        : null,
+    finishOrder: p.finishOrder,
+  }));
+}
+
+/** Fastest lap of the whole race (the "purple lap"), or null if none yet. */
+export function fastestLapOf(entries: LeaderboardEntry[]): { connectionId: string; timeMs: number } | null {
+  let fastest: { connectionId: string; timeMs: number } | null = null;
+  for (const entry of entries) {
+    if (entry.bestLapMs !== null && (fastest === null || entry.bestLapMs < fastest.timeMs)) {
+      fastest = { connectionId: entry.connectionId, timeMs: entry.bestLapMs };
+    }
+  }
+  return fastest;
 }
