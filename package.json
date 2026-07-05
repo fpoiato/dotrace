@@ -3,13 +3,15 @@
   "private": true,
   "workspaces": [
     "frontend/dotrace-app",
-    "infra/cdk"
+    "infra/cdk",
+    "bot"
   ],
   "scripts": {
     "start": "npm run start --workspace=frontend/dotrace-app",
     "build": "npm run build --workspace=frontend/dotrace-app",
     "cdk:deploy": "npm run deploy --workspace=infra/cdk",
     "cdk:synth": "npm run synth --workspace=infra/cdk",
-    "test": "npm run test --workspace=infra/cdk"
+    "test": "npm run test --workspace=infra/cdk",
+    "bot": "npm run start --workspace=bot"
   }
 }

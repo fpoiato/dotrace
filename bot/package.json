@@ -1,0 +1,20 @@
+{
+  "name": "dotrace-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless AI bot client for the Dot Race (Vector Rally) game",
+  "scripts": {
+    "start": "tsx index.ts",
+    "dev": "tsx watch index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
