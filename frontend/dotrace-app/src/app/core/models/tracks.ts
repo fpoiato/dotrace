@@ -3,7 +3,8 @@ import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
 /**
  * Circuits are rasterized from a centerline polyline stamped with a round
  * brush, mimicking a marker pen on grid paper. Layouts approximate the
- * classic outlines of Monza, Monaco and Interlagos.
+ * classic outlines of Monza, Monaco, Interlagos, Spa and Suzuka, plus a
+ * simple oval speedway.
  */
 
 const GRID_W = 56;
@@ -200,10 +201,114 @@ const INTERLAGOS: CircuitSpec = {
   checkpoint: { x0: 44, y0: 12, x1: 54, y1: 28 },
 };
 
+/**
+ * Spa — clockwise: bottom start straight heading right (Kemmel-like blast),
+ * sweeping up the right flank, Les Combes hook at the top-right, flowing
+ * esses across the top and a long left side dropping back to the line.
+ */
+const SPA: CircuitSpec = {
+  id: 'spa',
+  nameKey: 'tracks.spa',
+  centerline: [
+    { x: 12, y: 31 },
+    { x: 32, y: 31 },
+    { x: 43, y: 30 },
+    { x: 49, y: 26 },
+    { x: 51, y: 19 },
+    { x: 49, y: 11 },
+    { x: 43, y: 6 },
+    { x: 35, y: 8 },
+    { x: 28, y: 12 },
+    { x: 21, y: 9 },
+    { x: 14, y: 5 },
+    { x: 8, y: 8 },
+    { x: 5, y: 14 },
+    { x: 6, y: 21 },
+    { x: 9, y: 27 },
+    { x: 12, y: 31 },
+  ],
+  finish: { x0: 20, x1: 21, y0: 28, y1: 34 },
+  startLine: gridSlots(23, 2, [30, 32]),
+  arrows: [
+    { at: { x: 20.5, y: 27.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 20.5, y: 34.5 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 40, y0: 3, x1: 54, y1: 14 },
+};
+
+/**
+ * Suzuka — anticlockwise (stylized, no crossover): bottom start straight
+ * running right-to-left, left curl climbing into the esses, Degner run up
+ * to the top-right hairpin, spoon dip and the 130R sweep back down.
+ */
+const SUZUKA: CircuitSpec = {
+  id: 'suzuka',
+  nameKey: 'tracks.suzuka',
+  centerline: [
+    { x: 40, y: 31 },
+    { x: 20, y: 31 },
+    { x: 12, y: 29 },
+    { x: 7, y: 24 },
+    { x: 6, y: 17 },
+    { x: 10, y: 12 },
+    { x: 16, y: 14 },
+    { x: 21, y: 10 },
+    { x: 27, y: 12 },
+    { x: 32, y: 8 },
+    { x: 39, y: 5 },
+    { x: 46, y: 4 },
+    { x: 51, y: 8 },
+    { x: 50, y: 14 },
+    { x: 45, y: 18 },
+    { x: 47, y: 23 },
+    { x: 46, y: 28 },
+    { x: 40, y: 31 },
+  ],
+  finish: { x0: 28, x1: 29, y0: 28, y1: 34 },
+  startLine: gridSlots(26, -2, [30, 32]),
+  arrows: [
+    { at: { x: 28.5, y: 27.5 }, dir: { x: -1, y: 0 } },
+    { at: { x: 28.5, y: 34.5 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 42, y0: 1, x1: 54, y1: 12 },
+};
+
+/**
+ * Speedway — clockwise oval: two long straights joined by wide banked-style
+ * turns. The simplest sheet in the pad, great for first races.
+ */
+const SPEEDWAY: CircuitSpec = {
+  id: 'speedway',
+  nameKey: 'tracks.speedway',
+  centerline: [
+    { x: 15, y: 30 },
+    { x: 41, y: 30 },
+    { x: 48, y: 27 },
+    { x: 51, y: 18 },
+    { x: 48, y: 9 },
+    { x: 41, y: 6 },
+    { x: 15, y: 6 },
+    { x: 8, y: 9 },
+    { x: 5, y: 18 },
+    { x: 8, y: 27 },
+    { x: 15, y: 30 },
+  ],
+  finish: { x0: 26, x1: 27, y0: 27, y1: 33 },
+  startLine: gridSlots(29, 2, [29, 31]),
+  arrows: [
+    { at: { x: 26.5, y: 26.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 26.5, y: 33.5 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 20, y0: 3, x1: 34, y1: 9 },
+};
+
 export const TRACKS: TrackDefinition[] = [
   buildCircuit(MONZA),
   buildCircuit(MONACO),
   buildCircuit(INTERLAGOS),
+  buildCircuit(SPA),
+  buildCircuit(SUZUKA),
+  buildCircuit(SPEEDWAY),
 ];
 
 export function getTrackById(id: string): TrackDefinition | undefined {
