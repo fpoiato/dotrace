@@ -18,6 +18,7 @@
   "lobby.reject": "Reject",
   "lobby.startRace": "Start Race",
   "lobby.selectTrack": "Select track",
+  "lobby.pickTrack": "Tap to choose…",
   "lobby.laps": "Laps",
   "lobby.gameMode": "Game mode",
   "lobby.mode.TURNS": "Turns",
@@ -66,5 +67,6 @@
   "common.loading": "Loading…",
   "common.error": "Something went wrong",
   "common.copied": "Copied!",
+  "common.close": "Close",
   "common.host": "Host"
 }

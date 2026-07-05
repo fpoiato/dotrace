@@ -3,17 +3,18 @@ import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
-import { TRACKS, getTrackById } from '../../core/models/tracks';
+import { getTrackById } from '../../core/models/tracks';
 import { GAME_MODES, GameMode, MIN_PLAYERS } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { HowToPlayComponent } from '../../shared/how-to-play.component';
+import { TrackPickerComponent } from '../../shared/track-picker.component';
 
 @Component({
   selector: 'app-lobby',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, HowToPlayComponent],
+  imports: [AsyncPipe, TranslateModule, HowToPlayComponent, TrackPickerComponent],
   templateUrl: './lobby.component.html',
 })
 export class LobbyComponent implements OnInit, OnDestroy {
@@ -25,7 +26,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly room$ = this.room.room$;
   readonly players$ = this.room.players$;
   readonly pending$ = this.room.pending$;
-  readonly tracks = TRACKS;
   readonly minPlayers = MIN_PLAYERS;
 
   selectedTrackId = '';
@@ -35,6 +35,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly gameModes = GAME_MODES;
   copied = false;
   showHowTo = false;
+  showTrackPicker = false;
   private readonly subs: Subscription[] = [];
 
   ngOnInit(): void {

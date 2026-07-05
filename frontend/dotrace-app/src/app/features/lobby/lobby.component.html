@@ -17,18 +17,17 @@
       <p class="mb-4 text-sm text-orange-300">{{ 'lobby.youAreHost' | translate }}</p>
 
       <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
-      <div class="mb-6 grid grid-cols-1 gap-3">
-        @for (track of tracks; track track.id) {
-          <button
-            type="button"
-            (click)="selectTrack(track.id)"
-            class="min-h-14 rounded-xl border-2 px-4 text-left font-semibold transition"
-            [class]="selectedTrackId === track.id ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
-          >
-            {{ track.nameKey | translate }}
-          </button>
-        }
-      </div>
+      <button
+        type="button"
+        (click)="showTrackPicker = true"
+        class="mb-6 flex min-h-14 w-full items-center justify-between rounded-xl border-2 px-4 font-semibold transition"
+        [class]="selectedTrackId ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+      >
+        <span [class]="selectedTrackId ? 'text-white' : 'text-slate-400'">
+          {{ selectedTrackId ? (trackName(selectedTrackId) | translate) : ('lobby.pickTrack' | translate) }}
+        </span>
+        <span class="text-slate-400">▾</span>
+      </button>
 
       <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.laps' | translate }}</h2>
       <div class="mb-6 grid grid-cols-3 gap-3">
@@ -137,4 +136,12 @@
 
 @if (showHowTo) {
   <app-how-to-play (close)="showHowTo = false" />
+}
+
+@if (showTrackPicker) {
+  <app-track-picker
+    [selectedTrackId]="selectedTrackId"
+    (select)="selectTrack($event)"
+    (close)="showTrackPicker = false"
+  />
 }

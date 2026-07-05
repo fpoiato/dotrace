@@ -18,6 +18,7 @@
   "lobby.reject": "Recusar",
   "lobby.startRace": "Iniciar Corrida",
   "lobby.selectTrack": "Escolher pista",
+  "lobby.pickTrack": "Toque para escolher…",
   "lobby.laps": "Voltas",
   "lobby.gameMode": "Modo de jogo",
   "lobby.mode.TURNS": "Turnos",
@@ -66,5 +67,6 @@
   "common.loading": "Carregando…",
   "common.error": "Algo deu errado",
   "common.copied": "Copiado!",
+  "common.close": "Fechar",
   "common.host": "Host"
 }
