@@ -3,7 +3,7 @@ import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
 /**
  * Circuits are rasterized from a centerline polyline stamped with a round
  * brush, mimicking a marker pen on grid paper. Layouts approximate the
- * classic outlines of Monza, Monaco and Interlagos.
+ * classic outlines of Monza, Monaco, Interlagos, Spa, Silverstone and Suzuka.
  */
 
 const GRID_W = 56;
@@ -200,10 +200,119 @@ const INTERLAGOS: CircuitSpec = {
   checkpoint: { x0: 44, y0: 12, x1: 54, y1: 28 },
 };
 
+/**
+ * Spa — fast clockwise ribbon: long downhill run from the line, a tight right
+ * climb, sweeping top section and a compact infield loop before returning to
+ * the bottom straight.
+ */
+const SPA: CircuitSpec = {
+  id: 'spa',
+  nameKey: 'tracks.spa',
+  centerline: [
+    { x: 14, y: 30 },
+    { x: 32, y: 31 },
+    { x: 45, y: 29 },
+    { x: 51, y: 24 },
+    { x: 50, y: 17 },
+    { x: 44, y: 13 },
+    { x: 38, y: 9 },
+    { x: 31, y: 5 },
+    { x: 22, y: 4 },
+    { x: 15, y: 7 },
+    { x: 9, y: 12 },
+    { x: 7, y: 18 },
+    { x: 11, y: 23 },
+    { x: 18, y: 21 },
+    { x: 23, y: 16 },
+    { x: 29, y: 15 },
+    { x: 34, y: 18 },
+    { x: 30, y: 24 },
+    { x: 22, y: 27 },
+    { x: 14, y: 30 },
+  ],
+  finish: { x0: 20, x1: 21, y0: 26, y1: 33 },
+  startLine: gridSlots(23, 2, [29, 31]),
+  arrows: [
+    { at: { x: 20.5, y: 24.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 20.5, y: 34.5 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 36, y0: 6, x1: 54, y1: 20 },
+};
+
+/**
+ * Silverstone — broad clockwise airport layout: top start straight, Becketts
+ * kink on the right, long lower sweep and a late left complex back to the line.
+ */
+const SILVERSTONE: CircuitSpec = {
+  id: 'silverstone',
+  nameKey: 'tracks.silverstone',
+  centerline: [
+    { x: 14, y: 8 },
+    { x: 28, y: 7 },
+    { x: 44, y: 9 },
+    { x: 51, y: 15 },
+    { x: 49, y: 22 },
+    { x: 42, y: 27 },
+    { x: 30, y: 29 },
+    { x: 18, y: 28 },
+    { x: 8, y: 24 },
+    { x: 6, y: 17 },
+    { x: 10, y: 11 },
+    { x: 14, y: 8 },
+  ],
+  finish: { x0: 30, x1: 31, y0: 4, y1: 11 },
+  startLine: gridSlots(34, 2, [7, 9]),
+  arrows: [
+    { at: { x: 30.5, y: 2.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 30.5, y: 12.5 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 4, y0: 18, x1: 24, y1: 32 },
+};
+
+/**
+ * Suzuka — anticlockwise figure-eight inspired path: flowing esses on the left,
+ * a tight central crossover and a fast right-side loop back onto the main
+ * straight.
+ */
+const SUZUKA: CircuitSpec = {
+  id: 'suzuka',
+  nameKey: 'tracks.suzuka',
+  centerline: [
+    { x: 44, y: 27 },
+    { x: 32, y: 28 },
+    { x: 22, y: 25 },
+    { x: 14, y: 20 },
+    { x: 10, y: 14 },
+    { x: 13, y: 9 },
+    { x: 21, y: 6 },
+    { x: 30, y: 8 },
+    { x: 36, y: 13 },
+    { x: 33, y: 18 },
+    { x: 25, y: 19 },
+    { x: 18, y: 16 },
+    { x: 22, y: 12 },
+    { x: 31, y: 11 },
+    { x: 42, y: 13 },
+    { x: 49, y: 18 },
+    { x: 50, y: 24 },
+    { x: 44, y: 27 },
+  ],
+  finish: { x0: 36, x1: 37, y0: 24, y1: 31 },
+  startLine: gridSlots(34, -2, [27, 29]),
+  arrows: [
+    { at: { x: 36.5, y: 22.5 }, dir: { x: -1, y: 0 } },
+    { at: { x: 36.5, y: 32.5 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 10, y0: 5, x1: 34, y1: 17 },
+};
+
 export const TRACKS: TrackDefinition[] = [
   buildCircuit(MONZA),
   buildCircuit(MONACO),
   buildCircuit(INTERLAGOS),
+  buildCircuit(SPA),
+  buildCircuit(SILVERSTONE),
+  buildCircuit(SUZUKA),
 ];
 
 export function getTrackById(id: string): TrackDefinition | undefined {
