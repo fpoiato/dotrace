@@ -7,8 +7,8 @@
     "infra/cdk"
   ],
   "scripts": {
-    "bot": "npm run start --workspace=bot",
-    "bot:check": "npm run check --workspace=bot",
+    "bot": "npm --workspace=bot run start --",
+    "bot:check": "npm --workspace=bot run check",
     "start": "npm run start --workspace=frontend/dotrace-app",
     "build": "npm run build --workspace=frontend/dotrace-app",
     "cdk:deploy": "npm run deploy --workspace=infra/cdk",
