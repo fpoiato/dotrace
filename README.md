@@ -8,6 +8,7 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 
 | Path | Purpose |
 |------|---------|
+| `bot` | Headless TypeScript WebSocket bot / agentive client |
 | `frontend/dotrace-app` | Angular 19 + Tailwind 3.4 + ngx-translate (pt-BR / en) |
 | `infra/cdk` | DynamoDB `DotRaceConnections`, WebSocket Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
@@ -92,6 +93,8 @@ aws codepipeline start-pipeline-execution --name dotrace-game-pipeline --region 
 
 ```bash
 npm start          # Angular dev server
+npm run bot -- --room ABCDE --url ws://localhost:8080/game
+npm run bot:check  # Type-check the headless bot
 npm run build      # Production frontend build
 npm run cdk:synth  # CDK template
 npm run cdk:deploy # Deploy WebSocket stack

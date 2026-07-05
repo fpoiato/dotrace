@@ -2,10 +2,13 @@
   "name": "dotrace-game",
   "private": true,
   "workspaces": [
+    "bot",
     "frontend/dotrace-app",
     "infra/cdk"
   ],
   "scripts": {
+    "bot": "npm run start --workspace=bot",
+    "bot:check": "npm run check --workspace=bot",
     "start": "npm run start --workspace=frontend/dotrace-app",
     "build": "npm run build --workspace=frontend/dotrace-app",
     "cdk:deploy": "npm run deploy --workspace=infra/cdk",
