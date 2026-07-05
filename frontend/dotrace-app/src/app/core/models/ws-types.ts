@@ -80,6 +80,42 @@ export interface PodiumEntry {
   position: number;
 }
 
+/** How a recorded move resolved on the track. */
+export type MoveOutcome = 'normal' | 'collision' | 'off_track';
+
+/** One move in the race replay log (host records, relayed with state). */
+export interface ReplayMove {
+  /** 1-based round when the move was made. */
+  round: number;
+  /** Monotonic sequence across the whole race. */
+  seq: number;
+  playerId: string;
+  nickname: string;
+  color: string;
+  velocity: Vector2D;
+  from: Vector2D;
+  landing: Vector2D;
+  outcome: MoveOutcome;
+  /** Player position after this move. */
+  position: Vector2D;
+  /** Player velocity after this move. */
+  velocityAfter: Vector2D;
+  isOffTrack: boolean;
+  lap: number;
+  finishOrder?: number;
+}
+
+/** Starting grid snapshot for replay reconstruction. */
+export interface RaceReplayAnchor {
+  players: Array<{
+    connectionId: string;
+    nickname: string;
+    color: string;
+    position: Vector2D;
+  }>;
+  turnOrder: string[];
+}
+
 export interface GameState {
   phase: GamePhase;
   players: Player[];
@@ -97,6 +133,10 @@ export interface GameState {
   podium: PodiumEntry[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
+  /** Starting positions captured when the green flag drops. */
+  replayAnchor?: RaceReplayAnchor;
+  /** Move-by-move log for post-race replay. */
+  moveHistory?: ReplayMove[];
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -291,7 +331,87 @@ export function createInitialState(players: Player[], hostId: string): GameState
     gameMode: 'TURNS',
     diceRolls: {},
     podium: [],
+    moveHistory: [],
   };
+}
+
+/** Capture the grid at race start so replay can rebuild from move zero. */
+export function captureReplayAnchor(state: GameState): RaceReplayAnchor {
+  return {
+    players: state.players.map((p) => ({
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      position: { ...p.position },
+    })),
+    turnOrder: [...state.turnOrder],
+  };
+}
+
+/**
+ * Reconstruct race state after `step` moves (-1 = grid only, 0 = first move, …).
+ * Returns null when no replay anchor exists.
+ */
+export function buildReplayState(state: GameState, step: number): GameState | null {
+  const anchor = state.replayAnchor;
+  if (!anchor) return null;
+
+  const history = state.moveHistory ?? [];
+  const maxStep = history.length - 1;
+  const clamped = Math.max(-1, Math.min(step, maxStep));
+
+  const players: Player[] = anchor.players.map((p, idx) => ({
+    ...createLobbyPlayer(p.connectionId, p.nickname, false, idx, p.color),
+    position: { ...p.position },
+    velocity: zeroVector(),
+    isOffTrack: false,
+    trail: [{ ...p.position }],
+    lap: 1,
+  }));
+
+  const replay: GameState = {
+    ...state,
+    phase: 'GAME_ROUND',
+    players,
+    turnOrder: [...anchor.turnOrder],
+    currentTurnIndex: 0,
+    round: 1,
+    podium: [],
+    diceRolls: {},
+    moveHistory: history,
+    replayAnchor: anchor,
+  };
+
+  if (clamped < 0) return replay;
+
+  for (let i = 0; i <= clamped; i++) {
+    const move = history[i];
+    const player = players.find((p) => p.connectionId === move.playerId);
+    if (!player) continue;
+
+    const prevLap = player.lap;
+    player.position = { ...move.position };
+    player.velocity = { ...move.velocityAfter };
+    player.isOffTrack = move.isOffTrack;
+    player.lap = move.lap;
+
+    if (move.lap > prevLap) {
+      player.trail = [{ ...move.position }];
+      player.passedCheckpoint = false;
+    } else if (move.outcome !== 'collision') {
+      pushTrail(player, move.position);
+    }
+
+    if (move.finishOrder !== undefined) {
+      player.finishOrder = move.finishOrder;
+    } else {
+      delete player.finishOrder;
+    }
+
+    replay.round = move.round;
+  }
+
+  return replay;
 }
 
 export function isTimedMode(state: GameState): boolean {

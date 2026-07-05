@@ -5,11 +5,13 @@ import {
   GameMode,
   GameState,
   MIN_PLAYERS,
+  MoveOutcome,
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
   Vector2D,
   canPlayerMove,
+  captureReplayAnchor,
   createInitialState,
   createLobbyPlayer,
   findCollisionOpponent,
@@ -135,6 +137,8 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      state.moveHistory = [];
+      state.replayAnchor = captureReplayAnchor(state);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -189,6 +193,8 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    state.moveHistory = [];
+    state.replayAnchor = captureReplayAnchor(state);
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -235,6 +241,7 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      this.recordMove(state, player, vector, from, from, 'collision');
       this.afterMove(state);
       return;
     }
@@ -285,6 +292,9 @@ export class GameEngineService implements OnDestroy {
       }
     }
 
+    const outcome: MoveOutcome = tile === 'grass' ? 'off_track' : 'normal';
+    this.recordMove(state, player, vector, from, landing, outcome);
+
     if (isGameOver(state)) {
       state.phase = 'GAME_OVER';
       this.setStateAndRelay('GAME_OVER', state);
@@ -292,6 +302,33 @@ export class GameEngineService implements OnDestroy {
     }
 
     this.afterMove(state);
+  }
+
+  private recordMove(
+    state: GameState,
+    player: Player,
+    vector: Vector2D,
+    from: Vector2D,
+    landing: Vector2D,
+    outcome: MoveOutcome
+  ): void {
+    if (!state.moveHistory) state.moveHistory = [];
+    state.moveHistory.push({
+      round: state.round,
+      seq: state.moveHistory.length + 1,
+      playerId: player.connectionId,
+      nickname: player.nickname,
+      color: player.color,
+      velocity: { ...vector },
+      from: { ...from },
+      landing: { ...landing },
+      outcome,
+      position: { ...player.position },
+      velocityAfter: { ...player.velocity },
+      isOffTrack: player.isOffTrack,
+      lap: player.lap,
+      finishOrder: player.finishOrder,
+    });
   }
 
   private afterMove(state: GameState): void {

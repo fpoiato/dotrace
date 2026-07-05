@@ -17,7 +17,7 @@
       </div>
     }
 
-    @if (state.phase === 'GAME_ROUND' || state.phase === 'GAME_OVER') {
+    @if (state.phase === 'GAME_ROUND' || (state.phase === 'GAME_OVER' && !showReplay)) {
       <div class="mb-3 flex items-center justify-between gap-2 text-sm">
         @if (game.isMyTurn()) {
           @if (state.gameMode === 'TIMED') {
@@ -114,7 +114,9 @@
       }
     }
 
-    @if (state.phase === 'GAME_OVER' || showCelebration) {
+    @if (showReplay && canWatchReplay(state)) {
+      <app-race-replay [state]="state" (close)="closeReplay()" />
+    } @else if (state.phase === 'GAME_OVER' || showCelebration) {
       <div class="celebrate mt-6 rounded-2xl bg-gradient-to-br from-orange-600 to-yellow-500 p-6 text-center shadow-lg">
         <h2 class="text-2xl font-black text-white">{{ 'game.raceOver' | translate }} 🏁</h2>
         @if (state.gameMode === 'TIMED' && state.podium.length === 1) {
@@ -142,10 +144,19 @@
             }
           </ol>
         }
+        @if (canWatchReplay(state)) {
+          <button
+            type="button"
+            (click)="openReplay()"
+            class="mt-4 min-h-14 w-full rounded-xl bg-white/20 text-lg font-bold text-white backdrop-blur"
+          >
+            {{ 'game.replayWatch' | translate }}
+          </button>
+        }
         <button
           type="button"
           (click)="backToMenu()"
-          class="mt-6 min-h-14 w-full rounded-xl bg-slate-900 text-lg font-bold text-white"
+          class="mt-4 min-h-14 w-full rounded-xl bg-slate-900 text-lg font-bold text-white"
         >
           {{ 'game.backMenu' | translate }}
         </button>

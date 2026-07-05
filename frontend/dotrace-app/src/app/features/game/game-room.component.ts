@@ -20,6 +20,7 @@ import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
 import { MiniMapComponent } from './mini-map.component';
+import { RaceReplayComponent } from './race-replay.component';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 interface PadOption {
@@ -46,7 +47,7 @@ const PAD_GLYPHS: Record<string, string> = {
 @Component({
   selector: 'app-game-room',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent],
+  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent, RaceReplayComponent],
   templateUrl: './game-room.component.html',
 })
 export class GameRoomComponent implements OnInit, OnDestroy {
@@ -62,6 +63,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;
+  showReplay = false;
   padOptions: PadOption[] = [];
 
   ngOnInit(): void {
@@ -165,9 +167,24 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   backToMenu(): void {
     this.showCelebration = false;
+    this.showReplay = false;
     this.game.reset();
     this.room.reset();
     this.ws.disconnect();
     void this.router.navigate(['/']);
+  }
+
+  canWatchReplay(state: GameState): boolean {
+    return !!state.replayAnchor && (state.moveHistory?.length ?? 0) > 0;
+  }
+
+  openReplay(): void {
+    this.showReplay = true;
+    this.showCelebration = false;
+  }
+
+  closeReplay(): void {
+    this.showReplay = false;
+    this.showCelebration = true;
   }
 }

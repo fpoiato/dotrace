@@ -21,6 +21,8 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
   buildRaceTelemetry,
+  buildReplayState,
+  captureReplayAnchor,
   formatRaceTime,
 } from '../../../shared/ws-types';
 
@@ -394,6 +396,116 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('race replay', () => {
+  function raceState(): GameState {
+    const p1 = makePlayer({ connectionId: 'c1', nickname: 'Ana', position: { x: 0, y: 0 } });
+    const p2 = makePlayer({
+      connectionId: 'c2',
+      nickname: 'Bob',
+      color: '#00f',
+      joinOrder: 1,
+      position: { x: 1, y: 0 },
+    });
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [p1, p2],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: ['c1', 'c2'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 2,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+      moveHistory: [],
+    };
+    state.replayAnchor = captureReplayAnchor(state);
+    return state;
+  }
+
+  it('captures starting grid for replay', () => {
+    const state = raceState();
+    expect(state.replayAnchor?.players).toHaveLength(2);
+    expect(state.replayAnchor?.players[0].position).toEqual({ x: 0, y: 0 });
+    expect(state.replayAnchor?.turnOrder).toEqual(['c1', 'c2']);
+  });
+
+  it('rebuilds state step-by-step from move history', () => {
+    const state = raceState();
+    state.moveHistory = [
+      {
+        round: 1,
+        seq: 1,
+        playerId: 'c1',
+        nickname: 'Ana',
+        color: '#fff',
+        velocity: { x: 1, y: 0 },
+        from: { x: 0, y: 0 },
+        landing: { x: 1, y: 0 },
+        outcome: 'normal',
+        position: { x: 1, y: 0 },
+        velocityAfter: { x: 1, y: 0 },
+        isOffTrack: false,
+        lap: 1,
+      },
+      {
+        round: 1,
+        seq: 2,
+        playerId: 'c2',
+        nickname: 'Bob',
+        color: '#00f',
+        velocity: { x: 0, y: 1 },
+        from: { x: 1, y: 0 },
+        landing: { x: 1, y: 1 },
+        outcome: 'normal',
+        position: { x: 1, y: 1 },
+        velocityAfter: { x: 0, y: 1 },
+        isOffTrack: false,
+        lap: 1,
+      },
+    ];
+
+    const grid = buildReplayState(state, -1)!;
+    expect(grid.players.find((p) => p.connectionId === 'c1')?.position).toEqual({ x: 0, y: 0 });
+
+    const afterFirst = buildReplayState(state, 0)!;
+    expect(afterFirst.players.find((p) => p.connectionId === 'c1')?.position).toEqual({ x: 1, y: 0 });
+    expect(afterFirst.round).toBe(1);
+
+    const afterSecond = buildReplayState(state, 1)!;
+    expect(afterSecond.players.find((p) => p.connectionId === 'c2')?.position).toEqual({ x: 1, y: 1 });
+    expect(afterSecond.players.find((p) => p.connectionId === 'c2')?.trail).toHaveLength(2);
+  });
+
+  it('records collision as staying on the from square', () => {
+    const state = raceState();
+    state.moveHistory = [
+      {
+        round: 1,
+        seq: 1,
+        playerId: 'c1',
+        nickname: 'Ana',
+        color: '#fff',
+        velocity: { x: 1, y: 0 },
+        from: { x: 0, y: 0 },
+        landing: { x: 0, y: 0 },
+        outcome: 'collision',
+        position: { x: 0, y: 0 },
+        velocityAfter: { x: 0, y: 0 },
+        isOffTrack: false,
+        lap: 1,
+      },
+    ];
+
+    const replay = buildReplayState(state, 0)!;
+    const ana = replay.players.find((p) => p.connectionId === 'c1')!;
+    expect(ana.position).toEqual({ x: 0, y: 0 });
+    expect(ana.velocity).toEqual({ x: 0, y: 0 });
+    expect(ana.trail).toHaveLength(1);
   });
 });
 
