@@ -75,27 +75,29 @@ jobs:
           EXEC_ID="${{ steps.pipeline.outputs.execution_id }}"
           echo "Waiting for $PIPELINE_NAME execution $EXEC_ID …"
           for i in $(seq 1 90); do
-            read -r STAGE EXEC STATUS <<< "$(
-              aws codepipeline get-pipeline-state \
-                --name "$PIPELINE_NAME" \
-                --region "$AWS_REGION" \
-                --query "stageStates[?latestExecution.pipelineExecutionId=='${EXEC_ID}'] | [-1].[stageName, latestExecution.pipelineExecutionId, latestExecution.status] | [0]" \
-                --output text
-            )"
-            echo "Attempt $i/90: stage=$STAGE status=$STATUS"
-            if [ "$EXEC" = "$EXEC_ID" ]; then
-              case "$STATUS" in
-                Succeeded)
-                  echo "Deployment succeeded."
-                  exit 0
-                  ;;
-                Failed|Cancelled|Superseded|Stopped)
-                  echo "Deployment failed with status: $STATUS"
-                  exit 1
-                  ;;
-              esac
+            STATE=$(aws codepipeline get-pipeline-state \
+              --name "$PIPELINE_NAME" \
+              --region "$AWS_REGION" \
+              --output json)
+
+            FAILED_STAGE=$(echo "$STATE" | jq -r --arg id "$EXEC_ID" '
+              [.stageStates[]
+                | select(.latestExecution.pipelineExecutionId == $id)
+                | select(.latestExecution.status | IN("Failed", "Stopped", "Cancelled"))
+                | .stageName][0] // empty')
+            if [ -n "$FAILED_STAGE" ]; then
+              echo "Deployment failed in stage: $FAILED_STAGE"
+              exit 1
             fi
-            sleep 30
+
+            LAST_EXEC=$(echo "$STATE" | jq -r '.stageStates[-1].latestExecution.pipelineExecutionId // empty')
+            LAST_STATUS=$(echo "$STATE" | jq -r '.stageStates[-1].latestExecution.status // empty')
+            echo "Attempt $i/90: final stage execution=${LAST_EXEC:-none} status=${LAST_STATUS:-none}"
+            if [ "$LAST_EXEC" = "$EXEC_ID" ] && [ "$LAST_STATUS" = "Succeeded" ]; then
+              echo "Deployment succeeded."
+              exit 0
+            fi
+            sleep 20
           done
           echo "Timed out waiting for pipeline execution."
           exit 1
