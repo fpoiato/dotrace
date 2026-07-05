@@ -1,0 +1,20 @@
+{
+  "name": "dotrace-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless agentive client (AI bot) for Dot Race — connects over WebSocket, parses relayed game state and races using a greedy pathfinder.",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "smoke": "tsx src/brain-smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}

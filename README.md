@@ -12,6 +12,7 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | `infra/cdk` | DynamoDB `DotRaceConnections`, WebSocket Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
 | `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
+| `bot/` | Headless Node.js AI client (greedy vector pathfinder) — see `bot/README.md` |
 | `pipeline/` | CodeBuild buildspec |
 | `.github/workflows/` | CI/CD on push to `main` (`ci-cd.yml`) |
 
