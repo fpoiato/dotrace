@@ -15,6 +15,10 @@ env:
   AWS_REGION: us-east-1
   PIPELINE_NAME: dotrace-game-pipeline
 
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -71,23 +75,26 @@ jobs:
           EXEC_ID="${{ steps.pipeline.outputs.execution_id }}"
           echo "Waiting for $PIPELINE_NAME execution $EXEC_ID …"
           for i in $(seq 1 90); do
-            STATUS=$(aws codepipeline get-pipeline-execution \
-              --pipeline-name "$PIPELINE_NAME" \
-              --pipeline-execution-id "$EXEC_ID" \
-              --region "$AWS_REGION" \
-              --query pipelineExecution.status \
-              --output text)
-            echo "Attempt $i/90: $STATUS"
-            case "$STATUS" in
-              Succeeded)
-                echo "Deployment succeeded."
-                exit 0
-                ;;
-              Failed|Cancelled|Superseded|Stopped)
-                echo "Deployment failed with status: $STATUS"
-                exit 1
-                ;;
-            esac
+            read -r STAGE EXEC STATUS <<< "$(
+              aws codepipeline get-pipeline-state \
+                --name "$PIPELINE_NAME" \
+                --region "$AWS_REGION" \
+                --query "stageStates[?latestExecution.pipelineExecutionId=='${EXEC_ID}'] | [-1].[stageName, latestExecution.pipelineExecutionId, latestExecution.status] | [0]" \
+                --output text
+            )"
+            echo "Attempt $i/90: stage=$STAGE status=$STATUS"
+            if [ "$EXEC" = "$EXEC_ID" ]; then
+              case "$STATUS" in
+                Succeeded)
+                  echo "Deployment succeeded."
+                  exit 0
+                  ;;
+                Failed|Cancelled|Superseded|Stopped)
+                  echo "Deployment failed with status: $STATUS"
+                  exit 1
+                  ;;
+              esac
+            fi
             sleep 30
           done
           echo "Timed out waiting for pipeline execution."

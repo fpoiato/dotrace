@@ -29,7 +29,12 @@ resource "aws_iam_role_policy" "github_actions" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = ["codepipeline:StartPipelineExecution", "codepipeline:GetPipeline", "codepipeline:GetPipelineState"]
+      Action = [
+        "codepipeline:StartPipelineExecution",
+        "codepipeline:GetPipeline",
+        "codepipeline:GetPipelineState",
+        "codepipeline:GetPipelineExecution",
+      ]
       Resource = aws_codepipeline.dotrace.arn
     }]
   })
