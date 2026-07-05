@@ -7,6 +7,7 @@ import { getTrackById } from '../../core/models/tracks';
 import {
   GameState,
   Player,
+  ReplayMove,
   Vector2D,
   canPlayerMove,
   formatRaceTime,
@@ -29,6 +30,11 @@ interface PadOption {
   velocity: Vector2D | null;
   /** The move is legal but lands in the gravel. */
   grass: boolean;
+}
+
+interface ReplayRound {
+  round: number;
+  moves: ReplayMove[];
 }
 
 const PAD_GLYPHS: Record<string, string> = {
@@ -161,6 +167,38 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const player = state.players.find((p) => p.connectionId === connectionId);
     if (!player?.finishedAt || !state.raceStartedAt) return null;
     return formatRaceTime(player.finishedAt - state.raceStartedAt);
+  }
+
+  replayRounds(state: GameState): ReplayRound[] {
+    const buckets = new Map<number, ReplayMove[]>();
+    for (const move of state.replayMoves ?? []) {
+      const list = buckets.get(move.round);
+      if (list) {
+        list.push(move);
+      } else {
+        buckets.set(move.round, [move]);
+      }
+    }
+    return [...buckets.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([round, moves]) => ({ round, moves }));
+  }
+
+  replayOutcomeIcon(move: ReplayMove): string {
+    switch (move.outcome) {
+      case 'CRASH':
+        return '💥';
+      case 'OFF_TRACK':
+        return '🟩';
+      case 'FINISH':
+        return '🏁';
+      default:
+        return '➜';
+    }
+  }
+
+  replayOutcomeKey(move: ReplayMove): string {
+    return `game.replayOutcome.${move.outcome}`;
   }
 
   backToMenu(): void {

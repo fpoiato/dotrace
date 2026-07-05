@@ -80,6 +80,24 @@ export interface PodiumEntry {
   position: number;
 }
 
+export type ReplayMoveOutcome = 'MOVE' | 'OFF_TRACK' | 'CRASH' | 'FINISH';
+
+export interface ReplayMove {
+  /** 1-based sequence across the whole race. */
+  sequence: number;
+  /** Round when this move was submitted (turn-based races). */
+  round: number;
+  playerId: string;
+  nickname: string;
+  from: Vector2D;
+  to: Vector2D;
+  submittedVelocity: Vector2D;
+  resultingVelocity: Vector2D;
+  lap: number;
+  outcome: ReplayMoveOutcome;
+  timestamp: number;
+}
+
 export interface GameState {
   phase: GamePhase;
   players: Player[];
@@ -97,6 +115,8 @@ export interface GameState {
   podium: PodiumEntry[];
   /** Epoch ms when the green flag drops (GRID_ORDER_DONE). */
   raceStartedAt?: number;
+  /** Round-by-round move history used by the post-race replay panel. */
+  replayMoves?: ReplayMove[];
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -291,6 +311,7 @@ export function createInitialState(players: Player[], hostId: string): GameState
     gameMode: 'TURNS',
     diceRolls: {},
     podium: [],
+    replayMoves: [],
   };
 }
 
@@ -432,11 +453,36 @@ export function segmentEntersRect(
 
 /** Trail history cap — bounds RELAY payload size on long races. */
 export const MAX_TRAIL_POINTS = 300;
+/** Replay move cap — bounds RELAY payload size on long races. */
+export const MAX_REPLAY_MOVES = 600;
 
 export function pushTrail(player: Player, point: Vector2D): void {
   player.trail.push({ ...point });
   if (player.trail.length > MAX_TRAIL_POINTS) {
     player.trail.shift();
+  }
+}
+
+export function pushReplayMove(
+  state: GameState,
+  move: Omit<ReplayMove, 'sequence'>
+): void {
+  if (!state.replayMoves) {
+    state.replayMoves = [];
+  }
+  state.replayMoves.push({
+    ...move,
+    from: { ...move.from },
+    to: { ...move.to },
+    submittedVelocity: { ...move.submittedVelocity },
+    resultingVelocity: { ...move.resultingVelocity },
+    sequence: state.replayMoves.length + 1,
+  });
+  if (state.replayMoves.length > MAX_REPLAY_MOVES) {
+    state.replayMoves.shift();
+    state.replayMoves.forEach((entry, idx) => {
+      entry.sequence = idx + 1;
+    });
   }
 }
 

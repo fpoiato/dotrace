@@ -8,6 +8,7 @@ import {
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
+  ReplayMoveOutcome,
   Vector2D,
   canPlayerMove,
   createInitialState,
@@ -19,6 +20,7 @@ import {
   isTimedMode,
   landingPosition,
   nextActiveTurnIndex,
+  pushReplayMove,
   pushTrail,
   rollDice,
   segmentCrossesFinish,
@@ -220,6 +222,8 @@ export class GameEngineService implements OnDestroy {
 
     const track = getTrackById(state.trackId);
     if (!track) return;
+    const moveRound = state.round;
+    const moveTimestamp = Date.now();
 
     // Strict validation: the submitted velocity must be one of the moves the
     // host itself considers legal (±1 gear rule, off-track cap, in-grid landing,
@@ -235,6 +239,7 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      this.recordReplayMove(state, player, from, vector, 'CRASH', moveRound, moveTimestamp);
       this.afterMove(state);
       return;
     }
@@ -254,6 +259,8 @@ export class GameEngineService implements OnDestroy {
       player.velocity = { ...vector };
       player.isOffTrack = false;
     }
+    let replayOutcome: ReplayMoveOutcome = tile === 'grass' ? 'OFF_TRACK' : 'MOVE';
+    let finisher: string | null = null;
 
     if (track.checkpoint && !player.passedCheckpoint) {
       player.passedCheckpoint = segmentEntersRect(from, landing, track.checkpoint);
@@ -272,7 +279,7 @@ export class GameEngineService implements OnDestroy {
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
-        const now = Date.now();
+        const now = moveTimestamp;
         player.finishOrder = pos;
         player.finishRound = state.round;
         player.finishedAt = now;
@@ -281,8 +288,13 @@ export class GameEngineService implements OnDestroy {
           nickname: player.nickname,
           position: pos,
         });
-        this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
+        replayOutcome = 'FINISH';
+        finisher = player.nickname;
       }
+    }
+    this.recordReplayMove(state, player, from, vector, replayOutcome, moveRound, moveTimestamp);
+    if (finisher) {
+      this.setStateAndRelay('PLAYER_FINISHED', state, { finisher });
     }
 
     if (isGameOver(state)) {
@@ -359,7 +371,7 @@ export class GameEngineService implements OnDestroy {
     if (!this.hostRecoveryTimer) return;
     clearTimeout(this.hostRecoveryTimer);
     this.hostRecoveryTimer = null;
-    if (!state.gameMode) state.gameMode = 'TURNS';
+    this.normalizeIncomingState(state);
     const myId = this.myId;
     state.hostId = myId ?? state.hostId;
     for (const p of state.players) {
@@ -510,6 +522,13 @@ export class GameEngineService implements OnDestroy {
     if (state.hostId === oldConnectionId) {
       state.hostId = newConnectionId;
     }
+    if (state.replayMoves?.length) {
+      state.replayMoves = state.replayMoves.map((move) =>
+        move.playerId === oldConnectionId
+          ? { ...move, playerId: newConnectionId, nickname: player.nickname }
+          : move
+      );
+    }
 
     this.setStateAndRelay('STATE_SYNC', state);
   }
@@ -517,8 +536,36 @@ export class GameEngineService implements OnDestroy {
   private applyRelay(relay: RelayPayload): void {
     if (this.isHost) return;
     const state = relay.state;
-    if (!state.gameMode) state.gameMode = 'TURNS';
+    this.normalizeIncomingState(state);
     this.emit(state);
+  }
+
+  private normalizeIncomingState(state: GameState): void {
+    if (!state.gameMode) state.gameMode = 'TURNS';
+    if (!state.replayMoves) state.replayMoves = [];
+  }
+
+  private recordReplayMove(
+    state: GameState,
+    player: Player,
+    from: Vector2D,
+    submittedVelocity: Vector2D,
+    outcome: ReplayMoveOutcome,
+    round: number,
+    timestamp: number
+  ): void {
+    pushReplayMove(state, {
+      round,
+      playerId: player.connectionId,
+      nickname: player.nickname,
+      from,
+      to: player.position,
+      submittedVelocity,
+      resultingVelocity: player.velocity,
+      lap: player.lap,
+      outcome,
+      timestamp,
+    });
   }
 
   private handlePlayerAction(action: Record<string, unknown>): void {
