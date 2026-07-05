@@ -3,7 +3,7 @@ import { TileType, TrackArrow, TrackDefinition, Vector2D } from './ws-types';
 /**
  * Circuits are rasterized from a centerline polyline stamped with a round
  * brush, mimicking a marker pen on grid paper. Layouts approximate the
- * classic outlines of Monza, Monaco and Interlagos.
+ * classic outlines of Monza, Monaco, Interlagos, Silverstone and Spa.
  */
 
 const GRID_W = 56;
@@ -200,10 +200,79 @@ const INTERLAGOS: CircuitSpec = {
   checkpoint: { x0: 44, y0: 12, x1: 54, y1: 28 },
 };
 
+/**
+ * Silverstone — clockwise fast loop: broad lower sweep, rapid rise on the
+ * right edge, then a long upper arc feeding back through flowing left-side
+ * corners toward the pit straight.
+ */
+const SILVERSTONE: CircuitSpec = {
+  id: 'silverstone',
+  nameKey: 'tracks.silverstone',
+  centerline: [
+    { x: 10, y: 28 },
+    { x: 16, y: 30 },
+    { x: 28, y: 31 },
+    { x: 40, y: 29 },
+    { x: 48, y: 24 },
+    { x: 50, y: 17 },
+    { x: 46, y: 11 },
+    { x: 37, y: 8 },
+    { x: 28, y: 7 },
+    { x: 20, y: 9 },
+    { x: 14, y: 13 },
+    { x: 10, y: 19 },
+    { x: 8, y: 24 },
+    { x: 10, y: 28 },
+  ],
+  finish: { x0: 24, x1: 25, y0: 27, y1: 35 },
+  startLine: gridSlots(27, 2, [29, 31]),
+  arrows: [
+    { at: { x: 24.5, y: 25.5 }, dir: { x: 1, y: 0 } },
+    { at: { x: 24.5, y: 35.2 }, dir: { x: 1, y: 0 } },
+  ],
+  checkpoint: { x0: 37, y0: 5, x1: 54, y1: 20 },
+};
+
+/**
+ * Spa — clockwise rollercoaster: long downhill lower straight into the
+ * left-side valley, climb through the top section and descend via the
+ * right-hand side back toward the line.
+ */
+const SPA: CircuitSpec = {
+  id: 'spa',
+  nameKey: 'tracks.spa',
+  centerline: [
+    { x: 46, y: 30 },
+    { x: 38, y: 32 },
+    { x: 27, y: 32 },
+    { x: 17, y: 30 },
+    { x: 10, y: 26 },
+    { x: 6, y: 19 },
+    { x: 8, y: 12 },
+    { x: 14, y: 8 },
+    { x: 22, y: 6 },
+    { x: 31, y: 7 },
+    { x: 39, y: 10 },
+    { x: 45, y: 15 },
+    { x: 49, y: 21 },
+    { x: 50, y: 27 },
+    { x: 46, y: 30 },
+  ],
+  finish: { x0: 34, x1: 35, y0: 27, y1: 35 },
+  startLine: gridSlots(33, -2, [29, 31]),
+  arrows: [
+    { at: { x: 34.5, y: 25.5 }, dir: { x: -1, y: 0 } },
+    { at: { x: 34.5, y: 35.2 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 4, y0: 6, x1: 18, y1: 21 },
+};
+
 export const TRACKS: TrackDefinition[] = [
   buildCircuit(MONZA),
   buildCircuit(MONACO),
   buildCircuit(INTERLAGOS),
+  buildCircuit(SILVERSTONE),
+  buildCircuit(SPA),
 ];
 
 export function getTrackById(id: string): TrackDefinition | undefined {
