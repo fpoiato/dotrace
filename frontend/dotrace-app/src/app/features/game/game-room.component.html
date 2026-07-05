@@ -116,13 +116,25 @@
 
     @if (state.phase === 'GAME_OVER' || showCelebration) {
       <app-leaderboard [state]="state" />
+      @if (!showReplay && (state.replayLog?.length ?? 0) > 0) {
+        <button
+          type="button"
+          (click)="openReplay()"
+          class="mt-3 min-h-12 w-full rounded-xl bg-slate-700 text-base font-bold text-white active:bg-slate-600"
+        >
+          🎬 {{ 'game.replay' | translate }}
+        </button>
+      }
       <button
         type="button"
         (click)="backToMenu()"
-        class="mt-4 min-h-14 w-full rounded-xl bg-slate-800 text-lg font-bold text-white"
+        class="mt-3 min-h-14 w-full rounded-xl bg-slate-800 text-lg font-bold text-white"
       >
         {{ 'game.backMenu' | translate }}
       </button>
+      @if (showReplay) {
+        <app-replay-viewer [state]="state" (closed)="closeReplay()" />
+      }
     }
 
     @if (state.phase === 'LOBBY') {

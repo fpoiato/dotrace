@@ -21,6 +21,7 @@ import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
 import { LeaderboardComponent } from './leaderboard.component';
 import { MiniMapComponent } from './mini-map.component';
+import { ReplayViewerComponent } from './replay-viewer.component';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 interface PadOption {
@@ -47,7 +48,7 @@ const PAD_GLYPHS: Record<string, string> = {
 @Component({
   selector: 'app-game-room',
   standalone: true,
-  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent, LeaderboardComponent],
+  imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent, LeaderboardComponent, ReplayViewerComponent],
   templateUrl: './game-room.component.html',
 })
 export class GameRoomComponent implements OnInit, OnDestroy {
@@ -63,6 +64,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;
+  showReplay = false;
   padOptions: PadOption[] = [];
 
   ngOnInit(): void {
@@ -158,8 +160,18 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return state.players.find((p) => p.connectionId === id);
   }
 
+  openReplay(): void {
+    this.showReplay = true;
+  }
+
+  closeReplay(): void {
+    this.showReplay = false;
+  }
+
+
   backToMenu(): void {
     this.showCelebration = false;
+    this.showReplay = false;
     this.game.reset();
     this.room.reset();
     this.ws.disconnect();

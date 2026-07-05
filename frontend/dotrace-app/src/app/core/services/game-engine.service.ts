@@ -19,6 +19,7 @@ import {
   isTimedMode,
   landingPosition,
   nextActiveTurnIndex,
+  pushReplayMove,
   pushTrail,
   rollDice,
   segmentCrossesFinish,
@@ -207,6 +208,18 @@ export class GameEngineService implements OnDestroy {
       player.trail = [{ ...start }];
       player.lap = 1;
     });
+    // Record starting positions as seq=0 replay entries.
+    state.replayLog = [];
+    for (const player of ordered) {
+      pushReplayMove(state, {
+        round: 0,
+        connectionId: player.connectionId,
+        position: { ...player.position },
+        velocity: { ...player.velocity },
+        isOffTrack: player.isOffTrack,
+        lap: player.lap,
+      });
+    }
   }
 
   private applyMove(senderId: string, vector: Vector2D): void {
@@ -235,6 +248,14 @@ export class GameEngineService implements OnDestroy {
     if (findCollisionOpponent(senderId, from, landing, state.players)) {
       // Crash: stay put, kill momentum (gear 0). Never share a cell.
       player.velocity = zeroVector();
+      pushReplayMove(state, {
+        round: state.round,
+        connectionId: senderId,
+        position: { ...player.position },
+        velocity: { ...player.velocity },
+        isOffTrack: player.isOffTrack,
+        lap: player.lap,
+      });
       this.afterMove(state);
       return;
     }
@@ -287,6 +308,16 @@ export class GameEngineService implements OnDestroy {
         this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
       }
     }
+
+    // Record this move for the post-race replay (after all state mutations).
+    pushReplayMove(state, {
+      round: state.round,
+      connectionId: senderId,
+      position: { ...player.position },
+      velocity: { ...player.velocity },
+      isOffTrack: player.isOffTrack,
+      lap: player.lap,
+    });
 
     if (isGameOver(state)) {
       state.phase = 'GAME_OVER';
@@ -363,6 +394,7 @@ export class GameEngineService implements OnDestroy {
     clearTimeout(this.hostRecoveryTimer);
     this.hostRecoveryTimer = null;
     if (!state.gameMode) state.gameMode = 'TURNS';
+    if (!state.replayLog) state.replayLog = [];
     const myId = this.myId;
     state.hostId = myId ?? state.hostId;
     for (const p of state.players) {
@@ -523,6 +555,7 @@ export class GameEngineService implements OnDestroy {
     if (this.isHost) return;
     const state = relay.state;
     if (!state.gameMode) state.gameMode = 'TURNS';
+    if (!state.replayLog) state.replayLog = [];
     this.emit(state);
   }
 
