@@ -117,7 +117,7 @@
     @if (state.phase === 'GAME_OVER' || showCelebration) {
       <div class="celebrate mt-6 rounded-2xl bg-gradient-to-br from-orange-600 to-yellow-500 p-6 text-center shadow-lg">
         <h2 class="text-2xl font-black text-white">{{ 'game.raceOver' | translate }} 🏁</h2>
-        @if (state.gameMode === 'TIMED' && state.podium.length === 1) {
+        @if ((state.gameMode === 'TIMED' && state.podium.length === 1) || (game.isPracticeMode && state.podium.length >= 1)) {
           <p class="mt-2 text-lg font-bold text-white">
             🏆 {{ state.podium[0].nickname }}
             @if (finishTime(state, state.podium[0].connectionId); as time) {

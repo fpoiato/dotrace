@@ -1,0 +1,76 @@
+<div class="mx-auto max-w-md px-4 py-6">
+  <div class="mb-2 flex items-center justify-between">
+    <h1 class="text-2xl font-bold text-orange-400">{{ 'practice.title' | translate }}</h1>
+    <button
+      type="button"
+      (click)="showHowTo = true"
+      [attr.aria-label]="'howto.title' | translate"
+      class="min-h-11 min-w-11 rounded-full bg-slate-800 text-lg font-bold text-slate-300 hover:text-white"
+    >
+      ?
+    </button>
+  </div>
+  <p class="mb-6 text-sm text-slate-400">{{ 'practice.subtitle' | translate }}</p>
+
+  <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
+  <div class="mb-6 grid grid-cols-1 gap-3">
+    @for (track of tracks; track track.id) {
+      <button
+        type="button"
+        (click)="selectTrack(track.id)"
+        class="min-h-14 rounded-xl border-2 px-4 text-left font-semibold transition"
+        [class]="selectedTrackId === track.id ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+      >
+        {{ track.nameKey | translate }}
+      </button>
+    }
+  </div>
+
+  <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.laps' | translate }}</h2>
+  <div class="mb-6 grid grid-cols-3 gap-3">
+    @for (n of lapOptions; track n) {
+      <button
+        type="button"
+        (click)="selectLaps(n)"
+        class="min-h-12 rounded-xl border-2 text-lg font-bold transition"
+        [class]="selectedLaps === n ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+      >
+        {{ n }}
+      </button>
+    }
+  </div>
+
+  <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.gameMode' | translate }}</h2>
+  <div class="mb-6 grid grid-cols-2 gap-3">
+    @for (mode of gameModes; track mode) {
+      <button
+        type="button"
+        (click)="selectGameMode(mode)"
+        class="min-h-12 rounded-xl border-2 px-3 text-sm font-semibold transition"
+        [class]="selectedGameMode === mode ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+      >
+        {{ 'lobby.mode.' + mode | translate }}
+      </button>
+    }
+  </div>
+
+  <button
+    type="button"
+    (click)="startRace()"
+    [disabled]="!selectedTrackId"
+    class="mb-3 min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
+  >
+    {{ 'practice.start' | translate }}
+  </button>
+  <button
+    type="button"
+    (click)="backToMenu()"
+    class="min-h-12 w-full rounded-xl text-slate-400 hover:text-white"
+  >
+    {{ 'practice.back' | translate }}
+  </button>
+</div>
+
+@if (showHowTo) {
+  <app-how-to-play (close)="showHowTo = false" />
+}

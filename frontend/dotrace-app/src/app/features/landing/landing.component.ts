@@ -55,7 +55,7 @@ export class LandingComponent implements OnInit {
     this.loading = true;
     this.error = '';
     try {
-      this.session.save({ nickname: this.nickname.trim() });
+      this.session.save({ nickname: this.nickname.trim(), sessionKind: 'multiplayer' });
       await this.room.createRoom(this.nickname.trim());
       await this.router.navigate(['/lobby']);
     } catch (e) {
@@ -70,7 +70,7 @@ export class LandingComponent implements OnInit {
     this.loading = true;
     this.error = '';
     try {
-      this.session.save({ nickname: this.nickname.trim() });
+      this.session.save({ nickname: this.nickname.trim(), sessionKind: 'multiplayer' });
       await this.room.joinRoom(this.nickname.trim(), this.roomCode.trim());
       await this.router.navigate(['/lobby']);
     } catch (e) {
@@ -78,5 +78,11 @@ export class LandingComponent implements OnInit {
     } finally {
       this.loading = false;
     }
+  }
+
+  startPractice(): void {
+    if (!this.nickname.trim()) return;
+    this.session.save({ nickname: this.nickname.trim(), sessionKind: 'practice' });
+    void this.router.navigate(['/practice']);
   }
 }

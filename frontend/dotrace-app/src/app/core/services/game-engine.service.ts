@@ -5,6 +5,7 @@ import {
   GameMode,
   GameState,
   MIN_PLAYERS,
+  PLAYER_COLORS,
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
@@ -26,6 +27,9 @@ import {
   zeroVector,
   buildRaceTelemetry,
 } from '../models/ws-types';
+
+/** Fixed connection id for the solo practice player (no WebSocket). */
+export const PRACTICE_PLAYER_ID = 'practice-local';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
@@ -44,6 +48,7 @@ export class GameEngineService implements OnDestroy {
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
+  private practiceMode = false;
 
   get state(): GameState | null {
     return this.stateSubject.value;
@@ -59,17 +64,40 @@ export class GameEngineService implements OnDestroy {
     this.stateSubject.next(structuredClone(state));
   }
 
+  get isPracticeMode(): boolean {
+    return this.practiceMode;
+  }
+
   get isHost(): boolean {
-    return this.roomService.room?.isHost ?? false;
+    return this.practiceMode || (this.roomService.room?.isHost ?? false);
   }
 
   get myId(): string | null {
+    if (this.practiceMode) return PRACTICE_PLAYER_ID;
     return this.roomService.room?.connectionId ?? this.ws.connectionId;
   }
 
   init(): void {
     if (this.messageSub) return;
     this.messageSub = this.ws.messages$.subscribe((msg) => this.handleMessage(msg.action, msg.payload));
+  }
+
+  enterPracticeLobby(nickname: string): void {
+    this.practiceMode = true;
+    this.session.save({ nickname, sessionKind: 'practice' });
+    const player = createLobbyPlayer(
+      PRACTICE_PLAYER_ID,
+      nickname,
+      true,
+      0,
+      PLAYER_COLORS[0]
+    );
+    const state = createInitialState([player], PRACTICE_PLAYER_ID);
+    const saved = this.session.load();
+    if (saved?.trackId) state.trackId = saved.trackId;
+    if (saved?.laps) state.totalLaps = saved.laps;
+    if (saved?.gameMode) state.gameMode = saved.gameMode;
+    this.emit(state);
   }
 
   selectTrack(trackId: string): void {
@@ -101,24 +129,28 @@ export class GameEngineService implements OnDestroy {
 
   startRace(): void {
     if (!this.isHost) return;
+    if (this.practiceMode) {
+      this.beginRaceFromLobby(this.state?.players ?? [], PRACTICE_PLAYER_ID);
+      return;
+    }
     const room = this.roomService.room;
     const lobbyPlayers = this.roomService.players.filter((p) => p.status === 'approved');
     if (!room || lobbyPlayers.length < MIN_PLAYERS) return;
 
+    const roster = lobbyPlayers.map((p) =>
+      createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+    );
+    this.beginRaceFromLobby(roster, room.connectionId);
+  }
+
+  private beginRaceFromLobby(lobbyPlayers: Player[], hostId: string): void {
     const saved = this.session.load();
     const trackId = this.state?.trackId || saved?.trackId || '';
     if (!trackId || !getTrackById(trackId)) return;
     const totalLaps = this.state?.totalLaps ?? saved?.laps ?? 1;
     const gameMode = this.state?.gameMode ?? saved?.gameMode ?? 'TURNS';
 
-    // Rebuild the roster from players$ (the single source of truth) so anyone
-    // approved after the track was selected is included in the race.
-    const state = createInitialState(
-      lobbyPlayers.map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      ),
-      room.connectionId
-    );
+    const state = createInitialState(lobbyPlayers, hostId);
     state.trackId = trackId;
     state.totalLaps = [1, 2, 3].includes(totalLaps) ? totalLaps : 1;
     state.gameMode = gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
@@ -132,6 +164,7 @@ export class GameEngineService implements OnDestroy {
       state.currentTurnIndex = 0;
       state.round = 1;
       state.phase = 'GAME_ROUND';
+      state.raceStartedAt = Date.now();
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -149,6 +182,10 @@ export class GameEngineService implements OnDestroy {
   }
 
   submitMove(vector: Vector2D): void {
+    if (this.practiceMode) {
+      this.applyMove(PRACTICE_PLAYER_ID, vector);
+      return;
+    }
     const room = this.roomService.room;
     if (!room) return;
 
@@ -564,6 +601,14 @@ export class GameEngineService implements OnDestroy {
   }
 
   ensureLobbyState(): void {
+    const saved = this.session.load();
+    if (saved?.sessionKind === 'practice') {
+      this.practiceMode = true;
+      if (!this.state && saved.nickname) {
+        this.enterPracticeLobby(saved.nickname);
+      }
+      return;
+    }
     if (!this.state && this.roomService.room) {
       this.bootstrapLobbyState();
     }
@@ -577,6 +622,7 @@ export class GameEngineService implements OnDestroy {
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.practiceMode = false;
     this.stateSubject.next(null);
   }
 }

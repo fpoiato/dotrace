@@ -5,11 +5,14 @@ import { Injectable } from '@angular/core';
  * connection id, host flag) deliberately lives in memory alone — persisting
  * it caused fresh visits to get pulled back into stale rooms.
  */
+export type SessionKind = 'multiplayer' | 'practice';
+
 export interface SessionData {
   nickname?: string;
   trackId?: string;
   laps?: number;
   gameMode?: 'TURNS' | 'TIMED';
+  sessionKind?: SessionKind;
 }
 
 const KEY = 'dotrace-session';

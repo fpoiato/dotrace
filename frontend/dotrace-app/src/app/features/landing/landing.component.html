@@ -36,6 +36,14 @@
       >
         {{ 'landing.joinGame' | translate }}
       </button>
+      <button
+        type="button"
+        (click)="startPractice()"
+        [disabled]="loading || !nickname.trim()"
+        class="min-h-14 w-full rounded-xl border-2 border-slate-600 bg-transparent text-lg font-bold text-slate-300 transition hover:border-slate-500 hover:bg-slate-800/50 disabled:opacity-50"
+      >
+        {{ 'landing.practice' | translate }}
+      </button>
     } @else {
       <label class="block">
         <span class="mb-2 block text-sm font-medium text-slate-300">{{ 'landing.roomCode' | translate }}</span>

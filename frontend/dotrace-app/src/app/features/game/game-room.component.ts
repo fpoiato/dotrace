@@ -16,6 +16,7 @@ import {
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
+import { SessionStorageService } from '../../core/services/session-storage.service';
 import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component';
@@ -53,6 +54,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);
   readonly telemetry = inject(TelemetryService);
   private readonly room = inject(RoomService);
+  private readonly session = inject(SessionStorageService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
 
@@ -65,25 +67,26 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   padOptions: PadOption[] = [];
 
   ngOnInit(): void {
-    if (!this.room.room) {
+    const inPractice = this.game.isPracticeMode || this.session.load()?.sessionKind === 'practice';
+    if (!inPractice && !this.room.room) {
       void this.router.navigate(['/']);
       return;
     }
-    this.game.init();
+    if (!this.game.isPracticeMode) {
+      this.game.init();
+      this.subs.push(this.room.listenForLobbyUpdates().subscribe());
+    }
     this.telemetry.init();
     this.game.ensureLobbyState();
 
     this.subs.push(
-      this.room.listenForLobbyUpdates().subscribe(),
       this.game.state$.subscribe((state) => {
         this.padOptions = this.buildPadOptions(state);
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
         }
-        // Host-migration fallback can reset the game to the lobby phase;
-        // follow it so nobody is stranded on the game screen.
         if (state?.phase === 'LOBBY') {
-          void this.router.navigate(['/lobby']);
+          void this.router.navigate([this.game.isPracticeMode ? '/practice' : '/lobby']);
         }
       })
     );
@@ -96,7 +99,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
    */
   private buildPadOptions(state: GameState | null): PadOption[] {
     const options: PadOption[] = [];
-    const myId = this.room.room?.connectionId;
+    const myId = this.game.myId;
     const track = state?.trackId ? getTrackById(state.trackId) : undefined;
     const me = state?.players.find((p) => p.connectionId === myId);
     const canMove =
@@ -153,8 +156,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   myPlayer(state: GameState): Player | undefined {
-    const id = this.room.room?.connectionId;
-    return state.players.find((p) => p.connectionId === id);
+    const id = this.game.myId;
+    return id ? state.players.find((p) => p.connectionId === id) : undefined;
   }
 
   finishTime(state: GameState, connectionId: string): string | null {
@@ -165,9 +168,14 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   backToMenu(): void {
     this.showCelebration = false;
+    const wasPractice = this.game.isPracticeMode || this.session.load()?.sessionKind === 'practice';
     this.game.reset();
-    this.room.reset();
-    this.ws.disconnect();
+    if (wasPractice) {
+      this.session.save({ sessionKind: 'multiplayer' });
+    } else {
+      this.room.reset();
+      this.ws.disconnect();
+    }
     void this.router.navigate(['/']);
   }
 }
