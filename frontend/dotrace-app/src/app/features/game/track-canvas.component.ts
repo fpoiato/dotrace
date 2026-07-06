@@ -20,8 +20,10 @@ import {
   gearOf,
   getValidMoves,
   isTimedMode,
+  segmentCrossesRumble,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
+import { HapticService } from '../../core/services/haptic.service';
 import { RoomService } from '../../core/services/room.service';
 
 /** World pixels per grid cell (all drawing happens in world coordinates). */
@@ -133,6 +135,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   @Input() state: GameState | null = null;
 
   private readonly game = inject(GameEngineService);
+  private readonly haptic = inject(HapticService);
   private readonly room = inject(RoomService);
   private validMoves: { velocity: Vector2D; landing: Vector2D }[] = [];
 
@@ -329,7 +332,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     const pts: Vector2D[] = [focus.position];
     const myId = this.room.room?.connectionId;
     if (focus.connectionId === myId && focus.finishOrder === undefined) {
-      for (const m of getValidMoves(focus, track, state.players)) {
+      for (const m of getValidMoves(focus, track, state.players, state.round)) {
         pts.push(m.landing);
       }
     }
@@ -517,6 +520,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     this.drawPaper(ctx, track);
     this.drawGrass(ctx, track);
+    this.drawRumbleStrips(ctx, track);
     this.drawFinishStripe(ctx, track);
     this.drawInkBoundaries(ctx, track);
     this.drawArrows(ctx, track);
@@ -555,6 +559,22 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
+  /** Red/yellow kerb stripes on corner rumble strips. */
+  private drawRumbleStrips(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+    for (let y = 0; y < track.height; y++) {
+      for (let x = 0; x < track.width; x++) {
+        if (track.grid[y][x] !== 'rumble') continue;
+        const px = x * CELL;
+        const py = y * CELL;
+        const stripeW = 3;
+        for (let i = 0; i < CELL; i += stripeW) {
+          ctx.fillStyle = i % (stripeW * 2) === 0 ? PAPER_COLORS.rumbleRed : PAPER_COLORS.rumbleYellow;
+          ctx.fillRect(px + i, py + 1, Math.min(stripeW, CELL - i), CELL - 2);
+        }
+      }
+    }
+  }
+
   private drawFinishStripe(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     ctx.fillStyle = PAPER_COLORS.finish;
     for (let y = 0; y < track.height; y++) {
@@ -570,7 +590,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private drawInkBoundaries(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     const isRoad = (x: number, y: number): boolean => {
       const t = track.grid[y]?.[x];
-      return t === 'track' || t === 'finish';
+      return t === 'track' || t === 'finish' || t === 'rumble';
     };
     const jitter = (x: number, y: number): number =>
       ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
@@ -677,7 +697,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     const active = isTimedMode(state) ? this.myPlayer(state) : this.activePlayer(state);
     if (!active || active.connectionId !== myId || active.finishOrder !== undefined) return;
 
-    this.validMoves = getValidMoves(active, track, state.players);
+    this.validMoves = getValidMoves(active, track, state.players, state.round);
     const color = active.color;
     for (const m of this.validMoves) {
       const px = m.landing.x * CELL;
@@ -771,6 +791,12 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       }
     }
     if (best && bestDist <= 1.15) {
+      const state = this.state;
+      const track = state?.trackId ? getTrackById(state.trackId) : undefined;
+      const me = state ? this.myPlayer(state) : null;
+      if (me && track && segmentCrossesRumble(track, me.position, best.landing)) {
+        this.haptic.rumbleStrip();
+      }
       this.game.submitMove(best.velocity);
     }
   }

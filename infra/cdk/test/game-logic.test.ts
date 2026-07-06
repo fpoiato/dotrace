@@ -22,7 +22,18 @@ import {
   segmentEntersRect,
   buildRaceTelemetry,
   formatRaceTime,
+  applyGrassPenalty,
+  GRASS_PENALTY_TURNS_FIRST,
+  GRASS_PENALTY_TURNS_REPEAT,
+  GRASS_PENALTY_TIMED_FIRST_MS,
+  GRASS_PENALTY_TIMED_REPEAT_MS,
+  isGearLimited,
+  isGrassShortcut,
+  isPlayerStopped,
+  segmentCrossesGrass,
+  segmentCrossesRumble,
 } from '../../../shared/ws-types';
+import { TRACKS } from '../../../shared/tracks';
 
 function makeTrack(): TrackDefinition {
   // 6x4: all track except a grass border on the right column.
@@ -306,6 +317,21 @@ describe('canPlayerMove', () => {
     expect(canPlayerMove(timed, 'c1')).toBe(false);
     expect(canPlayerMove(timed, 'c2')).toBe(true);
   });
+
+  it('blocks timed racers during a grass stop penalty', () => {
+    const now = 1_000_000;
+    const timed: GameState = {
+      ...base,
+      gameMode: 'TIMED',
+      players: [
+        makePlayer({ stopUntil: now + 5000 }),
+        makePlayer({ connectionId: 'c2', nickname: 'Bia', joinOrder: 1, color: '#000' }),
+      ],
+    };
+    expect(canPlayerMove(timed, 'c1', now)).toBe(false);
+    expect(canPlayerMove(timed, 'c1', now + 5000)).toBe(true);
+    expect(canPlayerMove(timed, 'c2', now)).toBe(true);
+  });
 });
 
 describe('finish line crossing', () => {
@@ -394,6 +420,113 @@ describe('race telemetry', () => {
     expect(formatRaceTime(0)).toBe('0:00');
     expect(formatRaceTime(45_000)).toBe('0:45');
     expect(formatRaceTime(125_000)).toBe('2:05');
+  });
+});
+
+describe('grass shortcut penalties', () => {
+  it('detects cutting through grass without landing on it', () => {
+    const track = makeTrack();
+    // grass column at x=5; fly from x=3 to x=4 at y=1 — path crosses x=5? No.
+    // Move from (4,1) to (4,1) with step through grass at (5,1): from (3,1) to (4,1) doesn't cross.
+    // Jump from (4,1) to (4,1)... need a move that crosses grass.
+    expect(segmentCrossesGrass(track, { x: 4, y: 1 }, { x: 4, y: 1 })).toBe(false);
+    expect(segmentCrossesGrass(track, { x: 4, y: 1 }, { x: 5, y: 1 })).toBe(true);
+    expect(isGrassShortcut(track, { x: 4, y: 1 }, { x: 5, y: 1 })).toBe(true);
+    expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(false);
+  });
+
+  it('does not count leaving grass as a shortcut', () => {
+    const track = makeTrack();
+    expect(segmentCrossesGrass(track, { x: 5, y: 1 }, { x: 4, y: 1 })).toBe(false);
+  });
+
+  it('applies 3-round gear cap on first turns-mode cut, 5 on repeat', () => {
+    const player = makePlayer();
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [player],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: ['c1'],
+      currentTurnIndex: 0,
+      round: 10,
+      totalLaps: 1,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+    };
+
+    applyGrassPenalty(player, state, 1000);
+    expect(player.grassCuts).toBe(1);
+    expect(player.gearPenaltyUntilRound).toBe(13);
+    expect(isGearLimited(player, 12)).toBe(true);
+    expect(isGearLimited(player, 13)).toBe(true);
+    expect(isGearLimited(player, 14)).toBe(false);
+
+    applyGrassPenalty(player, state, 2000);
+    expect(player.grassCuts).toBe(2);
+    expect(player.gearPenaltyUntilRound).toBe(15);
+  });
+
+  it('applies timed stop penalties with repeat downgear', () => {
+    const player = makePlayer({ velocity: { x: 3, y: 0 } });
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [player],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: ['c1'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 1,
+      gameMode: 'TIMED',
+      diceRolls: {},
+      podium: [],
+    };
+    const now = 50_000;
+
+    applyGrassPenalty(player, state, now);
+    expect(player.stopUntil).toBe(now + GRASS_PENALTY_TIMED_FIRST_MS);
+    expect(player.velocity).toEqual({ x: 3, y: 0 });
+    expect(isPlayerStopped(player, now + 1000)).toBe(true);
+
+    applyGrassPenalty(player, state, now + 10_000);
+    expect(player.stopUntil).toBe(now + 10_000 + GRASS_PENALTY_TIMED_REPEAT_MS);
+    expect(player.velocity).toEqual({ x: 0, y: 0 });
+  });
+
+  it('caps valid moves at gear 1 during a turns-mode grass penalty on track', () => {
+    const player = makePlayer({
+      position: { x: 2, y: 2 },
+      velocity: { x: 3, y: 0 },
+      isOffTrack: false,
+      gearPenaltyUntilRound: 20,
+    });
+    const track = makeTrack();
+    const moves = getValidMoves(player, track, undefined, 10);
+    expect(moves.every((m) => Math.max(Math.abs(m.velocity.x), Math.abs(m.velocity.y)) <= 1)).toBe(
+      true
+    );
+  });
+});
+
+describe('rumble strips', () => {
+  it('detects crossing rumble tiles along a move segment', () => {
+    const track = makeTrack();
+    track.grid[1][4] = 'rumble';
+    expect(segmentCrossesRumble(track, { x: 2, y: 1 }, { x: 4, y: 1 })).toBe(true);
+    expect(segmentCrossesRumble(track, { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(false);
+  });
+
+  it('stamps kerb rumble at sharp corners on built-in circuits', () => {
+    const monza = TRACKS.find((t) => t.id === 'monza')!;
+    let rumbleCells = 0;
+    for (let y = 0; y < monza.height; y++) {
+      for (let x = 0; x < monza.width; x++) {
+        if (monza.grid[y][x] === 'rumble') rumbleCells++;
+      }
+    }
+    expect(rumbleCells).toBeGreaterThan(10);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   RelayPayload,
   WsEnvelope,
   canPlayerMove,
+  isGearLimited,
 } from '../../shared/ws-types';
 
 /** Car kinematics extracted from a Player record. */
@@ -30,11 +31,11 @@ export interface TurnContext {
   relayType: string;
 }
 
-function toCarState(player: Player): CarState {
+function toCarState(player: Player, round: number): CarState {
   return {
     position: { ...player.position },
     velocity: { ...player.velocity },
-    isOffTrack: player.isOffTrack,
+    isOffTrack: isGearLimited(player, round),
   };
 }
 
@@ -68,7 +69,7 @@ export function parseRelayEnvelope(
   return {
     gameState,
     myPlayer,
-    car: toCarState(myPlayer),
+    car: toCarState(myPlayer, gameState.round),
     track: toTrackState(gameState, trackWidth, trackHeight),
     isMyTurn: canPlayerMove(gameState, connectionId),
     relayType: payload.type,

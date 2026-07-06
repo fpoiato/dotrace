@@ -53,6 +53,15 @@
 
       @if (myPlayer(state)?.isOffTrack) {
         <p class="mb-2 text-center text-sm text-amber-400">{{ 'game.offTrack' | translate }}</p>
+      } @else if (myPlayer(state); as me) {
+        @if (hasGearPenalty(state, me)) {
+          <p class="mb-2 text-center text-sm text-amber-400">{{ 'game.grassPenaltyTurns' | translate }}</p>
+        }
+        @if (state.gameMode === 'TIMED' && stopPenaltySec(me) > 0) {
+          <p class="mb-2 text-center text-sm text-red-400">
+            {{ 'game.grassPenaltyTimed' | translate: { sec: stopPenaltySec(me) } }}
+          </p>
+        }
       }
 
       <app-track-canvas [state]="state" />

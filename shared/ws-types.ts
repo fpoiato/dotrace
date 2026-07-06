@@ -12,7 +12,7 @@ export interface Vector2D {
   y: number;
 }
 
-export type TileType = 'track' | 'grass' | 'finish';
+export type TileType = 'track' | 'grass' | 'finish' | 'rumble';
 
 export interface CheckpointRect {
   x0: number;
@@ -75,6 +75,12 @@ export interface Player {
    * Meaningful in TURNS mode; mirrors lapTimes but in round units.
    */
   lapRounds?: number[];
+  /** Grass shortcuts taken this race (drives escalating penalties). */
+  grassCuts?: number;
+  /** TURNS mode: max gear 1 until this round (inclusive). */
+  gearPenaltyUntilRound?: number;
+  /** TIMED mode: epoch ms before the player may move again. */
+  stopUntil?: number;
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
@@ -334,12 +340,33 @@ export function isTimedMode(state: GameState): boolean {
 }
 
 /** Whether this player may submit a move in the current phase. */
-export function canPlayerMove(state: GameState, playerId: string): boolean {
+export function canPlayerMove(state: GameState, playerId: string, now = Date.now()): boolean {
   if (state.phase !== 'GAME_ROUND') return false;
   const player = state.players.find((p) => p.connectionId === playerId);
   if (!player || player.finishOrder !== undefined) return false;
-  if (isTimedMode(state)) return true;
+  if (isTimedMode(state)) {
+    return !isPlayerStopped(player, now);
+  }
   return state.turnOrder[state.currentTurnIndex] === playerId;
+}
+
+/** TIMED mode: player is serving a grass-cut stop penalty. */
+export function isPlayerStopped(player: Player, now = Date.now()): boolean {
+  return player.stopUntil !== undefined && now < player.stopUntil;
+}
+
+/** Remaining stop-penalty time in ms (0 if none active). */
+export function remainingStopMs(player: Player, now = Date.now()): number {
+  if (!player.stopUntil) return 0;
+  return Math.max(0, player.stopUntil - now);
+}
+
+/** Max gear 1 while off-track or serving a turns-mode grass penalty. */
+export function isGearLimited(player: Player, round: number): boolean {
+  if (player.isOffTrack) return true;
+  return (
+    player.gearPenaltyUntilRound !== undefined && round <= player.gearPenaltyUntilRound
+  );
 }
 
 /** Roll virtual 2d6 (2–12). */
@@ -355,6 +382,14 @@ export const MAX_GEAR = 6;
 
 /** Off-track players may only use velocity components in this set. */
 export const OFF_TRACK_GEARS = [-1, 0, 1] as const;
+
+/** TURNS mode: rounds capped at gear 1 after a grass shortcut. */
+export const GRASS_PENALTY_TURNS_FIRST = 3;
+export const GRASS_PENALTY_TURNS_REPEAT = 5;
+
+/** TIMED mode: stop duration (ms) after a grass shortcut. */
+export const GRASS_PENALTY_TIMED_FIRST_MS = 5000;
+export const GRASS_PENALTY_TIMED_REPEAT_MS = 10000;
 
 export function isValidGearChange(
   current: Vector2D,
@@ -427,6 +462,75 @@ export function gearOf(velocity: Vector2D): number {
 }
 
 /**
+ * Whether the straight move from → to passes over a grass tile (excluding
+ * the starting cell — already being on grass is not a shortcut).
+ */
+export function segmentCrossesGrass(
+  track: TrackDefinition,
+  from: Vector2D,
+  to: Vector2D
+): boolean {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  for (let i = 0; i <= Math.max(steps, 1); i++) {
+    const t = steps === 0 ? 1 : i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (x === from.x && y === from.y) continue;
+    if (getTileAt(track, x, y) === 'grass') return true;
+  }
+  return false;
+}
+
+/** Landing on grass or cutting through it on the way. */
+export function isGrassShortcut(
+  track: TrackDefinition,
+  from: Vector2D,
+  landing: Vector2D
+): boolean {
+  return (
+    getTileAt(track, landing.x, landing.y) === 'grass' ||
+    segmentCrossesGrass(track, from, landing)
+  );
+}
+
+/**
+ * Whether the straight move from → to passes over a rumble-strip tile
+ * (excluding the starting cell).
+ */
+export function segmentCrossesRumble(
+  track: TrackDefinition,
+  from: Vector2D,
+  to: Vector2D
+): boolean {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  for (let i = 0; i <= Math.max(steps, 1); i++) {
+    const t = steps === 0 ? 1 : i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (x === from.x && y === from.y) continue;
+    if (getTileAt(track, x, y) === 'rumble') return true;
+  }
+  return false;
+}
+
+/** Apply escalating grass-shortcut penalties (host calls after a violation). */
+export function applyGrassPenalty(player: Player, state: GameState, now = Date.now()): void {
+  const isRepeat = (player.grassCuts ?? 0) > 0;
+  player.grassCuts = (player.grassCuts ?? 0) + 1;
+
+  if (isTimedMode(state)) {
+    const duration = isRepeat ? GRASS_PENALTY_TIMED_REPEAT_MS : GRASS_PENALTY_TIMED_FIRST_MS;
+    player.stopUntil = now + duration;
+    if (isRepeat) {
+      player.velocity = zeroVector();
+    }
+  } else {
+    const rounds = isRepeat ? GRASS_PENALTY_TURNS_REPEAT : GRASS_PENALTY_TURNS_FIRST;
+    player.gearPenaltyUntilRound = state.round + rounds;
+  }
+}
+
+/**
  * Whether the straight move from → to passes over a finish tile.
  * Sampled along the segment: a fast car may jump the stripe without
  * landing on it, and that still counts as crossing the line.
@@ -489,16 +593,18 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
 export function getValidMoves(
   player: Player,
   track: TrackDefinition,
-  others?: Player[]
+  others?: Player[],
+  round = 1
 ): { velocity: Vector2D; landing: Vector2D }[] {
   const moves: { velocity: Vector2D; landing: Vector2D }[] = [];
-  const { position, velocity, isOffTrack } = player;
+  const { position, velocity } = player;
+  const gearLimited = isGearLimited(player, round);
   const opponents = others ? activeRacers(others, player.connectionId) : [];
 
   for (let dvx = -MAX_GEAR_DELTA; dvx <= MAX_GEAR_DELTA; dvx++) {
     for (let dvy = -MAX_GEAR_DELTA; dvy <= MAX_GEAR_DELTA; dvy++) {
       const next: Vector2D = { x: velocity.x + dvx, y: velocity.y + dvy };
-      if (!isValidGearChange(velocity, next, isOffTrack)) continue;
+      if (!isValidGearChange(velocity, next, gearLimited)) continue;
       const landing = landingPosition(position, next);
       if (getTileAt(track, landing.x, landing.y) === null) continue;
       if (opponents.some((o) => o.position.x === landing.x && o.position.y === landing.y)) {

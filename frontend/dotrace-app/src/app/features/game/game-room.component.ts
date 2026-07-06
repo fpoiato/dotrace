@@ -12,9 +12,14 @@ import {
   formatRaceTime,
   getTileAt,
   getValidMoves,
+  isGearLimited,
   landingPosition,
+  remainingStopMs,
+  segmentCrossesGrass,
+  segmentCrossesRumble,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
+import { HapticService } from '../../core/services/haptic.service';
 import { RoomService } from '../../core/services/room.service';
 import { TelemetryService } from '../../core/services/telemetry.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -54,6 +59,7 @@ const PAD_GLYPHS: Record<string, string> = {
 export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);
   readonly telemetry = inject(TelemetryService);
+  private readonly haptic = inject(HapticService);
   private readonly room = inject(RoomService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
@@ -66,6 +72,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   showCelebration = false;
   showReplay = false;
   padOptions: PadOption[] = [];
+  /** Tick every 250ms while a timed stop penalty is active. */
+  private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -80,6 +88,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       this.room.listenForLobbyUpdates().subscribe(),
       this.game.state$.subscribe((state) => {
         this.padOptions = this.buildPadOptions(state);
+        this.syncStopPenaltyTimer(state);
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
         }
@@ -105,7 +114,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const canMove =
       !!state && !!myId && canPlayerMove(state, myId) && me?.finishOrder === undefined;
 
-    const valid = canMove && me && track ? getValidMoves(me, track, state?.players) : [];
+    const valid = canMove && me && track ? getValidMoves(me, track, state?.players, state?.round ?? 1) : [];
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -117,7 +126,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
           const match = valid.find((m) => m.velocity.x === v.x && m.velocity.y === v.y);
           if (match) {
             velocity = match.velocity;
-            grass = getTileAt(track, match.landing.x, match.landing.y) === 'grass';
+            const landing = landingPosition(me.position, match.velocity);
+            grass =
+              getTileAt(track, landing.x, landing.y) === 'grass' ||
+              segmentCrossesGrass(track, me.position, landing);
           }
         }
         options.push({ key, glyph: PAD_GLYPHS[key], enabled: velocity !== null, velocity, grass });
@@ -135,7 +147,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         glyph: '■',
         enabled: true,
         velocity: stop.velocity,
-        grass: getTileAt(track, landing.x, landing.y) === 'grass',
+        grass: getTileAt(track, landing.x, landing.y) === 'grass' ||
+          segmentCrossesGrass(track, me.position, landing),
       };
     }
 
@@ -144,10 +157,19 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   pad(option: PadOption): void {
     if (!option.enabled || !option.velocity) return;
+
+    const state = this.game.state;
+    const me = state ? this.myPlayer(state) : undefined;
+    const track = state?.trackId ? getTrackById(state.trackId) : undefined;
+    if (me && track && segmentCrossesRumble(track, me.position, landingPosition(me.position, option.velocity))) {
+      this.haptic.rumbleStrip();
+    }
+
     this.game.submitMove(option.velocity);
   }
 
   ngOnDestroy(): void {
+    this.clearStopPenaltyTimer();
     this.subs.forEach((s) => s.unsubscribe());
   }
 
@@ -158,6 +180,43 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
+  }
+
+  /** TURNS mode: gear-1 cap from a grass penalty (not just standing on grass). */
+  hasGearPenalty(state: GameState, player: Player): boolean {
+    return isGearLimited(player, state.round) && !player.isOffTrack;
+  }
+
+  /** Seconds left on a timed stop penalty (0 if none). */
+  stopPenaltySec(player: Player): number {
+    return Math.ceil(remainingStopMs(player) / 1000);
+  }
+
+  private syncStopPenaltyTimer(state: GameState | null): void {
+    const me = state && this.room.room
+      ? state.players.find((p) => p.connectionId === this.room.room!.connectionId)
+      : undefined;
+    const active = !!me && remainingStopMs(me) > 0;
+    if (active && !this.stopPenaltyTimer) {
+      this.stopPenaltyTimer = setInterval(() => {
+        const s = this.game.state;
+        const id = this.room.room?.connectionId;
+        const p = s?.players.find((pl) => pl.connectionId === id);
+        this.padOptions = this.buildPadOptions(s);
+        if (!p || remainingStopMs(p) <= 0) {
+          this.clearStopPenaltyTimer();
+        }
+      }, 250);
+    } else if (!active) {
+      this.clearStopPenaltyTimer();
+    }
+  }
+
+  private clearStopPenaltyTimer(): void {
+    if (this.stopPenaltyTimer) {
+      clearInterval(this.stopPenaltyTimer);
+      this.stopPenaltyTimer = null;
+    }
   }
 
   openReplay(): void {

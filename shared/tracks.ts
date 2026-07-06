@@ -76,9 +76,57 @@ interface CircuitSpec {
   checkpoint: { x0: number; y0: number; x1: number; y1: number };
 }
 
+function hasGrassNeighbor(grid: TileType[][], x: number, y: number): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (grid[y + dy]?.[x + dx] === 'grass') return true;
+    }
+  }
+  return false;
+}
+
+/** Kerb rumble strips on track edges at sharp centerline corners. */
+function stampCornerRumble(grid: TileType[][], centerline: Vector2D[]): void {
+  const h = grid.length;
+  const w = grid[0].length;
+  const CORNER_DEG = 28;
+  const REACH = 3;
+
+  for (let i = 1; i < centerline.length - 1; i++) {
+    const prev = centerline[i - 1];
+    const curr = centerline[i];
+    const next = centerline[i + 1];
+    const v1x = curr.x - prev.x;
+    const v1y = curr.y - prev.y;
+    const v2x = next.x - curr.x;
+    const v2y = next.y - curr.y;
+    const len1 = Math.hypot(v1x, v1y);
+    const len2 = Math.hypot(v2x, v2y);
+    if (len1 < 0.01 || len2 < 0.01) continue;
+
+    const dot = (v1x * v2x + v1y * v2y) / (len1 * len2);
+    const angle = (Math.acos(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI;
+    if (angle < CORNER_DEG) continue;
+
+    for (let dy = -REACH; dy <= REACH; dy++) {
+      for (let dx = -REACH; dx <= REACH; dx++) {
+        const x = Math.round(curr.x + dx);
+        const y = Math.round(curr.y + dy);
+        if (y < 0 || y >= h || x < 0 || x >= w) continue;
+        if (grid[y][x] !== 'track') continue;
+        if (hasGrassNeighbor(grid, x, y)) {
+          grid[y][x] = 'rumble';
+        }
+      }
+    }
+  }
+}
+
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
   const grid = emptyGrid(GRID_W, GRID_H);
   carvePolyline(grid, spec.centerline);
+  stampCornerRumble(grid, spec.centerline);
   stampFinish(grid, spec.finish.x0, spec.finish.x1, spec.finish.y0, spec.finish.y1);
   return {
     id: spec.id,
@@ -366,10 +414,13 @@ export const PAPER_COLORS = {
   ink: '#111111',
   finish: '#f97316',
   finishDark: '#111111',
+  rumbleRed: '#dc2626',
+  rumbleYellow: '#facc15',
 };
 
 export const TILE_COLORS: Record<TileType, string> = {
   track: PAPER_COLORS.paper,
   grass: PAPER_COLORS.grass,
   finish: PAPER_COLORS.finish,
+  rumble: PAPER_COLORS.rumbleYellow,
 };

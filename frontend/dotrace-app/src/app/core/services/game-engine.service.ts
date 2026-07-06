@@ -9,6 +9,7 @@ import {
   PlayerRejoinedPayload,
   RelayPayload,
   Vector2D,
+  applyGrassPenalty,
   canPlayerMove,
   createInitialState,
   createLobbyPlayer,
@@ -16,6 +17,7 @@ import {
   getTileAt,
   getValidMoves,
   isGameOver,
+  isGrassShortcut,
   isTimedMode,
   landingPosition,
   nextActiveTurnIndex,
@@ -204,6 +206,9 @@ export class GameEngineService implements OnDestroy {
       player.position = { ...start };
       player.velocity = zeroVector();
       player.isOffTrack = false;
+      player.grassCuts = 0;
+      player.gearPenaltyUntilRound = undefined;
+      player.stopUntil = undefined;
       player.passedCheckpoint = false;
       player.trail = [{ ...start }];
       player.lap = 1;
@@ -237,7 +242,7 @@ export class GameEngineService implements OnDestroy {
     // Strict validation: the submitted velocity must be one of the moves the
     // host itself considers legal (±1 gear rule, off-track cap, in-grid landing,
     // including the emergency stop when no other move exists).
-    const isLegal = getValidMoves(player, track, state.players).some(
+    const isLegal = getValidMoves(player, track, state.players, state.round).some(
       (m) => m.velocity.x === vector.x && m.velocity.y === vector.y
     );
     if (!isLegal) return;
@@ -263,6 +268,8 @@ export class GameEngineService implements OnDestroy {
     const tile = getTileAt(track, landing.x, landing.y);
     if (tile === null) return;
 
+    const grassShortcut = isGrassShortcut(track, from, landing);
+
     player.position = landing;
     pushTrail(player, landing);
 
@@ -274,6 +281,10 @@ export class GameEngineService implements OnDestroy {
     } else {
       player.velocity = { ...vector };
       player.isOffTrack = false;
+    }
+
+    if (grassShortcut) {
+      applyGrassPenalty(player, state);
     }
 
     if (track.checkpoint && !player.passedCheckpoint) {
@@ -539,6 +550,9 @@ export class GameEngineService implements OnDestroy {
       merged.finishedAt = state.players[idx].finishedAt;
       merged.lapTimes = state.players[idx].lapTimes;
       merged.lapRounds = state.players[idx].lapRounds;
+      merged.grassCuts = state.players[idx].grassCuts;
+      merged.gearPenaltyUntilRound = state.players[idx].gearPenaltyUntilRound;
+      merged.stopUntil = state.players[idx].stopUntil;
       state.players[idx] = merged;
     } else {
       state.players.push(merged);
