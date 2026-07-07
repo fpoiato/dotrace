@@ -86,7 +86,18 @@ function hasGrassNeighbor(grid: TileType[][], x: number, y: number): boolean {
   return false;
 }
 
-/** Kerb rumble strips on track edges at sharp centerline corners. */
+function hasTrackNeighbor(grid: TileType[][], x: number, y: number): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const t = grid[y + dy]?.[x + dx];
+      if (t === 'track' || t === 'finish') return true;
+    }
+  }
+  return false;
+}
+
+/** Kerb rumble strips on grass cells beside the track at sharp corners. */
 function stampCornerRumble(grid: TileType[][], centerline: Vector2D[]): void {
   const h = grid.length;
   const w = grid[0].length;
@@ -114,8 +125,8 @@ function stampCornerRumble(grid: TileType[][], centerline: Vector2D[]): void {
         const x = Math.round(curr.x + dx);
         const y = Math.round(curr.y + dy);
         if (y < 0 || y >= h || x < 0 || x >= w) continue;
-        if (grid[y][x] !== 'track') continue;
-        if (hasGrassNeighbor(grid, x, y)) {
+        if (grid[y][x] !== 'grass') continue;
+        if (hasTrackNeighbor(grid, x, y)) {
           grid[y][x] = 'rumble';
         }
       }
@@ -422,5 +433,5 @@ export const TILE_COLORS: Record<TileType, string> = {
   track: PAPER_COLORS.paper,
   grass: PAPER_COLORS.grass,
   finish: PAPER_COLORS.finish,
-  rumble: PAPER_COLORS.paper,
+  rumble: PAPER_COLORS.grass,
 };

@@ -9,6 +9,7 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { TranslateModule } from '@ngx-translate/core';
 import { PAPER_COLORS, getTrackById } from '../../core/models/tracks';
 import {
   GameState,
@@ -21,6 +22,7 @@ import {
   getValidMoves,
   isGrassShortcut,
   isTimedMode,
+  getTileAt,
   segmentCrossesRumble,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
@@ -56,12 +58,13 @@ function buildGaugeSegments(): string[] {
 /**
  * "Pen and paper" renderer with a map-style camera: drag to pan, pinch or
  * use the overlay buttons to zoom, tap a highlighted square to move. The
- * camera auto-frames your car and options on your turn; panning hands
- * control to the user until their next turn (or the fit toggle).
+ * camera auto-frames your car on first load; pan/zoom hands control to the
+ * user until they tap the fit toggle or a new race starts.
  */
 @Component({
   selector: 'app-track-canvas',
   standalone: true,
+  imports: [TranslateModule],
   template: `
     <div class="relative">
       <canvas
@@ -96,7 +99,7 @@ function buildGaugeSegments(): string[] {
       <div class="absolute bottom-2 right-2 flex flex-col gap-1">
         <button
           type="button"
-          aria-label="Zoom in"
+          [attr.aria-label]="'game.map.zoomIn' | translate"
           (click)="zoomIn()"
           class="h-10 w-10 rounded-lg bg-slate-900/80 text-lg font-bold text-white active:bg-slate-700"
         >
@@ -104,7 +107,7 @@ function buildGaugeSegments(): string[] {
         </button>
         <button
           type="button"
-          aria-label="Zoom out"
+          [attr.aria-label]="'game.map.zoomOut' | translate"
           (click)="zoomOut()"
           class="h-10 w-10 rounded-lg bg-slate-900/80 text-lg font-bold text-white active:bg-slate-700"
         >
@@ -112,7 +115,7 @@ function buildGaugeSegments(): string[] {
         </button>
         <button
           type="button"
-          aria-label="Toggle full track"
+          [attr.aria-label]="'game.map.toggleFit' | translate"
           (click)="toggleFit()"
           class="h-10 w-10 rounded-lg text-sm font-bold text-white active:bg-slate-700"
           [class]="fitMode ? 'bg-orange-500' : 'bg-slate-900/80'"
@@ -187,10 +190,16 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['state']) {
-      // My turn → retake the camera so the reachable squares are framed.
-      const state = this.state;
-      if (state && this.activePlayer(state)?.connectionId === this.room.room?.connectionId) {
+      const prev = changes['state'].previousValue as GameState | null | undefined;
+      const curr = changes['state'].currentValue as GameState | null | undefined;
+      // New track or green flag: re-enable auto-framing once.
+      if (
+        prev?.trackId !== curr?.trackId ||
+        (prev?.phase !== 'GAME_ROUND' && curr?.phase === 'GAME_ROUND')
+      ) {
         this.manualCamera = false;
+        this.fitModeInitialized = false;
+        this.zoomFactor = 1;
       }
       requestAnimationFrame(() => this.draw());
     }
@@ -208,11 +217,20 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
   private zoomBy(factor: number): void {
     const canvas = this.canvasRef.nativeElement;
-    if (this.manualCamera) {
+    const state = this.state;
+    const track = state?.trackId ? getTrackById(state.trackId) : this.lastTrack;
+    if (!track) return;
+
+    if (this.fitMode) {
+      this.zoomFactor = Math.min(3, Math.max(0.4, this.zoomFactor * factor));
+    } else if (!this.manualCamera) {
+      // Commit the current auto-frame, then keep scale under user control.
+      if (state) this.computeCamera(state, track);
+      this.manualCamera = true;
+      this.fitMode = false;
       this.scaleAround(canvas.width / 2, canvas.height / 2, factor);
     } else {
-      this.zoomFactor = Math.min(3, Math.max(0.4, this.zoomFactor * factor));
-      this.fitMode = factor > 1 ? false : this.fitMode;
+      this.scaleAround(canvas.width / 2, canvas.height / 2, factor);
     }
     this.draw();
   }
@@ -521,9 +539,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     this.drawPaper(ctx, track);
     this.drawGrass(ctx, track);
+    this.drawRumbleKerbs(ctx, track);
     this.drawFinishStripe(ctx, track);
     this.drawInkBoundaries(ctx, track);
-    this.drawRumbleKerbBoundaries(ctx, track);
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
     this.drawValidTargets(ctx, state, track);
@@ -571,11 +589,15 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
-  /** Thick hand-inked black boundary wherever track meets grass. */
+  /** Thick hand-inked black boundary wherever track meets plain grass. */
   private drawInkBoundaries(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     const isRoad = (x: number, y: number): boolean => {
       const t = track.grid[y]?.[x];
-      return t === 'track' || t === 'finish' || t === 'rumble';
+      return t === 'track' || t === 'finish';
+    };
+    const blocksInk = (x: number, y: number): boolean => {
+      const t = track.grid[y]?.[x];
+      return t === 'grass' || t === 'rumble' || t === null || t === undefined;
     };
     const jitter = (x: number, y: number): number =>
       ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
@@ -590,19 +612,19 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
         if (tile !== 'track' && tile !== 'finish') continue;
         const px = x * CELL;
         const py = y * CELL;
-        if (!isRoad(x, y - 1)) {
+        if (blocksInk(x, y - 1) && track.grid[y - 1]?.[x] !== 'rumble') {
           ctx.moveTo(px - 1, py + jitter(x, y));
           ctx.lineTo(px + CELL + 1, py + jitter(x + 1, y));
         }
-        if (!isRoad(x, y + 1)) {
+        if (blocksInk(x, y + 1) && track.grid[y + 1]?.[x] !== 'rumble') {
           ctx.moveTo(px - 1, py + CELL + jitter(x, y + 1));
           ctx.lineTo(px + CELL + 1, py + CELL + jitter(x + 1, y + 1));
         }
-        if (!isRoad(x - 1, y)) {
+        if (blocksInk(x - 1, y) && track.grid[y]?.[x - 1] !== 'rumble') {
           ctx.moveTo(px + jitter(x, y), py - 1);
           ctx.lineTo(px + jitter(x, y + 1), py + CELL + 1);
         }
-        if (!isRoad(x + 1, y)) {
+        if (blocksInk(x + 1, y) && track.grid[y]?.[x + 1] !== 'rumble') {
           ctx.moveTo(px + CELL + jitter(x + 1, y), py - 1);
           ctx.lineTo(px + CELL + jitter(x + 1, y + 1), py + CELL + 1);
         }
@@ -611,36 +633,31 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     ctx.stroke();
   }
 
-  /** Red/white kerb along grass-facing edges of rumble-strip cells. */
-  private drawRumbleKerbBoundaries(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
-    const isRoad = (x: number, y: number): boolean => {
+  /** Red/white kerb strips on grass at corner apexes (track-facing edge + fill). */
+  private drawRumbleKerbs(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+    const isTrack = (x: number, y: number): boolean => {
       const t = track.grid[y]?.[x];
-      return t === 'track' || t === 'finish' || t === 'rumble';
+      return t === 'track' || t === 'finish';
     };
     const jitter = (x: number, y: number): number =>
       ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
-
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'butt';
     const segLen = 4;
+    const stripeW = 3;
 
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
         if (track.grid[y][x] !== 'rumble') continue;
         const px = x * CELL;
         const py = y * CELL;
-
-        if (!isRoad(x, y - 1)) {
-          this.drawKerbEdge(
-            ctx,
-            px - 1,
-            py + jitter(x, y),
-            px + CELL + 1,
-            py + jitter(x + 1, y),
-            segLen
-          );
+        for (let i = 0; i < CELL; i += stripeW) {
+          ctx.fillStyle = i % (stripeW * 2) === 0 ? PAPER_COLORS.rumbleRed : PAPER_COLORS.rumbleWhite;
+          ctx.fillRect(px + i, py + 1, Math.min(stripeW, CELL - i), CELL - 2);
         }
-        if (!isRoad(x, y + 1)) {
+
+        if (isTrack(x, y - 1)) {
+          this.drawKerbEdge(ctx, px - 1, py + jitter(x, y), px + CELL + 1, py + jitter(x + 1, y), segLen);
+        }
+        if (isTrack(x, y + 1)) {
           this.drawKerbEdge(
             ctx,
             px - 1,
@@ -650,17 +667,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
             segLen
           );
         }
-        if (!isRoad(x - 1, y)) {
-          this.drawKerbEdge(
-            ctx,
-            px + jitter(x, y),
-            py - 1,
-            px + jitter(x, y + 1),
-            py + CELL + 1,
-            segLen
-          );
+        if (isTrack(x - 1, y)) {
+          this.drawKerbEdge(ctx, px + jitter(x, y), py - 1, px + jitter(x, y + 1), py + CELL + 1, segLen);
         }
-        if (!isRoad(x + 1, y)) {
+        if (isTrack(x + 1, y)) {
           this.drawKerbEdge(
             ctx,
             px + CELL + jitter(x + 1, y),
@@ -872,7 +882,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
         const landing = best.landing;
         if (isGrassShortcut(track, me.position, landing)) {
           this.haptic.grassHit();
-        } else if (segmentCrossesRumble(track, me.position, landing)) {
+        } else if (
+          getTileAt(track, landing.x, landing.y) === 'rumble' ||
+          segmentCrossesRumble(track, me.position, landing)
+        ) {
           this.haptic.rumbleStrip();
         }
       }

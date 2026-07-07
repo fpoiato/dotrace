@@ -46,39 +46,47 @@ function buildReplayFrames(replayLog: MoveRecord[], players: Player[]): ReplayFr
   if (replayLog.length === 0) return [];
 
   const meta = new Map(
-    players.map((p) => ({
-      connectionId: p.connectionId,
-      nickname: p.nickname,
-      color: p.color,
-      isHost: p.isHost,
-      joinOrder: p.joinOrder,
-      status: p.status,
-      finishOrder: p.finishOrder,
-      finishedAt: p.finishedAt,
-      finishRound: p.finishRound,
-      diceRoll: p.diceRoll,
-    })).map((m) => [m.connectionId, m])
+    players
+      .map((p) => ({
+        connectionId: p.connectionId,
+        nickname: p.nickname,
+        color: p.color,
+        isHost: p.isHost,
+        joinOrder: p.joinOrder,
+        status: p.status,
+        finishOrder: p.finishOrder,
+        finishedAt: p.finishedAt,
+        finishRound: p.finishRound,
+        diceRoll: p.diceRoll,
+      }))
+      .map((m) => [m.connectionId, m])
   );
 
   const currentState = new Map<string, ReplayPlayerState>();
 
-  // Process seq=0 records (starting positions).
-  const startRecords = replayLog.filter((r) => r.seq === 0);
-  for (const rec of startRecords) {
-    const info = meta.get(rec.connectionId);
+  // round=0 marks every car's grid slot (seq alone is not reliable — each push
+  // gets a unique seq, so only the first driver would match seq===0).
+  const startByPlayer = new Map(
+    replayLog.filter((r) => r.round === 0).map((r) => [r.connectionId, r])
+  );
+
+  for (const p of players) {
+    const info = meta.get(p.connectionId);
     if (!info) continue;
-    currentState.set(rec.connectionId, {
-      connectionId: rec.connectionId,
+    const rec = startByPlayer.get(p.connectionId);
+    const pos = rec?.position ?? p.trail?.[0] ?? p.position;
+    currentState.set(p.connectionId, {
+      connectionId: p.connectionId,
       nickname: info.nickname,
       color: info.color,
       isHost: info.isHost,
       joinOrder: info.joinOrder,
       status: info.status,
-      position: { ...rec.position },
-      velocity: { ...rec.velocity },
-      isOffTrack: rec.isOffTrack,
-      trail: [{ ...rec.position }],
-      lap: rec.lap,
+      position: { ...pos },
+      velocity: rec ? { ...rec.velocity } : { ...p.velocity },
+      isOffTrack: rec?.isOffTrack ?? p.isOffTrack,
+      trail: [{ ...pos }],
+      lap: rec?.lap ?? p.lap ?? 1,
       diceRoll: info.diceRoll,
     });
   }
@@ -91,12 +99,29 @@ function buildReplayFrames(replayLog: MoveRecord[], players: Player[]): ReplayFr
     players: cloneStates(currentState),
   });
 
-  const moves = replayLog.filter((r) => r.seq > 0).sort((a, b) => a.seq - b.seq);
+  const moves = replayLog.filter((r) => r.round > 0).sort((a, b) => a.seq - b.seq);
   for (const rec of moves) {
-    const ps = currentState.get(rec.connectionId);
-    if (!ps) continue;
+    let ps = currentState.get(rec.connectionId);
+    if (!ps) {
+      const info = meta.get(rec.connectionId);
+      if (!info) continue;
+      ps = {
+        connectionId: rec.connectionId,
+        nickname: info.nickname,
+        color: info.color,
+        isHost: info.isHost,
+        joinOrder: info.joinOrder,
+        status: info.status,
+        position: { ...rec.position },
+        velocity: { ...rec.velocity },
+        isOffTrack: rec.isOffTrack,
+        trail: [{ ...rec.position }],
+        lap: rec.lap,
+        diceRoll: info.diceRoll,
+      };
+      currentState.set(rec.connectionId, ps);
+    }
 
-    // Build trail: start fresh when the player advances to the next lap.
     const trail = rec.lap > ps.lap ? [{ ...rec.position }] : [...ps.trail, { ...rec.position }];
 
     const info = meta.get(rec.connectionId);
@@ -107,7 +132,6 @@ function buildReplayFrames(replayLog: MoveRecord[], players: Player[]): ReplayFr
       isOffTrack: rec.isOffTrack,
       lap: rec.lap,
       trail,
-      // Apply finish metadata from final race state once the player's lap matches.
       finishOrder: info?.finishOrder,
       finishedAt: info?.finishedAt,
       finishRound: info?.finishRound,

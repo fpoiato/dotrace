@@ -146,6 +146,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
             const landing = landingPosition(me.position, match.velocity);
             grass =
               getTileAt(track, landing.x, landing.y) === 'grass' ||
+              getTileAt(track, landing.x, landing.y) === 'rumble' ||
               segmentCrossesGrass(track, me.position, landing);
           }
         }
@@ -164,7 +165,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         glyph: '■',
         enabled: true,
         velocity: stop.velocity,
-        grass: getTileAt(track, landing.x, landing.y) === 'grass' ||
+        grass:
+          getTileAt(track, landing.x, landing.y) === 'grass' ||
+          getTileAt(track, landing.x, landing.y) === 'rumble' ||
           segmentCrossesGrass(track, me.position, landing),
       };
     }
@@ -182,7 +185,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       const landing = landingPosition(me.position, option.velocity);
       if (isGrassShortcut(track, me.position, landing)) {
         this.haptic.grassHit();
-      } else if (segmentCrossesRumble(track, me.position, landing)) {
+      } else if (
+        getTileAt(track, landing.x, landing.y) === 'rumble' ||
+        segmentCrossesRumble(track, me.position, landing)
+      ) {
         this.haptic.rumbleStrip();
       }
     }

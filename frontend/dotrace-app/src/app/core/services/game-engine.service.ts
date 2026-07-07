@@ -281,7 +281,7 @@ export class GameEngineService implements OnDestroy {
     player.position = landing;
     pushTrail(player, landing);
 
-    if (tile === 'grass') {
+    if (tile === 'grass' || tile === 'rumble') {
       // Gravel trap: stop on the spot, kill momentum (gotcha #5 — only the
       // landing square matters for the off-track check).
       player.velocity = zeroVector();
@@ -303,7 +303,7 @@ export class GameEngineService implements OnDestroy {
     // after the far-side checkpoint, so the line can't be gamed on turn one.
     const crossedFinish =
       player.passedCheckpoint !== false && segmentCrossesFinish(track, from, landing);
-    if (crossedFinish && player.finishOrder === undefined && tile !== 'grass') {
+    if (crossedFinish && player.finishOrder === undefined && tile !== 'grass' && tile !== 'rumble') {
       const now = Date.now();
       player.lapTimes = [...(player.lapTimes ?? []), now];
       player.lapRounds = [...(player.lapRounds ?? []), state.round];

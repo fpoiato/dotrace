@@ -518,15 +518,20 @@ describe('rumble strips', () => {
     expect(segmentCrossesRumble(track, { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(false);
   });
 
-  it('stamps kerb rumble at sharp corners on built-in circuits', () => {
+  it('stamps kerb rumble on grass beside track at sharp corners', () => {
     const monza = TRACKS.find((t) => t.id === 'monza')!;
     let rumbleCells = 0;
+    let rumbleOnGrass = 0;
     for (let y = 0; y < monza.height; y++) {
       for (let x = 0; x < monza.width; x++) {
-        if (monza.grid[y][x] === 'rumble') rumbleCells++;
+        if (monza.grid[y][x] === 'rumble') {
+          rumbleCells++;
+          rumbleOnGrass++;
+        }
       }
     }
     expect(rumbleCells).toBeGreaterThan(10);
+    expect(rumbleOnGrass).toBe(rumbleCells);
   });
 });
 

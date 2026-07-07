@@ -68,8 +68,11 @@ export class MiniMapComponent implements OnChanges {
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
         const tile = track.grid[y][x];
-        if (tile === 'track' || tile === 'rumble') {
+        if (tile === 'track') {
           ctx.fillStyle = '#cbd5e1';
+          ctx.fillRect(x * s, y * s, s, s);
+        } else if (tile === 'rumble') {
+          ctx.fillStyle = PAPER_COLORS.rumbleRed;
           ctx.fillRect(x * s, y * s, s, s);
         } else if (tile === 'finish') {
           ctx.fillStyle = PAPER_COLORS.finish;
