@@ -13,6 +13,7 @@ import {
   getTileAt,
   getValidMoves,
   isGearLimited,
+  isGrassShortcut,
   landingPosition,
   remainingStopMs,
   segmentCrossesGrass,
@@ -72,8 +73,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   showCelebration = false;
   showReplay = false;
   padOptions: PadOption[] = [];
+  /** Seconds left on a timed grass penalty (drives the popup countdown). */
+  penaltyCountdownSec = 0;
+  showCrashWarning = false;
   /** Tick every 250ms while a timed stop penalty is active. */
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
+  private crashWarningTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -86,8 +91,20 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
+      this.game.gameEvents$.subscribe((event) => {
+        if (event.type === 'crash' && event.playerId === this.room.room?.connectionId) {
+          this.haptic.crash();
+          this.showCrashWarning = true;
+          if (this.crashWarningTimer) clearTimeout(this.crashWarningTimer);
+          this.crashWarningTimer = setTimeout(() => {
+            this.showCrashWarning = false;
+            this.crashWarningTimer = null;
+          }, 2500);
+        }
+      }),
       this.game.state$.subscribe((state) => {
         this.padOptions = this.buildPadOptions(state);
+        this.updatePenaltyCountdown(state);
         this.syncStopPenaltyTimer(state);
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
@@ -161,8 +178,13 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const state = this.game.state;
     const me = state ? this.myPlayer(state) : undefined;
     const track = state?.trackId ? getTrackById(state.trackId) : undefined;
-    if (me && track && segmentCrossesRumble(track, me.position, landingPosition(me.position, option.velocity))) {
-      this.haptic.rumbleStrip();
+    if (me && track) {
+      const landing = landingPosition(me.position, option.velocity);
+      if (isGrassShortcut(track, me.position, landing)) {
+        this.haptic.grassHit();
+      } else if (segmentCrossesRumble(track, me.position, landing)) {
+        this.haptic.rumbleStrip();
+      }
     }
 
     this.game.submitMove(option.velocity);
@@ -170,6 +192,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.clearStopPenaltyTimer();
+    if (this.crashWarningTimer) clearTimeout(this.crashWarningTimer);
     this.subs.forEach((s) => s.unsubscribe());
   }
 
@@ -192,6 +215,15 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return Math.ceil(remainingStopMs(player) / 1000);
   }
 
+  private updatePenaltyCountdown(state: GameState | null): void {
+    if (!state || state.gameMode !== 'TIMED' || state.phase !== 'GAME_ROUND') {
+      this.penaltyCountdownSec = 0;
+      return;
+    }
+    const me = this.myPlayer(state);
+    this.penaltyCountdownSec = me ? this.stopPenaltySec(me) : 0;
+  }
+
   private syncStopPenaltyTimer(state: GameState | null): void {
     const me = state && this.room.room
       ? state.players.find((p) => p.connectionId === this.room.room!.connectionId)
@@ -203,6 +235,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         const id = this.room.room?.connectionId;
         const p = s?.players.find((pl) => pl.connectionId === id);
         this.padOptions = this.buildPadOptions(s);
+        this.updatePenaltyCountdown(s);
         if (!p || remainingStopMs(p) <= 0) {
           this.clearStopPenaltyTimer();
         }
@@ -217,6 +250,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       clearInterval(this.stopPenaltyTimer);
       this.stopPenaltyTimer = null;
     }
+    this.penaltyCountdownSec = 0;
   }
 
   openReplay(): void {

@@ -19,6 +19,7 @@ import {
   canPlayerMove,
   gearOf,
   getValidMoves,
+  isGrassShortcut,
   isTimedMode,
   segmentCrossesRumble,
 } from '../../core/models/ws-types';
@@ -520,9 +521,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     this.drawPaper(ctx, track);
     this.drawGrass(ctx, track);
-    this.drawRumbleStrips(ctx, track);
     this.drawFinishStripe(ctx, track);
     this.drawInkBoundaries(ctx, track);
+    this.drawRumbleKerbBoundaries(ctx, track);
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
     this.drawValidTargets(ctx, state, track);
@@ -559,22 +560,6 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
-  /** Red/yellow kerb stripes on corner rumble strips. */
-  private drawRumbleStrips(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
-    for (let y = 0; y < track.height; y++) {
-      for (let x = 0; x < track.width; x++) {
-        if (track.grid[y][x] !== 'rumble') continue;
-        const px = x * CELL;
-        const py = y * CELL;
-        const stripeW = 3;
-        for (let i = 0; i < CELL; i += stripeW) {
-          ctx.fillStyle = i % (stripeW * 2) === 0 ? PAPER_COLORS.rumbleRed : PAPER_COLORS.rumbleYellow;
-          ctx.fillRect(px + i, py + 1, Math.min(stripeW, CELL - i), CELL - 2);
-        }
-      }
-    }
-  }
-
   private drawFinishStripe(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     ctx.fillStyle = PAPER_COLORS.finish;
     for (let y = 0; y < track.height; y++) {
@@ -601,7 +586,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     ctx.beginPath();
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
-        if (!isRoad(x, y)) continue;
+        const tile = track.grid[y][x];
+        if (tile !== 'track' && tile !== 'finish') continue;
         const px = x * CELL;
         const py = y * CELL;
         if (!isRoad(x, y - 1)) {
@@ -623,6 +609,94 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       }
     }
     ctx.stroke();
+  }
+
+  /** Red/white kerb along grass-facing edges of rumble-strip cells. */
+  private drawRumbleKerbBoundaries(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+    const isRoad = (x: number, y: number): boolean => {
+      const t = track.grid[y]?.[x];
+      return t === 'track' || t === 'finish' || t === 'rumble';
+    };
+    const jitter = (x: number, y: number): number =>
+      ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
+
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'butt';
+    const segLen = 4;
+
+    for (let y = 0; y < track.height; y++) {
+      for (let x = 0; x < track.width; x++) {
+        if (track.grid[y][x] !== 'rumble') continue;
+        const px = x * CELL;
+        const py = y * CELL;
+
+        if (!isRoad(x, y - 1)) {
+          this.drawKerbEdge(
+            ctx,
+            px - 1,
+            py + jitter(x, y),
+            px + CELL + 1,
+            py + jitter(x + 1, y),
+            segLen
+          );
+        }
+        if (!isRoad(x, y + 1)) {
+          this.drawKerbEdge(
+            ctx,
+            px - 1,
+            py + CELL + jitter(x, y + 1),
+            px + CELL + 1,
+            py + CELL + jitter(x + 1, y + 1),
+            segLen
+          );
+        }
+        if (!isRoad(x - 1, y)) {
+          this.drawKerbEdge(
+            ctx,
+            px + jitter(x, y),
+            py - 1,
+            px + jitter(x, y + 1),
+            py + CELL + 1,
+            segLen
+          );
+        }
+        if (!isRoad(x + 1, y)) {
+          this.drawKerbEdge(
+            ctx,
+            px + CELL + jitter(x + 1, y),
+            py - 1,
+            px + CELL + jitter(x + 1, y + 1),
+            py + CELL + 1,
+            segLen
+          );
+        }
+      }
+    }
+  }
+
+  /** Alternating red/white dashes along one kerb edge. */
+  private drawKerbEdge(
+    ctx: CanvasRenderingContext2D,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    segLen: number
+  ): void {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.5) return;
+    const segments = Math.max(1, Math.ceil(len / segLen));
+    for (let i = 0; i < segments; i++) {
+      ctx.strokeStyle = i % 2 === 0 ? PAPER_COLORS.rumbleRed : PAPER_COLORS.rumbleWhite;
+      const t0 = i / segments;
+      const t1 = (i + 1) / segments;
+      ctx.beginPath();
+      ctx.moveTo(x0 + dx * t0, y0 + dy * t0);
+      ctx.lineTo(x0 + dx * t1, y0 + dy * t1);
+      ctx.stroke();
+    }
   }
 
   /** Small black race-direction arrows near the stripe. */
@@ -794,8 +868,13 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       const state = this.state;
       const track = state?.trackId ? getTrackById(state.trackId) : undefined;
       const me = state ? this.myPlayer(state) : null;
-      if (me && track && segmentCrossesRumble(track, me.position, best.landing)) {
-        this.haptic.rumbleStrip();
+      if (me && track) {
+        const landing = best.landing;
+        if (isGrassShortcut(track, me.position, landing)) {
+          this.haptic.grassHit();
+        } else if (segmentCrossesRumble(track, me.position, landing)) {
+          this.haptic.rumbleStrip();
+        }
       }
       this.game.submitMove(best.velocity);
     }

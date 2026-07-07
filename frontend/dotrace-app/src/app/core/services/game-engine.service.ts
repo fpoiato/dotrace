@@ -1,5 +1,5 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
-import { BehaviorSubject, Subscription } from 'rxjs';
+import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
 import {
   GameMode,
@@ -33,6 +33,11 @@ import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
 
+export interface GameEvent {
+  type: 'crash';
+  playerId: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class GameEngineService implements OnDestroy {
   private readonly ws = inject(WebSocketService);
@@ -41,6 +46,9 @@ export class GameEngineService implements OnDestroy {
 
   private readonly stateSubject = new BehaviorSubject<GameState | null>(null);
   readonly state$ = this.stateSubject.asObservable();
+
+  private readonly eventSubject = new Subject<GameEvent>();
+  readonly gameEvents$ = this.eventSubject.asObservable();
 
   private messageSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -261,7 +269,7 @@ export class GameEngineService implements OnDestroy {
         isOffTrack: player.isOffTrack,
         lap: player.lap,
       });
-      this.afterMove(state);
+      this.afterMove(state, { crash: senderId });
       return;
     }
 
@@ -339,15 +347,15 @@ export class GameEngineService implements OnDestroy {
     this.afterMove(state);
   }
 
-  private afterMove(state: GameState): void {
+  private afterMove(state: GameState, meta?: Record<string, unknown>): void {
     if (isTimedMode(state)) {
-      this.setStateAndRelay('TURN_ADVANCED', state);
+      this.setStateAndRelay('TURN_ADVANCED', state, meta);
       return;
     }
-    this.advanceTurn(state);
+    this.advanceTurn(state, meta);
   }
 
-  private advanceTurn(state: GameState): void {
+  private advanceTurn(state: GameState, meta?: Record<string, unknown>): void {
     if (isGameOver(state)) {
       state.phase = 'GAME_OVER';
       this.setStateAndRelay('GAME_OVER', state);
@@ -359,7 +367,7 @@ export class GameEngineService implements OnDestroy {
     if (state.currentTurnIndex <= prevIndex) {
       state.round += 1;
     }
-    this.setStateAndRelay('TURN_ADVANCED', state);
+    this.setStateAndRelay('TURN_ADVANCED', state, meta);
   }
 
   private bootstrapLobbyState(): GameState {
@@ -571,6 +579,7 @@ export class GameEngineService implements OnDestroy {
     if (!state.gameMode) state.gameMode = 'TURNS';
     if (!state.replayLog) state.replayLog = [];
     this.emit(state);
+    this.emitEventsFromMeta(relay.meta);
   }
 
   private handlePlayerAction(action: Record<string, unknown>): void {
@@ -597,11 +606,19 @@ export class GameEngineService implements OnDestroy {
 
   private setStateAndRelay(type: RelayPayload['type'], state: GameState, meta?: Record<string, unknown>): void {
     this.emit(state);
+    this.emitEventsFromMeta(meta);
     const room = this.roomService.room;
     if (!room?.isHost) return;
     const telemetry = buildRaceTelemetry(state);
     const relayMeta = telemetry ? { ...meta, telemetry } : meta;
     this.ws.send('RELAY', { type, state, meta: relayMeta }, room.roomCode);
+  }
+
+  private emitEventsFromMeta(meta?: Record<string, unknown>): void {
+    const crash = meta?.['crash'];
+    if (typeof crash === 'string') {
+      this.eventSubject.next({ type: 'crash', playerId: crash });
+    }
   }
 
   currentPlayer(): Player | null {

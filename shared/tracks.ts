@@ -415,12 +415,12 @@ export const PAPER_COLORS = {
   finish: '#f97316',
   finishDark: '#111111',
   rumbleRed: '#dc2626',
-  rumbleYellow: '#facc15',
+  rumbleWhite: '#ffffff',
 };
 
 export const TILE_COLORS: Record<TileType, string> = {
   track: PAPER_COLORS.paper,
   grass: PAPER_COLORS.grass,
   finish: PAPER_COLORS.finish,
-  rumble: PAPER_COLORS.rumbleYellow,
+  rumble: PAPER_COLORS.paper,
 };
