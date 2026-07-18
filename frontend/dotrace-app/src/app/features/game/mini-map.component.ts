@@ -78,21 +78,22 @@ export class MiniMapComponent implements OnChanges {
       }
     }
 
-    // Zebra kerbs as thin dashes on the track border (not filled cells).
+    // Full zebra outline on every track/off-track edge.
     const isRoad = (x: number, y: number): boolean => {
       const t = track.grid[y]?.[x];
       return t === 'track' || t === 'finish';
     };
+    const isOff = (x: number, y: number): boolean => !isRoad(x, y);
     ctx.lineWidth = Math.max(1, s * 0.35);
     ctx.lineCap = 'butt';
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
-        if (track.grid[y][x] !== 'rumble') continue;
+        if (!isRoad(x, y)) continue;
         const edges: Array<[number, number, number, number]> = [];
-        if (isRoad(x, y + 1)) edges.push([x * s, (y + 1) * s, (x + 1) * s, (y + 1) * s]);
-        if (isRoad(x, y - 1)) edges.push([x * s, y * s, (x + 1) * s, y * s]);
-        if (isRoad(x + 1, y)) edges.push([(x + 1) * s, y * s, (x + 1) * s, (y + 1) * s]);
-        if (isRoad(x - 1, y)) edges.push([x * s, y * s, x * s, (y + 1) * s]);
+        if (isOff(x, y - 1)) edges.push([x * s, y * s, (x + 1) * s, y * s]);
+        if (isOff(x, y + 1)) edges.push([x * s, (y + 1) * s, (x + 1) * s, (y + 1) * s]);
+        if (isOff(x - 1, y)) edges.push([x * s, y * s, x * s, (y + 1) * s]);
+        if (isOff(x + 1, y)) edges.push([(x + 1) * s, y * s, (x + 1) * s, (y + 1) * s]);
         for (const [x0, y0, x1, y1] of edges) {
           const dx = x1 - x0;
           const dy = y1 - y0;
