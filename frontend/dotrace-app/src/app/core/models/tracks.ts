@@ -392,10 +392,10 @@ const SILVERSTONE: CircuitSpec = {
 };
 
 /**
- * Spa-Francorchamps — larger classic silhouette: La Source hairpin at the
- * bottom-left, Eau Rouge/Raidillon kink climbing into the Kemmel Straight,
- * Les Combes at the top, Pouhon bulging out on the right, then Fagnes /
- * Stavelot / Blanchimont returning to the pit straight.
+ * Spa-Francorchamps — classic “gun” silhouette matching the croqui: La Source
+ * hairpin at bottom-left, Eau Rouge kink climbing the left flank into Kemmel,
+ * Les Combes at the top, Pouhon as a wide right-hand ear, then Fagnes /
+ * Stavelot / Blanchimont returning to the pit straight (S/F before La Source).
  */
 const SPA: CircuitSpec = {
   id: 'spa',
@@ -404,61 +404,65 @@ const SPA: CircuitSpec = {
   height: 52,
   centerline: [
     // Pit straight → La Source (race left). S/F on this stretch.
-    { x: 34, y: 47 },
-    { x: 22, y: 47 },
-    { x: 14, y: 46 },
+    { x: 32, y: 47 },
+    { x: 20, y: 47 },
+    { x: 12, y: 46 },
     // La Source — tight 180, exit upward
-    { x: 8, y: 44 },
-    { x: 4, y: 40 },
-    { x: 4, y: 36 },
-    { x: 8, y: 34 },
-    { x: 14, y: 34 },
-    // Eau Rouge / Raidillon — R-L-R kink climbing
-    { x: 20, y: 32 },
-    { x: 28, y: 28 },
-    { x: 24, y: 24 },
-    { x: 28, y: 20 },
-    { x: 34, y: 15 },
-    // Kemmel Straight
-    { x: 40, y: 9 },
-    { x: 46, y: 5 },
-    { x: 52, y: 3 },
-    // Les Combes / Malmedy
-    { x: 58, y: 2 },
-    { x: 64, y: 3 },
-    { x: 68, y: 6 },
-    { x: 66, y: 10 },
-    { x: 60, y: 12 },
-    { x: 56, y: 15 },
-    // Pouhon — wide outward bulge on the right
-    { x: 58, y: 19 },
-    { x: 64, y: 22 },
-    { x: 72, y: 26 },
-    { x: 76, y: 30 },
-    { x: 76, y: 34 },
-    { x: 72, y: 37 },
-    { x: 66, y: 38 },
+    { x: 6, y: 44 },
+    { x: 3, y: 40 },
+    { x: 3, y: 36 },
+    { x: 7, y: 34 },
+    { x: 11, y: 34 },
+    // Eau Rouge / Raidillon — R-L-R kink climbing the left flank
+    { x: 15, y: 32 },
+    { x: 21, y: 29 },
+    { x: 15, y: 26 },
+    { x: 19, y: 22 },
+    { x: 14, y: 18 },
+    // Kemmel Straight — long climb hugging the left edge
+    { x: 11, y: 13 },
+    { x: 10, y: 8 },
+    { x: 14, y: 4 },
+    { x: 20, y: 2 },
+    // Les Combes / Malmedy — tight top hook
+    { x: 28, y: 2 },
+    { x: 36, y: 3 },
+    { x: 40, y: 6 },
+    { x: 38, y: 10 },
+    { x: 34, y: 12 },
+    // Toward Pouhon
+    { x: 36, y: 16 },
+    { x: 40, y: 20 },
+    { x: 44, y: 22 },
+    // Pouhon — prominent right ear
+    { x: 52, y: 22 },
+    { x: 62, y: 23 },
+    { x: 70, y: 26 },
+    { x: 74, y: 30 },
+    { x: 74, y: 34 },
+    { x: 70, y: 37 },
+    { x: 62, y: 38 },
+    { x: 54, y: 37 },
+    { x: 48, y: 35 },
     // Fagnes
-    { x: 60, y: 36 },
-    { x: 56, y: 34 },
-    { x: 52, y: 36 },
+    { x: 46, y: 37 },
+    { x: 48, y: 40 },
     // Stavelot
-    { x: 48, y: 39 },
-    { x: 46, y: 42 },
-    { x: 50, y: 44 },
-    { x: 56, y: 44 },
+    { x: 52, y: 42 },
+    { x: 54, y: 44 },
+    { x: 50, y: 46 },
     // Blanchimont → pit straight
-    { x: 52, y: 46 },
     { x: 44, y: 47 },
-    { x: 34, y: 47 },
+    { x: 38, y: 46 },
+    { x: 32, y: 47 },
   ],
   finish: { x0: 24, x1: 25, y0: 44, y1: 50 },
-  startLine: gridSlots(22, -2, [45, 47]),
+  startLine: gridSlots(22, -2, [46, 48]),
   arrows: [
     { at: { x: 24.5, y: 42.5 }, dir: { x: -1, y: 0 } },
     { at: { x: 24.5, y: 50.4 }, dir: { x: -1, y: 0 } },
   ],
-  checkpoint: { x0: 68, y0: 24, x1: 79, y1: 38 },
+  checkpoint: { x0: 66, y0: 24, x1: 78, y1: 38 },
 };
 
 /**
