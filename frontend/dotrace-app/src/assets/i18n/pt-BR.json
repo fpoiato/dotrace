@@ -45,8 +45,6 @@
   "game.grassPenaltyTimed": "Atalho na grama — parado por {{sec}}s",
   "game.penaltyTitle": "Atalho na grama!",
   "game.penaltyBody": "Penalidade — você não pode mover até a contagem chegar a zero.",
-  "game.crashTitle": "Batida!",
-  "game.crashBody": "Você bateu em outro carro — perdeu o momentum.",
   "game.map.zoomIn": "Aumentar zoom",
   "game.map.zoomOut": "Diminuir zoom",
   "game.map.toggleFit": "Alternar visão da pista inteira",
