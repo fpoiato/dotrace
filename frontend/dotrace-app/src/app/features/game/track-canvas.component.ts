@@ -566,12 +566,13 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     ctx.stroke();
   }
 
-  /** Green marker covering everything that is not track. */
+  /** Green marker covering everything that is not track (rumble stays grass-colored). */
   private drawGrass(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     ctx.fillStyle = PAPER_COLORS.grass;
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
-        if (track.grid[y][x] === 'grass') {
+        const tile = track.grid[y][x];
+        if (tile === 'grass' || tile === 'rumble') {
           ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
         }
       }
@@ -633,7 +634,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     ctx.stroke();
   }
 
-  /** Red/white kerb strips on grass at corner apexes (track-facing edge + fill). */
+  /**
+   * Red/white zebra kerbs only on the track border (same place as the black
+   * ink line) — never filling the whole rumble cell.
+   */
   private drawRumbleKerbs(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     const isTrack = (x: number, y: number): boolean => {
       const t = track.grid[y]?.[x];
@@ -642,22 +646,19 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     const jitter = (x: number, y: number): number =>
       ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
     const segLen = 4;
-    const stripeW = 3;
+
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
 
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
         if (track.grid[y][x] !== 'rumble') continue;
         const px = x * CELL;
         const py = y * CELL;
-        for (let i = 0; i < CELL; i += stripeW) {
-          ctx.fillStyle = i % (stripeW * 2) === 0 ? PAPER_COLORS.rumbleRed : PAPER_COLORS.rumbleWhite;
-          ctx.fillRect(px + i, py + 1, Math.min(stripeW, CELL - i), CELL - 2);
-        }
 
-        if (isTrack(x, y - 1)) {
-          this.drawKerbEdge(ctx, px - 1, py + jitter(x, y), px + CELL + 1, py + jitter(x + 1, y), segLen);
-        }
+        // Draw the zebra only along the shared edge with the road.
         if (isTrack(x, y + 1)) {
+          // Track is below → zebra on the top edge of the track cell (bottom of rumble).
           this.drawKerbEdge(
             ctx,
             px - 1,
@@ -667,8 +668,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
             segLen
           );
         }
-        if (isTrack(x - 1, y)) {
-          this.drawKerbEdge(ctx, px + jitter(x, y), py - 1, px + jitter(x, y + 1), py + CELL + 1, segLen);
+        if (isTrack(x, y - 1)) {
+          this.drawKerbEdge(ctx, px - 1, py + jitter(x, y), px + CELL + 1, py + jitter(x + 1, y), segLen);
         }
         if (isTrack(x + 1, y)) {
           this.drawKerbEdge(
@@ -680,11 +681,14 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
             segLen
           );
         }
+        if (isTrack(x - 1, y)) {
+          this.drawKerbEdge(ctx, px + jitter(x, y), py - 1, px + jitter(x, y + 1), py + CELL + 1, segLen);
+        }
       }
     }
   }
 
-  /** Alternating red/white dashes along one kerb edge. */
+  /** Alternating red/white dashes along one kerb edge (ink-line thickness). */
   private drawKerbEdge(
     ctx: CanvasRenderingContext2D,
     x0: number,
