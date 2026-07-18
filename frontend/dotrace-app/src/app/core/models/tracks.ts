@@ -134,10 +134,60 @@ function stampCornerRumble(grid: TileType[][], centerline: Vector2D[]): void {
   }
 }
 
+/**
+ * Close short grass holes along the track edge inside a rumble strip so the
+ * black ink boundary doesn't interrupt the zebra mid-corner. Only fills cells
+ * that sit between rumble on both sides along the edge (does not grow the strip).
+ */
+function sealRumbleGaps(grid: TileType[][], maxGap = 2): void {
+  const h = grid.length;
+  const w = grid[0].length;
+  const ortho = [
+    [0, -1],
+    [0, 1],
+    [-1, 0],
+    [1, 0],
+  ] as const;
+
+  const fill: Array<[number, number]> = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (grid[y][x] !== 'grass') continue;
+
+      for (const [tdx, tdy] of ortho) {
+        const toward = grid[y + tdy]?.[x + tdx];
+        if (toward !== 'track' && toward !== 'finish') continue;
+
+        // Lateral walk along the shared edge (perpendicular to track normal).
+        const lx = -tdy;
+        const ly = tdx;
+        const hasRumble = (dir: 1 | -1): boolean => {
+          for (let step = 1; step <= maxGap; step++) {
+            const sx = x + lx * dir * step;
+            const sy = y + ly * dir * step;
+            if (sy < 0 || sy >= h || sx < 0 || sx >= w) return false;
+            const t = grid[sy][sx];
+            if (t === 'rumble') return true;
+            if (t !== 'grass') return false;
+          }
+          return false;
+        };
+
+        if (hasRumble(1) && hasRumble(-1)) {
+          fill.push([x, y]);
+          break;
+        }
+      }
+    }
+  }
+  for (const [x, y] of fill) grid[y][x] = 'rumble';
+}
+
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
   const grid = emptyGrid(GRID_W, GRID_H);
   carvePolyline(grid, spec.centerline);
   stampCornerRumble(grid, spec.centerline);
+  sealRumbleGaps(grid);
   stampFinish(grid, spec.finish.x0, spec.finish.x1, spec.finish.y0, spec.finish.y1);
   return {
     id: spec.id,
