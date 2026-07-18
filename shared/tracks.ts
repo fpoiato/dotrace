@@ -317,50 +317,17 @@ const INTERLAGOS: CircuitSpec = {
 };
 
 /**
- * Silverstone — clockwise: long bottom start straight, sweeping right-hand
- * complex at the top (Maggotts / Becketts feel), left flank dropping through
- * the infield and back onto the Wellington Straight.
+ * Silverstone — larger clockwise circuit: tight top hairpin, long right-hand
+ * descent, bottom bump/chicane and bulbous left turn, tall infield “n” loop
+ * with a left-middle bay, then the climb back to the hairpin.
  */
 const SILVERSTONE: CircuitSpec = {
   id: 'silverstone',
   nameKey: 'tracks.silverstone',
-  centerline: [
-    { x: 14, y: 31 },
-    { x: 40, y: 31 },
-    { x: 48, y: 28 },
-    { x: 51, y: 22 },
-    { x: 49, y: 15 },
-    { x: 42, y: 8 },
-    { x: 28, y: 5 },
-    { x: 14, y: 6 },
-    { x: 8, y: 10 },
-    { x: 6, y: 16 },
-    { x: 8, y: 23 },
-    { x: 12, y: 28 },
-    { x: 14, y: 31 },
-  ],
-  finish: { x0: 26, x1: 27, y0: 27, y1: 33 },
-  startLine: gridSlots(29, 2, [29, 31]),
-  arrows: [
-    { at: { x: 26.5, y: 26.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 26.5, y: 33.5 }, dir: { x: 1, y: 0 } },
-  ],
-  checkpoint: { x0: 12, y0: 0, x1: 42, y1: 10 },
-};
-
-/**
- * Spa-Francorchamps — larger clockwise circuit matching the classic silhouette:
- * La Source hairpin at the top, long right-hand descent, bottom bump/chicane and
- * bulbous left turn, tall infield “n” loop (Pouhon) with a left-middle bay, then
- * the Blanchimont straight climbing back to the hairpin.
- */
-const SPA: CircuitSpec = {
-  id: 'spa',
-  nameKey: 'tracks.spa',
   width: 80,
   height: 52,
   centerline: [
-    // La Source — tight top hairpin
+    // Top hairpin
     { x: 16, y: 7 },
     { x: 20, y: 3 },
     { x: 26, y: 2 },
@@ -398,7 +365,7 @@ const SPA: CircuitSpec = {
     { x: 28, y: 20 },
     { x: 22, y: 24 },
     { x: 16, y: 26 },
-    // Left Blanchimont straight up to La Source
+    // Left straight up to the hairpin
     { x: 12, y: 20 },
     { x: 10, y: 14 },
     { x: 12, y: 9 },
@@ -412,6 +379,76 @@ const SPA: CircuitSpec = {
     { at: { x: 17.5, y: 21.5 }, dir: { x: 0, y: -1 } },
   ],
   checkpoint: { x0: 68, y0: 30, x1: 78, y1: 44 },
+};
+
+/**
+ * Spa-Francorchamps — larger classic silhouette: La Source hairpin at the
+ * bottom-left, Eau Rouge/Raidillon kink climbing into the Kemmel Straight,
+ * Les Combes at the top, Pouhon bulging out on the right, then Fagnes /
+ * Stavelot / Blanchimont returning to the pit straight.
+ */
+const SPA: CircuitSpec = {
+  id: 'spa',
+  nameKey: 'tracks.spa',
+  width: 80,
+  height: 52,
+  centerline: [
+    // Pit straight → La Source (race left). S/F on this stretch.
+    { x: 34, y: 47 },
+    { x: 22, y: 47 },
+    { x: 14, y: 46 },
+    // La Source — tight 180, exit upward
+    { x: 8, y: 44 },
+    { x: 4, y: 40 },
+    { x: 4, y: 36 },
+    { x: 8, y: 34 },
+    { x: 14, y: 34 },
+    // Eau Rouge / Raidillon — R-L-R kink climbing
+    { x: 20, y: 32 },
+    { x: 28, y: 28 },
+    { x: 24, y: 24 },
+    { x: 28, y: 20 },
+    { x: 34, y: 15 },
+    // Kemmel Straight
+    { x: 40, y: 9 },
+    { x: 46, y: 5 },
+    { x: 52, y: 3 },
+    // Les Combes / Malmedy
+    { x: 58, y: 2 },
+    { x: 64, y: 3 },
+    { x: 68, y: 6 },
+    { x: 66, y: 10 },
+    { x: 60, y: 12 },
+    { x: 56, y: 15 },
+    // Pouhon — wide outward bulge on the right
+    { x: 58, y: 19 },
+    { x: 64, y: 22 },
+    { x: 72, y: 26 },
+    { x: 76, y: 30 },
+    { x: 76, y: 34 },
+    { x: 72, y: 37 },
+    { x: 66, y: 38 },
+    // Fagnes
+    { x: 60, y: 36 },
+    { x: 56, y: 34 },
+    { x: 52, y: 36 },
+    // Stavelot
+    { x: 48, y: 39 },
+    { x: 46, y: 42 },
+    { x: 50, y: 44 },
+    { x: 56, y: 44 },
+    // Blanchimont → pit straight
+    { x: 52, y: 46 },
+    { x: 44, y: 47 },
+    { x: 34, y: 47 },
+  ],
+  finish: { x0: 24, x1: 25, y0: 44, y1: 50 },
+  startLine: gridSlots(22, -2, [45, 47]),
+  arrows: [
+    { at: { x: 24.5, y: 42.5 }, dir: { x: -1, y: 0 } },
+    { at: { x: 24.5, y: 50.4 }, dir: { x: -1, y: 0 } },
+  ],
+  checkpoint: { x0: 68, y0: 24, x1: 79, y1: 38 },
 };
 
 /**
