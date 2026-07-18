@@ -503,7 +503,7 @@ describe('rumble strips', () => {
       [-1, 0],
       [1, 0],
     ] as const;
-    const maxGap = 2;
+    const maxGap = 3;
 
     for (const track of TRACKS) {
       for (let y = 0; y < track.height; y++) {

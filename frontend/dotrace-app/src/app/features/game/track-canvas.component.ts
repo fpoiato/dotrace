@@ -592,19 +592,25 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   }
 
   /**
-   * Track-edge facing (dx,dy) should be a zebra kerb: direct rumble neighbor,
-   * or grass flanked by rumble along that same edge (avoids black mid-kerb gaps).
+   * Boundary edge of track cell (x,y) facing (dx,dy) is a zebra kerb when the
+   * off-track side has rumble on/near that edge (fills gaps so black ink never
+   * appears mid-kerb on rasterized curves).
    */
   private edgeHasKerb(track: TrackDefinition, x: number, y: number, dx: number, dy: number): boolean {
     const nx = x + dx;
     const ny = y + dy;
     const neighbor = track.grid[ny]?.[nx];
     if (neighbor === 'rumble') return true;
-    if (neighbor !== 'grass') return false;
-    // Lateral cells along the edge (perpendicular to the outward normal).
-    const px = -dy;
-    const py = dx;
-    return track.grid[ny]?.[nx + px] === 'rumble' || track.grid[ny]?.[nx - px] === 'rumble';
+    if (neighbor !== 'grass' && neighbor != null) return false;
+
+    // Look laterally along the off-track side for nearby rumble.
+    const lx = -dy;
+    const ly = dx;
+    const reach = 3;
+    for (let s = -reach; s <= reach; s++) {
+      if (track.grid[ny + ly * s]?.[nx + lx * s] === 'rumble') return true;
+    }
+    return false;
   }
 
   /** Thick hand-inked black boundary wherever track meets plain grass (not kerbs). */
@@ -615,32 +621,88 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     };
     const jitter = (x: number, y: number): number =>
       ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
+    // Keep ink clear of zebra ends (half of ink width + padding).
+    const inset = 2.5;
 
     ctx.strokeStyle = PAPER_COLORS.ink;
     ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
+    ctx.lineCap = 'butt';
     ctx.beginPath();
+
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
         const tile = track.grid[y][x];
         if (tile !== 'track' && tile !== 'finish') continue;
         const px = x * CELL;
         const py = y * CELL;
+
+        // Top
         if (blocksInk(x, y - 1) && !this.edgeHasKerb(track, x, y, 0, -1)) {
-          ctx.moveTo(px - 1, py + jitter(x, y));
-          ctx.lineTo(px + CELL + 1, py + jitter(x + 1, y));
+          let x0 = px;
+          let x1 = px + CELL;
+          if (this.edgeHasKerb(track, x, y, -1, 0) || this.edgeHasKerb(track, x - 1, y, 0, -1)) {
+            x0 += inset;
+          }
+          if (this.edgeHasKerb(track, x, y, 1, 0) || this.edgeHasKerb(track, x + 1, y, 0, -1)) {
+            x1 -= inset;
+          }
+          if (x1 > x0) {
+            const j0 = py + jitter(x, y);
+            const j1 = py + jitter(x + 1, y);
+            ctx.moveTo(x0, j0);
+            ctx.lineTo(x1, j1);
+          }
         }
+        // Bottom
         if (blocksInk(x, y + 1) && !this.edgeHasKerb(track, x, y, 0, 1)) {
-          ctx.moveTo(px - 1, py + CELL + jitter(x, y + 1));
-          ctx.lineTo(px + CELL + 1, py + CELL + jitter(x + 1, y + 1));
+          let x0 = px;
+          let x1 = px + CELL;
+          if (this.edgeHasKerb(track, x, y, -1, 0) || this.edgeHasKerb(track, x - 1, y, 0, 1)) {
+            x0 += inset;
+          }
+          if (this.edgeHasKerb(track, x, y, 1, 0) || this.edgeHasKerb(track, x + 1, y, 0, 1)) {
+            x1 -= inset;
+          }
+          if (x1 > x0) {
+            const j0 = py + CELL + jitter(x, y + 1);
+            const j1 = py + CELL + jitter(x + 1, y + 1);
+            ctx.moveTo(x0, j0);
+            ctx.lineTo(x1, j1);
+          }
         }
+        // Left
         if (blocksInk(x - 1, y) && !this.edgeHasKerb(track, x, y, -1, 0)) {
-          ctx.moveTo(px + jitter(x, y), py - 1);
-          ctx.lineTo(px + jitter(x, y + 1), py + CELL + 1);
+          let y0 = py;
+          let y1 = py + CELL;
+          if (this.edgeHasKerb(track, x, y, 0, -1) || this.edgeHasKerb(track, x, y - 1, -1, 0)) {
+            y0 += inset;
+          }
+          if (this.edgeHasKerb(track, x, y, 0, 1) || this.edgeHasKerb(track, x, y + 1, -1, 0)) {
+            y1 -= inset;
+          }
+          if (y1 > y0) {
+            const j0 = px + jitter(x, y);
+            const j1 = px + jitter(x, y + 1);
+            ctx.moveTo(j0, y0);
+            ctx.lineTo(j1, y1);
+          }
         }
+        // Right
         if (blocksInk(x + 1, y) && !this.edgeHasKerb(track, x, y, 1, 0)) {
-          ctx.moveTo(px + CELL + jitter(x + 1, y), py - 1);
-          ctx.lineTo(px + CELL + jitter(x + 1, y + 1), py + CELL + 1);
+          let y0 = py;
+          let y1 = py + CELL;
+          if (this.edgeHasKerb(track, x, y, 0, -1) || this.edgeHasKerb(track, x, y - 1, 1, 0)) {
+            y0 += inset;
+          }
+          if (this.edgeHasKerb(track, x, y, 0, 1) || this.edgeHasKerb(track, x, y + 1, 1, 0)) {
+            y1 -= inset;
+          }
+          if (y1 > y0) {
+            const j0 = px + CELL + jitter(x + 1, y);
+            const j1 = px + CELL + jitter(x + 1, y + 1);
+            ctx.moveTo(j0, y0);
+            ctx.lineTo(j1, y1);
+          }
         }
       }
     }
@@ -648,16 +710,17 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   }
 
   /**
-   * Red/white zebra kerbs on the track border at rumble (and grass gaps
-   * flanked by rumble) — never filling the whole rumble cell.
+   * Red/white zebra kerbs on the track border near rumble — drawn after ink and
+   * slightly thicker so no black remnant shows through mid-curve.
    */
   private drawRumbleKerbs(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     const jitter = (x: number, y: number): number =>
       ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1) * 1.6 - 0.8;
     const segLen = 4;
 
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.lineCap = 'butt';
+    ctx.lineJoin = 'round';
 
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
@@ -667,28 +730,28 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
         const py = y * CELL;
 
         if (this.edgeHasKerb(track, x, y, 0, -1)) {
-          this.drawKerbEdge(ctx, px - 1, py + jitter(x, y), px + CELL + 1, py + jitter(x + 1, y), segLen);
+          this.drawKerbEdge(ctx, px, py + jitter(x, y), px + CELL, py + jitter(x + 1, y), segLen);
         }
         if (this.edgeHasKerb(track, x, y, 0, 1)) {
           this.drawKerbEdge(
             ctx,
-            px - 1,
+            px,
             py + CELL + jitter(x, y + 1),
-            px + CELL + 1,
+            px + CELL,
             py + CELL + jitter(x + 1, y + 1),
             segLen
           );
         }
         if (this.edgeHasKerb(track, x, y, -1, 0)) {
-          this.drawKerbEdge(ctx, px + jitter(x, y), py - 1, px + jitter(x, y + 1), py + CELL + 1, segLen);
+          this.drawKerbEdge(ctx, px + jitter(x, y), py, px + jitter(x, y + 1), py + CELL, segLen);
         }
         if (this.edgeHasKerb(track, x, y, 1, 0)) {
           this.drawKerbEdge(
             ctx,
             px + CELL + jitter(x + 1, y),
-            py - 1,
+            py,
             px + CELL + jitter(x + 1, y + 1),
-            py + CELL + 1,
+            py + CELL,
             segLen
           );
         }
@@ -696,7 +759,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
-  /** Alternating red/white dashes along one kerb edge (ink-line thickness). */
+  /** Alternating red/white dashes along one kerb edge. */
   private drawKerbEdge(
     ctx: CanvasRenderingContext2D,
     x0: number,
