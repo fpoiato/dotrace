@@ -533,6 +533,44 @@ describe('rumble strips', () => {
     expect(rumbleCells).toBeGreaterThan(10);
     expect(rumbleOnGrass).toBe(rumbleCells);
   });
+
+  it('seals short grass gaps along the track edge inside rumble strips', () => {
+    const ortho = [
+      [0, -1],
+      [0, 1],
+      [-1, 0],
+      [1, 0],
+    ] as const;
+    const maxGap = 2;
+
+    for (const track of TRACKS) {
+      for (let y = 0; y < track.height; y++) {
+        for (let x = 0; x < track.width; x++) {
+          if (track.grid[y][x] !== 'grass') continue;
+
+          for (const [tdx, tdy] of ortho) {
+            const toward = track.grid[y + tdy]?.[x + tdx];
+            if (toward !== 'track' && toward !== 'finish') continue;
+
+            const lx = -tdy;
+            const ly = tdx;
+            const hasRumble = (dir: 1 | -1): boolean => {
+              for (let step = 1; step <= maxGap; step++) {
+                const sx = x + lx * dir * step;
+                const sy = y + ly * dir * step;
+                const t = track.grid[sy]?.[sx];
+                if (t === 'rumble') return true;
+                if (t !== 'grass') return false;
+              }
+              return false;
+            };
+
+            expect(hasRumble(1) && hasRumble(-1)).toBe(false);
+          }
+        }
+      }
+    }
+  });
 });
 
 describe('primitives', () => {
