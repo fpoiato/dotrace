@@ -8,7 +8,6 @@ import {
   Player,
   TrackDefinition,
   createLobbyPlayer,
-  findCollisionOpponent,
   gearOf,
   getValidMoves,
   canPlayerMove,
@@ -17,7 +16,6 @@ import {
   nextActiveTurnIndex,
   rollDice,
   generateRoomCode,
-  segmentCrossesCell,
   segmentCrossesFinish,
   segmentEntersRect,
   buildRaceTelemetry,
@@ -129,42 +127,6 @@ describe('valid move enumeration', () => {
     const track = makeTrack();
     const moves = getValidMoves(player, track, [player, parked]);
     expect(moves.some((m) => m.landing.x === 3 && m.landing.y === 2)).toBe(true);
-  });
-});
-
-describe('car collisions', () => {
-  it('detects flying through another car along the segment', () => {
-    expect(segmentCrossesCell({ x: 0, y: 1 }, { x: 4, y: 1 }, { x: 2, y: 1 })).toBe(true);
-    expect(segmentCrossesCell({ x: 0, y: 0 }, { x: 1, y: 2 }, { x: 3, y: 3 })).toBe(false);
-  });
-
-  it('finds an opponent when landing on their cell', () => {
-    const mover = makePlayer({ connectionId: 'a', position: { x: 1, y: 1 } });
-    const other = makePlayer({ connectionId: 'b', position: { x: 3, y: 1 }, isHost: false });
-    expect(
-      findCollisionOpponent('a', mover.position, { x: 3, y: 1 }, [mover, other])
-    ).toBe(other);
-  });
-
-  it('finds an opponent when the path crosses their cell without landing on it', () => {
-    const mover = makePlayer({ connectionId: 'a', position: { x: 0, y: 1 }, velocity: { x: 4, y: 0 } });
-    const other = makePlayer({ connectionId: 'b', position: { x: 2, y: 1 }, isHost: false });
-    expect(
-      findCollisionOpponent('a', mover.position, { x: 4, y: 1 }, [mover, other])
-    ).toBe(other);
-  });
-
-  it('ignores finished racers for collisions', () => {
-    const mover = makePlayer({ connectionId: 'a', position: { x: 1, y: 1 } });
-    const other = makePlayer({
-      connectionId: 'b',
-      position: { x: 3, y: 1 },
-      isHost: false,
-      finishOrder: 1,
-    });
-    expect(
-      findCollisionOpponent('a', mover.position, { x: 3, y: 1 }, [mover, other])
-    ).toBeNull();
   });
 });
 

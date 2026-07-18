@@ -75,10 +75,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   padOptions: PadOption[] = [];
   /** Seconds left on a timed grass penalty (drives the popup countdown). */
   penaltyCountdownSec = 0;
-  showCrashWarning = false;
   /** Tick every 250ms while a timed stop penalty is active. */
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
-  private crashWarningTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -91,17 +89,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
-      this.game.gameEvents$.subscribe((event) => {
-        if (event.type === 'crash' && event.playerId === this.room.room?.connectionId) {
-          this.haptic.crash();
-          this.showCrashWarning = true;
-          if (this.crashWarningTimer) clearTimeout(this.crashWarningTimer);
-          this.crashWarningTimer = setTimeout(() => {
-            this.showCrashWarning = false;
-            this.crashWarningTimer = null;
-          }, 2500);
-        }
-      }),
       this.game.state$.subscribe((state) => {
         this.padOptions = this.buildPadOptions(state);
         this.updatePenaltyCountdown(state);
@@ -198,7 +185,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.clearStopPenaltyTimer();
-    if (this.crashWarningTimer) clearTimeout(this.crashWarningTimer);
     this.subs.forEach((s) => s.unsubscribe());
   }
 

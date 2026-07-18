@@ -426,36 +426,6 @@ export function activeRacers(players: Player[], excludeId?: string): Player[] {
   );
 }
 
-/** Whether the straight move from → to passes over a grid cell. */
-export function segmentCrossesCell(from: Vector2D, to: Vector2D, cell: Vector2D): boolean {
-  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
-  for (let i = 0; i <= Math.max(steps, 1); i++) {
-    const t = steps === 0 ? 1 : i / steps;
-    const x = Math.round(from.x + (to.x - from.x) * t);
-    const y = Math.round(from.y + (to.y - from.y) * t);
-    if (x === cell.x && y === cell.y) return true;
-  }
-  return false;
-}
-
-/**
- * If a move collides with another active racer (landing on them or flying
- * through their cell), return that opponent. The mover is the causer.
- */
-export function findCollisionOpponent(
-  moverId: string,
-  from: Vector2D,
-  landing: Vector2D,
-  players: Player[]
-): Player | null {
-  for (const other of activeRacers(players, moverId)) {
-    const pos = other.position;
-    if (landing.x === pos.x && landing.y === pos.y) return other;
-    if (segmentCrossesCell(from, landing, pos)) return other;
-  }
-  return null;
-}
-
 /** Racing "gear" = Chebyshev magnitude of the velocity vector. */
 export function gearOf(velocity: Vector2D): number {
   return Math.max(Math.abs(velocity.x), Math.abs(velocity.y));
@@ -587,6 +557,7 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
 /**
  * Enumerate valid next velocities and landing squares.
  * Used both for UI highlighting and host-side move validation.
+ * Cars may cross each other's paths, but cannot land on an occupied cell.
  * If every candidate lands outside the grid, an emergency stop
  * (velocity {0,0}, stay in place) is offered so the game never soft-locks.
  */
