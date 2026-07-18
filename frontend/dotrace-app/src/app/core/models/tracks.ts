@@ -139,7 +139,7 @@ function stampCornerRumble(grid: TileType[][], centerline: Vector2D[]): void {
  * black ink boundary doesn't interrupt the zebra mid-corner. Only fills cells
  * that sit between rumble on both sides along the edge (does not grow the strip).
  */
-function sealRumbleGaps(grid: TileType[][], maxGap = 2): void {
+function sealRumbleGaps(grid: TileType[][], maxGap = 3): void {
   const h = grid.length;
   const w = grid[0].length;
   const ortho = [
