@@ -108,15 +108,15 @@ describe('valid move enumeration', () => {
     expect(moves[0].landing).toEqual({ x: 5, y: 1 });
   });
 
-  it('allows landing on a cell occupied by another active racer', () => {
+  it('excludes landings occupied by another active racer', () => {
     const player = makePlayer({ connectionId: 'a', position: { x: 2, y: 2 } });
-    const other = makePlayer({ connectionId: 'b', position: { x: 3, y: 2 }, isHost: false });
+    const blocker = makePlayer({ connectionId: 'b', position: { x: 3, y: 2 }, isHost: false });
     const track = makeTrack();
-    const moves = getValidMoves(player, track, [player, other]);
-    expect(moves.some((m) => m.landing.x === 3 && m.landing.y === 2)).toBe(true);
+    const moves = getValidMoves(player, track, [player, blocker]);
+    expect(moves.some((m) => m.landing.x === 3 && m.landing.y === 2)).toBe(false);
   });
 
-  it('allows landing on a finished player cell', () => {
+  it('ignores finished players when checking occupancy', () => {
     const player = makePlayer({ connectionId: 'a', position: { x: 2, y: 2 } });
     const parked = makePlayer({
       connectionId: 'b',

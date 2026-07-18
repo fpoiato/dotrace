@@ -557,19 +557,20 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
 /**
  * Enumerate valid next velocities and landing squares.
  * Used both for UI highlighting and host-side move validation.
- * Cars may share cells / cross paths — no inter-car collision.
+ * Cars may cross each other's paths, but cannot land on an occupied cell.
  * If every candidate lands outside the grid, an emergency stop
  * (velocity {0,0}, stay in place) is offered so the game never soft-locks.
  */
 export function getValidMoves(
   player: Player,
   track: TrackDefinition,
-  _others?: Player[],
+  others?: Player[],
   round = 1
 ): { velocity: Vector2D; landing: Vector2D }[] {
   const moves: { velocity: Vector2D; landing: Vector2D }[] = [];
   const { position, velocity } = player;
   const gearLimited = isGearLimited(player, round);
+  const opponents = others ? activeRacers(others, player.connectionId) : [];
 
   for (let dvx = -MAX_GEAR_DELTA; dvx <= MAX_GEAR_DELTA; dvx++) {
     for (let dvy = -MAX_GEAR_DELTA; dvy <= MAX_GEAR_DELTA; dvy++) {
@@ -577,6 +578,9 @@ export function getValidMoves(
       if (!isValidGearChange(velocity, next, gearLimited)) continue;
       const landing = landingPosition(position, next);
       if (getTileAt(track, landing.x, landing.y) === null) continue;
+      if (opponents.some((o) => o.position.x === landing.x && o.position.y === landing.y)) {
+        continue;
+      }
       moves.push({ velocity: next, landing });
     }
   }
