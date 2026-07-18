@@ -56,12 +56,22 @@ function stampFinish(grid: TileType[][], x0: number, x1: number, y0: number, y1:
   }
 }
 
-/** Twelve staggered grid slots marching away from the stripe. */
+/** Twelve staggered grid slots marching away from the stripe (horizontal straight). */
 function gridSlots(firstCol: number, colStep: number, rows: [number, number]): Vector2D[] {
   const slots: Vector2D[] = [];
   for (let i = 0; i < 6; i++) {
     const x = firstCol + i * colStep;
     slots.push({ x, y: rows[0] }, { x, y: rows[1] });
+  }
+  return slots;
+}
+
+/** Twelve staggered grid slots along a vertical straight. */
+function gridSlotsVertical(cols: [number, number], firstRow: number, rowStep: number): Vector2D[] {
+  const slots: Vector2D[] = [];
+  for (let i = 0; i < 6; i++) {
+    const y = firstRow + i * rowStep;
+    slots.push({ x: cols[0], y }, { x: cols[1], y });
   }
   return slots;
 }
@@ -74,6 +84,9 @@ interface CircuitSpec {
   startLine: Vector2D[];
   arrows: TrackArrow[];
   checkpoint: { x0: number; y0: number; x1: number; y1: number };
+  /** Optional per-circuit grid size (defaults to GRID_W × GRID_H). */
+  width?: number;
+  height?: number;
 }
 
 function hasTrackNeighbor(grid: TileType[][], x: number, y: number): boolean {
@@ -174,16 +187,20 @@ function sealRumbleGaps(grid: TileType[][], maxGap = 3): void {
 }
 
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
-  const grid = emptyGrid(GRID_W, GRID_H);
+  const width = spec.width ?? GRID_W;
+  const height = spec.height ?? GRID_H;
+  const grid = emptyGrid(width, height);
   carvePolyline(grid, spec.centerline);
   stampCornerRumble(grid, spec.centerline);
+  // Tight hairpins can leave gaps wider than one seal pass can close.
+  sealRumbleGaps(grid);
   sealRumbleGaps(grid);
   stampFinish(grid, spec.finish.x0, spec.finish.x1, spec.finish.y0, spec.finish.y1);
   return {
     id: spec.id,
     nameKey: spec.nameKey,
-    width: GRID_W,
-    height: GRID_H,
+    width,
+    height,
     grid,
     startLine: spec.startLine,
     arrows: spec.arrows,
@@ -332,44 +349,69 @@ const SILVERSTONE: CircuitSpec = {
 };
 
 /**
- * Spa-Francorchamps — clockwise: long bottom start straight, La Source hairpin
- * on the right, Eau Rouge climb, Kemmel across the top, Les Combes chicane on
- * the left, Pouhon infield loop and Blanchimont sweep back to the line.
+ * Spa-Francorchamps — larger clockwise circuit matching the classic silhouette:
+ * La Source hairpin at the top, long right-hand descent, bottom bump/chicane and
+ * bulbous left turn, tall infield “n” loop (Pouhon) with a left-middle bay, then
+ * the Blanchimont straight climbing back to the hairpin.
  */
 const SPA: CircuitSpec = {
   id: 'spa',
   nameKey: 'tracks.spa',
+  width: 80,
+  height: 52,
   centerline: [
-    { x: 10, y: 32 },
-    { x: 44, y: 32 },
-    { x: 48, y: 30 },
-    { x: 50, y: 26 },
-    { x: 50, y: 20 },
-    { x: 46, y: 13 },
-    { x: 38, y: 8 },
-    { x: 24, y: 5 },
-    { x: 10, y: 5 },
-    { x: 5, y: 8 },
-    { x: 4, y: 14 },
-    { x: 7, y: 18 },
-    { x: 5, y: 22 },
-    { x: 8, y: 26 },
-    { x: 14, y: 29 },
-    { x: 22, y: 31 },
-    { x: 30, y: 29 },
-    { x: 38, y: 26 },
-    { x: 44, y: 28 },
-    { x: 48, y: 31 },
-    { x: 42, y: 32 },
-    { x: 10, y: 32 },
+    // La Source — tight top hairpin
+    { x: 16, y: 7 },
+    { x: 20, y: 3 },
+    { x: 26, y: 2 },
+    { x: 32, y: 3 },
+    { x: 36, y: 7 },
+    // Top-right sweep into the long right straight
+    { x: 48, y: 10 },
+    { x: 58, y: 14 },
+    { x: 66, y: 20 },
+    { x: 72, y: 28 },
+    { x: 74, y: 36 },
+    { x: 74, y: 42 },
+    // Bottom-right 90° left
+    { x: 70, y: 47 },
+    { x: 62, y: 49 },
+    { x: 52, y: 49 },
+    // Bottom bump / chicane
+    { x: 46, y: 48 },
+    { x: 42, y: 44 },
+    { x: 38, y: 47 },
+    // Bottom-left bulb
+    { x: 28, y: 49 },
+    { x: 18, y: 47 },
+    { x: 12, y: 42 },
+    // Tall infield n-loop (ascend right leg, round peak, descend left leg)
+    { x: 20, y: 38 },
+    { x: 30, y: 34 },
+    { x: 40, y: 30 },
+    { x: 48, y: 28 },
+    { x: 54, y: 26 },
+    { x: 56, y: 22 },
+    { x: 52, y: 18 },
+    { x: 44, y: 16 },
+    { x: 36, y: 17 },
+    { x: 28, y: 20 },
+    { x: 22, y: 24 },
+    { x: 16, y: 26 },
+    // Left Blanchimont straight up to La Source
+    { x: 12, y: 20 },
+    { x: 10, y: 14 },
+    { x: 12, y: 9 },
+    { x: 16, y: 7 },
   ],
-  finish: { x0: 24, x1: 25, y0: 29, y1: 35 },
-  startLine: gridSlots(27, 2, [31, 33]),
+  // Horizontal stripe across the vertical start/finish straight (race goes up)
+  finish: { x0: 7, x1: 16, y0: 21, y1: 22 },
+  startLine: gridSlotsVertical([10, 12], 19, -2),
   arrows: [
-    { at: { x: 24.5, y: 28.5 }, dir: { x: 1, y: 0 } },
-    { at: { x: 24.5, y: 35.4 }, dir: { x: 1, y: 0 } },
+    { at: { x: 5.5, y: 21.5 }, dir: { x: 0, y: -1 } },
+    { at: { x: 17.5, y: 21.5 }, dir: { x: 0, y: -1 } },
   ],
-  checkpoint: { x0: 2, y0: 2, x1: 16, y1: 12 },
+  checkpoint: { x0: 68, y0: 30, x1: 78, y1: 44 },
 };
 
 /**
