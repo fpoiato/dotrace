@@ -432,18 +432,11 @@ const SPA: CircuitSpec = {
     { x: 74, y: 34 },
     { x: 70, y: 37 },
     { x: 62, y: 38 },
-    { x: 54, y: 37 },
-    { x: 48, y: 35 },
-    // Fagnes
-    { x: 46, y: 37 },
-    { x: 48, y: 40 },
-    // Stavelot
-    { x: 52, y: 42 },
-    { x: 54, y: 44 },
-    { x: 50, y: 46 },
-    // Blanchimont → pit straight
-    { x: 44, y: 47 },
-    { x: 38, y: 46 },
+    // Smooth exit into Blanchimont / pit (no back-fold island)
+    { x: 54, y: 40 },
+    { x: 48, y: 43 },
+    { x: 42, y: 46 },
+    { x: 36, y: 47 },
     { x: 32, y: 47 },
   ],
   finish: { x0: 24, x1: 25, y0: 44, y1: 50 },
