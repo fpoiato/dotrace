@@ -51,6 +51,7 @@
   "game.finished": "Finished #{{pos}}",
   "game.podium": "Podium",
   "game.backMenu": "Back to Menu",
+  "game.playAgain": "Play again",
   "game.raceOver": "Race Over!",
   "game.telemetry": "Live standings",
   "game.turnOrder": "Turn order",
