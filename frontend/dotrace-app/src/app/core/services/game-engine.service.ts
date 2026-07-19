@@ -608,6 +608,38 @@ export class GameEngineService implements OnDestroy {
     }
   }
 
+  /**
+   * After GAME_OVER, send everyone back to the lobby with the same room,
+   * roster, track, laps and mode so the host can start another race.
+   */
+  returnToLobby(): void {
+    if (!this.isHost) return;
+    const current = this.state;
+    const room = this.roomService.room;
+    if (!current || !room || current.phase !== 'GAME_OVER') return;
+
+    if (this.gridOrderTimer) {
+      clearTimeout(this.gridOrderTimer);
+      this.gridOrderTimer = null;
+    }
+
+    const players = this.roomService.players
+      .filter((p) => p.status === 'approved')
+      .map((p) =>
+        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+      );
+    const state = createInitialState(players, room.connectionId);
+    state.trackId = current.trackId || '';
+    state.totalLaps = [1, 2, 3].includes(current.totalLaps) ? current.totalLaps : 1;
+    state.gameMode = current.gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
+    this.session.save({
+      trackId: state.trackId || undefined,
+      laps: state.totalLaps,
+      gameMode: state.gameMode,
+    });
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
   ngOnDestroy(): void {
     this.messageSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);

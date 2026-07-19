@@ -104,9 +104,11 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
         }
-        // Host-migration fallback can reset the game to the lobby phase;
-        // follow it so nobody is stranded on the game screen.
+        // Host-migration fallback / play-again can reset the game to the
+        // lobby phase; follow it so nobody is stranded on the game screen.
         if (state?.phase === 'LOBBY') {
+          this.showCelebration = false;
+          this.showReplay = false;
           void this.router.navigate(['/lobby']);
         }
       })
@@ -294,6 +296,11 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.showReplay = false;
   }
 
+  playAgain(): void {
+    this.showCelebration = false;
+    this.showReplay = false;
+    this.game.returnToLobby();
+  }
 
   backToMenu(): void {
     this.showCelebration = false;
