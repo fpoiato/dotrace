@@ -96,6 +96,23 @@ export interface PodiumEntry {
   position: number;
 }
 
+/** Running party-session totals across rematches in the same room. */
+export interface SessionPlayerStats {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  /** Races this player took part in during the session. */
+  races: number;
+  /** Times finishing in 1st place. */
+  wins: number;
+  /** Times finishing in the top 3. */
+  podiums: number;
+  /** Best single-lap wall time (ms) seen in TIMED races; lower is better. */
+  bestLapMs?: number;
+  /** Best single-lap round count seen in TURNS races; lower is better. */
+  bestLapRounds?: number;
+}
+
 /** One recorded move for post-race replay. seq=0 entries mark starting positions. */
 export interface MoveRecord {
   /** 0-based sequence number; 0 = starting positions before the first move. */
@@ -137,6 +154,11 @@ export interface GameState {
   raceStartedAt?: number;
   /** Move-by-move log for post-race replay. Populated by the host; relayed with final state. */
   replayLog?: MoveRecord[];
+  /**
+   * Cumulative ranking across rematches in this room.
+   * Updated once when a race transitions to GAME_OVER; preserved on return-to-lobby.
+   */
+  sessionStats?: SessionPlayerStats[];
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -168,7 +190,9 @@ export type ClientAction =
   | 'RELAY'
   | 'REQUEST_HOST_STATE'
   | 'HOST_STATE_RESPONSE'
-  | 'FORWARD_TO_HOST';
+  | 'FORWARD_TO_HOST'
+  | 'SUBMIT_RACE_STATS'
+  | 'GET_TOP10';
 
 export type RelayEventType =
   | 'STATE_SYNC'
@@ -192,7 +216,9 @@ export type ServerEvent =
   | 'REQUEST_HOST_STATE'
   | 'HOST_STATE_RESPONSE'
   | 'RELAY'
-  | 'PLAYER_ACTION';
+  | 'PLAYER_ACTION'
+  | 'TOP10'
+  | 'RACE_STATS_SAVED';
 
 export interface WsEnvelope<T = unknown> {
   action: ClientAction | ServerEvent | 'message';
@@ -645,4 +671,211 @@ export function formatRaceTime(elapsedMs: number): string {
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Wall-clock duration of a completed lap (1-based).
+ * Lap 1 is measured from raceStartedAt (or the first stamp if missing).
+ */
+export function lapSplitMs(
+  player: Pick<Player, 'lapTimes'>,
+  lapNumber: number,
+  raceStartedAt?: number
+): number | undefined {
+  const times = player.lapTimes ?? [];
+  const idx = lapNumber - 1;
+  if (times.length <= idx) return undefined;
+  const from = idx === 0 ? (raceStartedAt ?? times[0]) : times[idx - 1];
+  return Math.max(0, times[idx] - from);
+}
+
+/**
+ * Round count of a completed lap (1-based).
+ * Lap 1 is measured from round 0 (before the green flag).
+ */
+export function lapSplitRounds(
+  player: Pick<Player, 'lapRounds'>,
+  lapNumber: number
+): number | undefined {
+  const rounds = player.lapRounds ?? [];
+  const idx = lapNumber - 1;
+  if (rounds.length <= idx) return undefined;
+  const from = idx === 0 ? 0 : rounds[idx - 1];
+  return Math.max(0, rounds[idx] - from);
+}
+
+/** Fastest completed lap time (ms) for a player in the current race. */
+export function bestLapMs(
+  player: Pick<Player, 'lapTimes'>,
+  raceStartedAt?: number
+): number | undefined {
+  const times = player.lapTimes ?? [];
+  if (times.length === 0) return undefined;
+  let best: number | undefined;
+  for (let i = 1; i <= times.length; i++) {
+    const split = lapSplitMs(player, i, raceStartedAt);
+    if (split === undefined) continue;
+    if (best === undefined || split < best) best = split;
+  }
+  return best;
+}
+
+/** Fewest rounds used on any completed lap for a player in the current race. */
+export function bestLapRounds(player: Pick<Player, 'lapRounds'>): number | undefined {
+  const rounds = player.lapRounds ?? [];
+  if (rounds.length === 0) return undefined;
+  let best: number | undefined;
+  for (let i = 1; i <= rounds.length; i++) {
+    const split = lapSplitRounds(player, i);
+    if (split === undefined) continue;
+    if (best === undefined || split < best) best = split;
+  }
+  return best;
+}
+
+/** Connection id(s) that set the race's fastest lap (TIMED). Empty if none. */
+export function fastestLapHolderIds(state: GameState): string[] {
+  let best = Number.POSITIVE_INFINITY;
+  const holders: string[] = [];
+  for (const p of state.players) {
+    const v = bestLapMs(p, state.raceStartedAt);
+    if (v === undefined) continue;
+    if (v < best) {
+      best = v;
+      holders.length = 0;
+      holders.push(p.connectionId);
+    } else if (v === best) {
+      holders.push(p.connectionId);
+    }
+  }
+  return holders;
+}
+
+/** Connection id(s) that set the race's fewest-round lap (TURNS). Empty if none. */
+export function fewestRoundLapHolderIds(state: GameState): string[] {
+  let best = Number.POSITIVE_INFINITY;
+  const holders: string[] = [];
+  for (const p of state.players) {
+    const v = bestLapRounds(p);
+    if (v === undefined) continue;
+    if (v < best) {
+      best = v;
+      holders.length = 0;
+      holders.push(p.connectionId);
+    } else if (v === best) {
+      holders.push(p.connectionId);
+    }
+  }
+  return holders;
+}
+
+/**
+ * Fold the finished race into sessionStats (mutates state).
+ * Call exactly once when transitioning to GAME_OVER.
+ */
+export function updateSessionStats(state: GameState): void {
+  const byId = new Map<string, SessionPlayerStats>(
+    (state.sessionStats ?? []).map((s) => [s.connectionId, { ...s }])
+  );
+
+  for (const p of state.players) {
+    const prev = byId.get(p.connectionId);
+    const entry: SessionPlayerStats = prev ?? {
+      connectionId: p.connectionId,
+      nickname: p.nickname,
+      color: p.color,
+      races: 0,
+      wins: 0,
+      podiums: 0,
+    };
+    entry.nickname = p.nickname;
+    entry.color = p.color;
+    entry.races += 1;
+    if (p.finishOrder === 1) entry.wins += 1;
+    if (p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE) entry.podiums += 1;
+
+    const lapMs = bestLapMs(p, state.raceStartedAt);
+    if (lapMs !== undefined && (entry.bestLapMs === undefined || lapMs < entry.bestLapMs)) {
+      entry.bestLapMs = lapMs;
+    }
+    const lapRounds = bestLapRounds(p);
+    if (
+      lapRounds !== undefined &&
+      (entry.bestLapRounds === undefined || lapRounds < entry.bestLapRounds)
+    ) {
+      entry.bestLapRounds = lapRounds;
+    }
+    byId.set(p.connectionId, entry);
+  }
+
+  state.sessionStats = [...byId.values()];
+}
+
+/** Session ranking sorted for display: wins → podiums → best lap → best rounds → name. */
+export function buildSessionRanking(state: GameState): SessionPlayerStats[] {
+  const rows = [...(state.sessionStats ?? [])];
+  rows.sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (b.podiums !== a.podiums) return b.podiums - a.podiums;
+    const aLap = a.bestLapMs ?? Number.POSITIVE_INFINITY;
+    const bLap = b.bestLapMs ?? Number.POSITIVE_INFINITY;
+    if (aLap !== bLap) return aLap - bLap;
+    const aRounds = a.bestLapRounds ?? Number.POSITIVE_INFINITY;
+    const bRounds = b.bestLapRounds ?? Number.POSITIVE_INFINITY;
+    if (aRounds !== bRounds) return aRounds - bRounds;
+    return a.nickname.localeCompare(b.nickname);
+  });
+  return rows;
+}
+
+/** Remap session-stat keys when a player reconnects with a new connection id. */
+export function remapSessionStatsConnectionId(
+  state: GameState,
+  oldConnectionId: string,
+  newConnectionId: string
+): void {
+  if (!state.sessionStats) return;
+  state.sessionStats = state.sessionStats.map((s) =>
+    s.connectionId === oldConnectionId ? { ...s, connectionId: newConnectionId } : s
+  );
+}
+
+/** Per-race delta sent to the server to persist global nickname stats. */
+export interface RaceStatDelta {
+  nickname: string;
+  races: number;
+  wins: number;
+  podiums: number;
+  bestLapMs?: number;
+  bestLapRounds?: number;
+}
+
+/** One row in the global Top 10 leaderboard. */
+export interface Top10Entry {
+  nickname: string;
+  races: number;
+  wins: number;
+  podiums: number;
+  bestLapMs?: number;
+  bestLapRounds?: number;
+}
+
+/**
+ * Build host-submitted per-race deltas from the finished GameState.
+ * One entry per player who took part; counters are 0/1 for this race only.
+ */
+export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
+  return state.players.map((p) => {
+    const delta: RaceStatDelta = {
+      nickname: p.nickname,
+      races: 1,
+      wins: p.finishOrder === 1 ? 1 : 0,
+      podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
+    };
+    const lapMs = bestLapMs(p, state.raceStartedAt);
+    if (lapMs !== undefined) delta.bestLapMs = lapMs;
+    const rounds = bestLapRounds(p);
+    if (rounds !== undefined) delta.bestLapRounds = rounds;
+    return delta;
+  });
 }

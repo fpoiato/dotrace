@@ -1,7 +1,10 @@
+import { AsyncPipe } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
+import { formatRaceTime } from '../../core/models/ws-types';
+import { LeaderboardService } from '../../core/services/leaderboard.service';
 import { HowToPlayComponent } from '../../shared/how-to-play.component';
 import { LanguageToggleComponent } from '../../shared/language-toggle.component';
 import { RoomService } from '../../core/services/room.service';
@@ -10,7 +13,13 @@ import { SessionStorageService } from '../../core/services/session-storage.servi
 @Component({
   selector: 'app-landing',
   standalone: true,
-  imports: [FormsModule, TranslateModule, LanguageToggleComponent, HowToPlayComponent],
+  imports: [
+    AsyncPipe,
+    FormsModule,
+    TranslateModule,
+    LanguageToggleComponent,
+    HowToPlayComponent,
+  ],
   templateUrl: './landing.component.html',
 })
 export class LandingComponent implements OnInit {
@@ -18,6 +27,9 @@ export class LandingComponent implements OnInit {
   private readonly session = inject(SessionStorageService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  readonly leaderboard = inject(LeaderboardService);
+
+  readonly formatRaceTime = formatRaceTime;
 
   nickname = '';
   roomCode = '';
@@ -39,6 +51,8 @@ export class LandingComponent implements OnInit {
     if (saved?.nickname) {
       this.nickname = saved.nickname;
     }
+
+    void this.leaderboard.refreshTop10();
   }
 
   openJoin(): void {
