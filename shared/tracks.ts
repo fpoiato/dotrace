@@ -449,75 +449,62 @@ const SPA: CircuitSpec = {
 };
 
 /**
- * Suzuka — dense clockwise serpentine: tight switchbacks climbing through the
- * centre of the grid, a hairpin off the top row, then interleaved descent
- * lanes back to the bottom start straight (Vector Racer–style layout).
+ * Suzuka — figure-eight matching the croqui: S/F on the lower-right flank
+ * racing UP into the central crossover, upper loop with a tight hairpin at
+ * the top, then a wide right-hand turn into the sweeping bottom bulb that
+ * returns to the line.
  */
 const SUZUKA: CircuitSpec = {
   id: 'suzuka',
   nameKey: 'tracks.suzuka',
+  width: 120,
+  height: 78,
   centerline: [
-    { x: 15, y: 48 },
-    { x: 69, y: 48 },
-    { x: 72, y: 47 },
-    { x: 72, y: 44 },
-    { x: 69, y: 42 },
-    { x: 15, y: 42 },
-    { x: 12, y: 41 },
-    { x: 12, y: 38 },
-    { x: 15, y: 36 },
-    { x: 69, y: 36 },
-    { x: 72, y: 35 },
-    { x: 72, y: 32 },
-    { x: 69, y: 30 },
-    { x: 15, y: 30 },
-    { x: 12, y: 29 },
-    { x: 12, y: 26 },
-    { x: 15, y: 24 },
-    { x: 69, y: 24 },
-    { x: 72, y: 23 },
-    { x: 72, y: 20 },
-    { x: 69, y: 18 },
-    { x: 15, y: 18 },
-    { x: 12, y: 17 },
-    { x: 12, y: 14 },
-    { x: 15, y: 12 },
-    { x: 69, y: 12 },
-    { x: 72, y: 11 },
-    { x: 72, y: 8 },
-    { x: 69, y: 6 },
-    { x: 72, y: 9 },
-    { x: 72, y: 14 },
-    { x: 69, y: 15 },
-    { x: 15, y: 15 },
-    { x: 12, y: 17 },
-    { x: 12, y: 20 },
-    { x: 15, y: 21 },
-    { x: 69, y: 21 },
-    { x: 72, y: 23 },
-    { x: 72, y: 26 },
-    { x: 69, y: 27 },
-    { x: 15, y: 27 },
-    { x: 12, y: 29 },
-    { x: 12, y: 32 },
-    { x: 15, y: 33 },
-    { x: 69, y: 33 },
-    { x: 72, y: 35 },
-    { x: 72, y: 38 },
-    { x: 69, y: 39 },
-    { x: 15, y: 39 },
-    { x: 12, y: 41 },
-    { x: 12, y: 44 },
-    { x: 15, y: 45 },
-    { x: 15, y: 48 },
+    // S/F straight — tall vertical right flank, race UP into the crossover
+    { x: 92, y: 62 },
+    { x: 92, y: 54 },
+    { x: 92, y: 46 },
+    { x: 90, y: 38 },
+    { x: 82, y: 32 },
+    // Crossover (SE → NW) into the upper loop
+    { x: 68, y: 26 },
+    { x: 54, y: 20 },
+    // Wide sweeping left-hand turn
+    { x: 40, y: 14 },
+    { x: 30, y: 9 },
+    // Tight U-shaped hairpin at the top
+    { x: 34, y: 4 },
+    { x: 46, y: 3 },
+    { x: 58, y: 3 },
+    { x: 70, y: 5 },
+    { x: 78, y: 10 },
+    // Wide left-hand turn heading back down to the crossover
+    { x: 80, y: 18 },
+    { x: 74, y: 26 },
+    { x: 62, y: 32 },
+    // Crossover (NE → SW) into the lower loop
+    { x: 48, y: 38 },
+    // Large wide right-hand turn onto the west side
+    { x: 34, y: 46 },
+    { x: 24, y: 54 },
+    { x: 20, y: 60 },
+    // Long sweeping left-hand bulb along the bottom
+    { x: 22, y: 67 },
+    { x: 34, y: 72 },
+    { x: 50, y: 73 },
+    { x: 68, y: 73 },
+    { x: 82, y: 70 },
+    { x: 90, y: 66 },
+    { x: 92, y: 62 },
   ],
-  finish: { x0: 21, x1: 23, y0: 44, y1: 53 },
-  startLine: gridSlots(26, 3, [47, 50]),
+  // Horizontal stripe across the vertical S/F straight (race goes up)
+  finish: { x0: 84, x1: 100, y0: 55, y1: 56 },
+  startLine: gridSlotsVertical([89, 93], 53, -3),
   arrows: [
-    { at: { x: 22, y: 43 }, dir: { x: 1, y: 0 } },
-    { at: { x: 22, y: 53 }, dir: { x: 1, y: 0 } },
+    { at: { x: 82, y: 55 }, dir: { x: 0, y: -1 } },
+    { at: { x: 102, y: 55 }, dir: { x: 0, y: -1 } },
   ],
-  checkpoint: { x0: 57, y0: 3, x1: 78, y1: 15 },
+  checkpoint: { x0: 40, y0: 1, x1: 72, y1: 12 },
 };
 
 export const TRACKS: TrackDefinition[] = [
