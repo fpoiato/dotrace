@@ -35,8 +35,23 @@ export class DotRaceWsStack extends Stack {
       projectionType: ProjectionType.ALL,
     });
 
+    const leaderboardTable = new Table(this, 'DotRaceLeaderboard', {
+      tableName: 'DotRaceLeaderboard',
+      partitionKey: { name: 'nicknameKey', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    leaderboardTable.addGlobalSecondaryIndex({
+      indexName: 'BoardRankIndex',
+      partitionKey: { name: 'board', type: AttributeType.STRING },
+      sortKey: { name: 'rankKey', type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
+    });
+
     const lambdaEnv = {
       CONNECTIONS_TABLE: connectionsTable.tableName,
+      LEADERBOARD_TABLE: leaderboardTable.tableName,
       NODE_OPTIONS: '--enable-source-maps',
     };
 
@@ -73,6 +88,7 @@ export class DotRaceWsStack extends Stack {
     connectionsTable.grantReadWriteData(connectFn);
     connectionsTable.grantReadWriteData(disconnectFn);
     connectionsTable.grantReadWriteData(messageFn);
+    leaderboardTable.grantReadWriteData(messageFn);
 
     const webSocketApi = new WebSocketApi(this, 'DotRaceWebSocketApi', {
       connectRouteOptions: {
@@ -112,5 +128,6 @@ export class DotRaceWsStack extends Stack {
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
     new CfnOutput(this, 'ConnectionsTableName', { value: connectionsTable.tableName });
+    new CfnOutput(this, 'LeaderboardTableName', { value: leaderboardTable.tableName });
   }
 }

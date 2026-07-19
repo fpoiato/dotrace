@@ -27,6 +27,7 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
   updateSessionStats,
+  buildRaceStatDeltas,
   zeroVector,
   buildRaceTelemetry,
 } from '../models/ws-types';
@@ -353,7 +354,18 @@ export class GameEngineService implements OnDestroy {
     state.phase = 'GAME_OVER';
     updateSessionStats(state);
     this.setStateAndRelay('GAME_OVER', state);
+    this.submitGlobalRaceStats(state);
     return true;
+  }
+
+  /** Persist this race's deltas into the global nickname leaderboard (host only). */
+  private submitGlobalRaceStats(state: GameState): void {
+    if (!this.isHost) return;
+    const room = this.roomService.room;
+    if (!room) return;
+    const stats = buildRaceStatDeltas(state);
+    if (stats.length === 0) return;
+    this.ws.send('SUBMIT_RACE_STATS', { stats }, room.roomCode);
   }
 
   /**

@@ -190,7 +190,9 @@ export type ClientAction =
   | 'RELAY'
   | 'REQUEST_HOST_STATE'
   | 'HOST_STATE_RESPONSE'
-  | 'FORWARD_TO_HOST';
+  | 'FORWARD_TO_HOST'
+  | 'SUBMIT_RACE_STATS'
+  | 'GET_TOP10';
 
 export type RelayEventType =
   | 'STATE_SYNC'
@@ -214,7 +216,9 @@ export type ServerEvent =
   | 'REQUEST_HOST_STATE'
   | 'HOST_STATE_RESPONSE'
   | 'RELAY'
-  | 'PLAYER_ACTION';
+  | 'PLAYER_ACTION'
+  | 'TOP10'
+  | 'RACE_STATS_SAVED';
 
 export interface WsEnvelope<T = unknown> {
   action: ClientAction | ServerEvent | 'message';
@@ -834,4 +838,44 @@ export function remapSessionStatsConnectionId(
   state.sessionStats = state.sessionStats.map((s) =>
     s.connectionId === oldConnectionId ? { ...s, connectionId: newConnectionId } : s
   );
+}
+
+/** Per-race delta sent to the server to persist global nickname stats. */
+export interface RaceStatDelta {
+  nickname: string;
+  races: number;
+  wins: number;
+  podiums: number;
+  bestLapMs?: number;
+  bestLapRounds?: number;
+}
+
+/** One row in the global Top 10 leaderboard. */
+export interface Top10Entry {
+  nickname: string;
+  races: number;
+  wins: number;
+  podiums: number;
+  bestLapMs?: number;
+  bestLapRounds?: number;
+}
+
+/**
+ * Build host-submitted per-race deltas from the finished GameState.
+ * One entry per player who took part; counters are 0/1 for this race only.
+ */
+export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
+  return state.players.map((p) => {
+    const delta: RaceStatDelta = {
+      nickname: p.nickname,
+      races: 1,
+      wins: p.finishOrder === 1 ? 1 : 0,
+      podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
+    };
+    const lapMs = bestLapMs(p, state.raceStartedAt);
+    if (lapMs !== undefined) delta.bestLapMs = lapMs;
+    const rounds = bestLapRounds(p);
+    if (rounds !== undefined) delta.bestLapRounds = rounds;
+    return delta;
+  });
 }

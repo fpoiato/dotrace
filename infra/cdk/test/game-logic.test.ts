@@ -40,8 +40,10 @@ import {
   fewestRoundLapHolderIds,
   remapSessionStatsConnectionId,
   createInitialState,
+  buildRaceStatDeltas,
 } from '../../../shared/ws-types';
 import { TRACKS } from '../../../shared/tracks';
+import { buildRankKey, nicknameKey } from '../lambda/src/lib/leaderboard';
 
 function makeTrack(): TrackDefinition {
   // 6x4: all track except a grass border on the right column.
@@ -666,5 +668,55 @@ describe('lap splits and session ranking', () => {
     ];
     remapSessionStatsConnectionId(state, 'old', 'new');
     expect(state.sessionStats![0].connectionId).toBe('new');
+  });
+
+  it('builds per-race deltas for global leaderboard persistence', () => {
+    const ana = racePlayer({ connectionId: 'a', nickname: 'Ana', finishOrder: 1 });
+    const bob = racePlayer({
+      connectionId: 'b',
+      nickname: 'Bob',
+      color: '#0f0',
+      finishOrder: undefined,
+      lapTimes: [startedAt + 40_000],
+      lapRounds: [9],
+    });
+    const state = createInitialState([ana, bob], 'a');
+    state.raceStartedAt = startedAt;
+    state.players = [ana, bob];
+
+    const deltas = buildRaceStatDeltas(state);
+    expect(deltas).toHaveLength(2);
+    expect(deltas.find((d) => d.nickname === 'Ana')).toMatchObject({
+      races: 1,
+      wins: 1,
+      podiums: 1,
+      bestLapMs: 25_000,
+      bestLapRounds: 5,
+    });
+    expect(deltas.find((d) => d.nickname === 'Bob')).toMatchObject({
+      races: 1,
+      wins: 0,
+      podiums: 0,
+      bestLapMs: 40_000,
+      bestLapRounds: 9,
+    });
+  });
+});
+
+describe('global leaderboard rank keys', () => {
+  it('normalizes nicknames case-insensitively', () => {
+    expect(nicknameKey('  Ana ')).toBe('ana');
+  });
+
+  it('orders higher wins before lower wins (ascending rankKey)', () => {
+    const high = buildRankKey(5, 1, 'ana');
+    const low = buildRankKey(2, 8, 'bob');
+    expect(high < low).toBe(true);
+  });
+
+  it('breaks ties by podiums then nickname', () => {
+    const morePodiums = buildRankKey(3, 5, 'zoe');
+    const fewerPodiums = buildRankKey(3, 2, 'amy');
+    expect(morePodiums < fewerPodiums).toBe(true);
   });
 });

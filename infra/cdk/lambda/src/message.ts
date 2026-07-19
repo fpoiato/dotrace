@@ -20,6 +20,7 @@ import {
   ttl24h,
 } from './lib/ddb';
 import { ok, parseBody, WsEnvelope } from './lib/response';
+import { applyRaceStatDeltas, getTop10, RaceStatDelta } from './lib/leaderboard';
 
 async function isHost(connectionId: string): Promise<boolean> {
   const conn = await getConnection(connectionId);
@@ -459,6 +460,28 @@ export const handler: APIGatewayProxyHandler = async (event) => {
             senderNickname: sender.nickname,
           },
           roomCode: sender.roomCode,
+        });
+        break;
+      }
+
+      case 'SUBMIT_RACE_STATS': {
+        // Host-trusted: same model as RELAY. Counters are clamped to +1 per player.
+        if (!(await isHost(connectionId))) return ok();
+        const { stats } = (payload ?? {}) as { stats?: RaceStatDelta[] };
+        if (!Array.isArray(stats) || stats.length === 0) return ok();
+        const applied = await applyRaceStatDeltas(stats);
+        await sendToConnection(connectionId, {
+          action: 'RACE_STATS_SAVED',
+          payload: { applied },
+        });
+        break;
+      }
+
+      case 'GET_TOP10': {
+        const entries = await getTop10();
+        await sendToConnection(connectionId, {
+          action: 'TOP10',
+          payload: { entries },
         });
         break;
       }
