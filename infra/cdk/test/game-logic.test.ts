@@ -30,6 +30,16 @@ import {
   isPlayerStopped,
   segmentCrossesGrass,
   segmentCrossesRumble,
+  lapSplitMs,
+  lapSplitRounds,
+  bestLapMs,
+  bestLapRounds,
+  updateSessionStats,
+  buildSessionRanking,
+  fastestLapHolderIds,
+  fewestRoundLapHolderIds,
+  remapSessionStatsConnectionId,
+  createInitialState,
 } from '../../../shared/ws-types';
 import { TRACKS } from '../../../shared/tracks';
 
@@ -548,5 +558,113 @@ describe('primitives', () => {
     for (let i = 0; i < 50; i++) {
       expect(generateRoomCode()).toMatch(/^[A-HJ-NP-Z]{5}$/);
     }
+  });
+});
+
+describe('lap splits and session ranking', () => {
+  const startedAt = 1_000_000;
+
+  function racePlayer(overrides: Partial<Player> = {}): Player {
+    return makePlayer({
+      connectionId: 'c1',
+      nickname: 'Ana',
+      color: '#f00',
+      lapTimes: [startedAt + 30_000, startedAt + 55_000],
+      lapRounds: [5, 12],
+      finishOrder: 1,
+      ...overrides,
+    });
+  }
+
+  it('computes TIMED lap splits from raceStartedAt and prior stamps', () => {
+    const p = racePlayer();
+    expect(lapSplitMs(p, 1, startedAt)).toBe(30_000);
+    expect(lapSplitMs(p, 2, startedAt)).toBe(25_000);
+    expect(bestLapMs(p, startedAt)).toBe(25_000);
+  });
+
+  it('computes TURNS lap splits as round deltas', () => {
+    const p = racePlayer();
+    expect(lapSplitRounds(p, 1)).toBe(5);
+    expect(lapSplitRounds(p, 2)).toBe(7);
+    expect(bestLapRounds(p)).toBe(5);
+  });
+
+  it('awards fastest / fewest-round holders', () => {
+    const ana = racePlayer({
+      connectionId: 'a',
+      nickname: 'Ana',
+      lapTimes: [startedAt + 40_000],
+      lapRounds: [8],
+    });
+    const bob = racePlayer({
+      connectionId: 'b',
+      nickname: 'Bob',
+      color: '#0f0',
+      lapTimes: [startedAt + 22_000],
+      lapRounds: [6],
+      finishOrder: 2,
+    });
+    const state = createInitialState([ana, bob], 'a');
+    state.phase = 'GAME_OVER';
+    state.raceStartedAt = startedAt;
+    state.players = [ana, bob];
+    expect(fastestLapHolderIds(state)).toEqual(['b']);
+    expect(fewestRoundLapHolderIds(state)).toEqual(['b']);
+  });
+
+  it('accumulates session stats across races and sorts the ranking', () => {
+    const ana = racePlayer({ connectionId: 'a', nickname: 'Ana', finishOrder: 1 });
+    const bob = racePlayer({
+      connectionId: 'b',
+      nickname: 'Bob',
+      color: '#0f0',
+      finishOrder: 2,
+      lapTimes: [startedAt + 20_000],
+      lapRounds: [4],
+    });
+    const state = createInitialState([ana, bob], 'a');
+    state.phase = 'GAME_OVER';
+    state.raceStartedAt = startedAt;
+    state.players = [ana, bob];
+
+    updateSessionStats(state);
+    expect(state.sessionStats).toHaveLength(2);
+    expect(state.sessionStats!.find((s) => s.connectionId === 'a')!.wins).toBe(1);
+    expect(state.sessionStats!.find((s) => s.connectionId === 'b')!.bestLapMs).toBe(20_000);
+
+    // Second race: Bob wins, Ana DNF — wins accumulate; races increment.
+    state.players = [
+      { ...ana, finishOrder: undefined, lapTimes: [startedAt + 50_000], lapRounds: [9] },
+      { ...bob, finishOrder: 1, lapTimes: [startedAt + 18_000], lapRounds: [3] },
+    ];
+    updateSessionStats(state);
+
+    const ranking = buildSessionRanking(state);
+    // Ana: races 2, wins 1, podiums 1
+    // Bob: races 2, wins 1, podiums 2 → Bob leads on podiums
+    expect(ranking[0].nickname).toBe('Bob');
+    expect(ranking[0].wins).toBe(1);
+    expect(ranking[0].podiums).toBe(2);
+    expect(ranking[0].races).toBe(2);
+    expect(ranking[0].bestLapMs).toBe(18_000);
+    expect(ranking[0].bestLapRounds).toBe(3);
+  });
+
+  it('remaps session stats when a player reconnects', () => {
+    const state = createInitialState([racePlayer()], 'c1');
+    state.sessionStats = [
+      {
+        connectionId: 'old',
+        nickname: 'Ana',
+        color: '#f00',
+        races: 1,
+        wins: 1,
+        podiums: 1,
+        bestLapMs: 20_000,
+      },
+    ];
+    remapSessionStatsConnectionId(state, 'old', 'new');
+    expect(state.sessionStats![0].connectionId).toBe('new');
   });
 });

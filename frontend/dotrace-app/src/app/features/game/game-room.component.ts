@@ -253,6 +253,15 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.showReplay = false;
   }
 
+  get isHost(): boolean {
+    return this.game.isHost;
+  }
+
+  playAgain(): void {
+    this.showCelebration = false;
+    this.showReplay = false;
+    this.game.returnToLobby();
+  }
 
   backToMenu(): void {
     this.showCelebration = false;

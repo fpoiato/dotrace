@@ -152,6 +152,17 @@
           🎬 {{ 'game.replay' | translate }}
         </button>
       }
+      @if (isHost) {
+        <button
+          type="button"
+          (click)="playAgain()"
+          class="mt-3 min-h-14 w-full rounded-xl bg-orange-600 text-lg font-bold text-white active:bg-orange-500"
+        >
+          {{ 'game.playAgain' | translate }}
+        </button>
+      } @else {
+        <p class="mt-3 text-center text-sm text-slate-400">{{ 'game.waitPlayAgain' | translate }}</p>
+      }
       <button
         type="button"
         (click)="backToMenu()"

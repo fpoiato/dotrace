@@ -22,9 +22,11 @@ import {
   nextActiveTurnIndex,
   pushReplayMove,
   pushTrail,
+  remapSessionStatsConnectionId,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
+  updateSessionStats,
   zeroVector,
   buildRaceTelemetry,
 } from '../models/ws-types';
@@ -108,10 +110,13 @@ export class GameEngineService implements OnDestroy {
     if (!room || lobbyPlayers.length < MIN_PLAYERS) return;
 
     const saved = this.session.load();
-    const trackId = this.state?.trackId || saved?.trackId || '';
+    const prev = this.state;
+    const trackId = prev?.trackId || saved?.trackId || '';
     if (!trackId || !getTrackById(trackId)) return;
-    const totalLaps = this.state?.totalLaps ?? saved?.laps ?? 1;
-    const gameMode = this.state?.gameMode ?? saved?.gameMode ?? 'TURNS';
+    const totalLaps = prev?.totalLaps ?? saved?.laps ?? 1;
+    const gameMode = prev?.gameMode ?? saved?.gameMode ?? 'TURNS';
+    // Keep party-session ranking across rematches in the same room.
+    const sessionStats = prev?.sessionStats;
 
     // Rebuild the roster from players$ (the single source of truth) so anyone
     // approved after the track was selected is included in the race.
@@ -124,6 +129,7 @@ export class GameEngineService implements OnDestroy {
     state.trackId = trackId;
     state.totalLaps = [1, 2, 3].includes(totalLaps) ? totalLaps : 1;
     state.gameMode = gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
+    if (sessionStats?.length) state.sessionStats = sessionStats;
 
     const track = getTrackById(trackId)!;
 
@@ -314,11 +320,7 @@ export class GameEngineService implements OnDestroy {
       lap: player.lap,
     });
 
-    if (isGameOver(state)) {
-      state.phase = 'GAME_OVER';
-      this.setStateAndRelay('GAME_OVER', state);
-      return;
-    }
+    if (this.tryEndRace(state)) return;
 
     this.afterMove(state);
   }
@@ -332,11 +334,7 @@ export class GameEngineService implements OnDestroy {
   }
 
   private advanceTurn(state: GameState, meta?: Record<string, unknown>): void {
-    if (isGameOver(state)) {
-      state.phase = 'GAME_OVER';
-      this.setStateAndRelay('GAME_OVER', state);
-      return;
-    }
+    if (this.tryEndRace(state)) return;
 
     const prevIndex = state.currentTurnIndex;
     state.currentTurnIndex = nextActiveTurnIndex(state);
@@ -344,6 +342,42 @@ export class GameEngineService implements OnDestroy {
       state.round += 1;
     }
     this.setStateAndRelay('TURN_ADVANCED', state, meta);
+  }
+
+  /**
+   * Transition to GAME_OVER exactly once, folding race results into sessionStats.
+   * Returns true when the race ended (caller should stop further turn advances).
+   */
+  private tryEndRace(state: GameState): boolean {
+    if (state.phase === 'GAME_OVER' || !isGameOver(state)) return false;
+    state.phase = 'GAME_OVER';
+    updateSessionStats(state);
+    this.setStateAndRelay('GAME_OVER', state);
+    return true;
+  }
+
+  /**
+   * Host-only: after a finished race, return everyone to the lobby keeping
+   * track/laps/mode and the session ranking so the party can rematch.
+   */
+  returnToLobby(): void {
+    if (!this.isHost) return;
+    const prev = this.state;
+    const room = this.roomService.room;
+    if (!prev || !room || prev.phase !== 'GAME_OVER') return;
+
+    const lobbyPlayers = this.roomService.players.filter((p) => p.status === 'approved');
+    const state = createInitialState(
+      lobbyPlayers.map((p) =>
+        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+      ),
+      room.connectionId
+    );
+    state.trackId = prev.trackId;
+    state.totalLaps = prev.totalLaps;
+    state.gameMode = prev.gameMode;
+    if (prev.sessionStats?.length) state.sessionStats = prev.sessionStats;
+    this.setStateAndRelay('STATE_SYNC', state);
   }
 
   private bootstrapLobbyState(): GameState {
@@ -485,11 +519,7 @@ export class GameEngineService implements OnDestroy {
       if (!active || active.finishOrder !== undefined) {
         state.currentTurnIndex = nextActiveTurnIndex(state);
       }
-      if (isGameOver(state)) {
-        state.phase = 'GAME_OVER';
-        this.setStateAndRelay('GAME_OVER', state);
-        return;
-      }
+      if (this.tryEndRace(state)) return;
     }
 
     this.setStateAndRelay('STATE_SYNC', state);
@@ -510,6 +540,7 @@ export class GameEngineService implements OnDestroy {
     state.podium = state.podium.map((e) =>
       e.connectionId === oldConnectionId ? { ...e, connectionId: newConnectionId } : e
     );
+    remapSessionStatsConnectionId(state, oldConnectionId, newConnectionId);
 
     const idx = state.players.findIndex((p) => p.connectionId === oldConnectionId);
     const merged: Player = {
