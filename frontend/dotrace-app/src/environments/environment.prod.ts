@@ -2,5 +2,5 @@ export const environment = {
   production: true,
   wsUrl: 'wss://xfsrp9ko57.execute-api.us-east-1.amazonaws.com/prod',
   appUrl: 'https://dotrace.fpoiato.com',
-  version: '1.7.1',
+  version: '1.8.0',
 };
