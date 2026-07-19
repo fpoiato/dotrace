@@ -152,11 +152,14 @@
           🎬 {{ 'game.replay' | translate }}
         </button>
       }
-      @if (isHost) {
+      @if (showReplay) {
+        <app-replay-viewer [state]="state" (closed)="closeReplay()" />
+      }
+      @if (game.isHost) {
         <button
           type="button"
           (click)="playAgain()"
-          class="mt-3 min-h-14 w-full rounded-xl bg-orange-600 text-lg font-bold text-white active:bg-orange-500"
+          class="mt-3 min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold text-white active:bg-orange-600"
         >
           {{ 'game.playAgain' | translate }}
         </button>
@@ -170,9 +173,6 @@
       >
         {{ 'game.backMenu' | translate }}
       </button>
-      @if (showReplay) {
-        <app-replay-viewer [state]="state" (closed)="closeReplay()" />
-      }
     }
 
     @if (state.phase === 'LOBBY') {

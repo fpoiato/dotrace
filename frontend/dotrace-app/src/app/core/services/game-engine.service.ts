@@ -374,21 +374,30 @@ export class GameEngineService implements OnDestroy {
    */
   returnToLobby(): void {
     if (!this.isHost) return;
-    const prev = this.state;
+    const current = this.state;
     const room = this.roomService.room;
-    if (!prev || !room || prev.phase !== 'GAME_OVER') return;
+    if (!current || !room || current.phase !== 'GAME_OVER') return;
 
-    const lobbyPlayers = this.roomService.players.filter((p) => p.status === 'approved');
-    const state = createInitialState(
-      lobbyPlayers.map((p) =>
+    if (this.gridOrderTimer) {
+      clearTimeout(this.gridOrderTimer);
+      this.gridOrderTimer = null;
+    }
+
+    const players = this.roomService.players
+      .filter((p) => p.status === 'approved')
+      .map((p) =>
         createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      ),
-      room.connectionId
-    );
-    state.trackId = prev.trackId;
-    state.totalLaps = prev.totalLaps;
-    state.gameMode = prev.gameMode;
-    if (prev.sessionStats?.length) state.sessionStats = prev.sessionStats;
+      );
+    const state = createInitialState(players, room.connectionId);
+    state.trackId = current.trackId || '';
+    state.totalLaps = [1, 2, 3].includes(current.totalLaps) ? current.totalLaps : 1;
+    state.gameMode = current.gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
+    if (current.sessionStats?.length) state.sessionStats = current.sessionStats;
+    this.session.save({
+      trackId: state.trackId || undefined,
+      laps: state.totalLaps,
+      gameMode: state.gameMode,
+    });
     this.setStateAndRelay('STATE_SYNC', state);
   }
 

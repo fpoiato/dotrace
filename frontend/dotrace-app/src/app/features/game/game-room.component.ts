@@ -19,6 +19,7 @@ import {
   segmentCrossesGrass,
   segmentCrossesRumble,
 } from '../../core/models/ws-types';
+import { AudioService } from '../../core/services/audio.service';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { HapticService } from '../../core/services/haptic.service';
 import { RoomService } from '../../core/services/room.service';
@@ -61,6 +62,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);
   readonly telemetry = inject(TelemetryService);
   private readonly haptic = inject(HapticService);
+  private readonly audio = inject(AudioService);
   private readonly room = inject(RoomService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
@@ -77,6 +79,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   penaltyCountdownSec = 0;
   /** Tick every 250ms while a timed stop penalty is active. */
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
+  /** One-shot so reconnect/replay emissions don't restart the anthem. */
+  private victoryAnthemPlayed = false;
+  /** Removes the one-shot gesture listener used to unlock AudioContext. */
+  private removeAudioUnlock: (() => void) | null = null;
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -86,6 +92,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.game.init();
     this.telemetry.init();
     this.game.ensureLobbyState();
+    this.armAudioUnlock();
 
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
@@ -93,16 +100,34 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.padOptions = this.buildPadOptions(state);
         this.updatePenaltyCountdown(state);
         this.syncStopPenaltyTimer(state);
+        this.maybePlayVictoryAnthem(state);
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
         }
-        // Host-migration fallback can reset the game to the lobby phase;
-        // follow it so nobody is stranded on the game screen.
+        // Host-migration fallback / play-again can reset the game to the
+        // lobby phase; follow it so nobody is stranded on the game screen.
         if (state?.phase === 'LOBBY') {
+          this.showCelebration = false;
+          this.showReplay = false;
           void this.router.navigate(['/lobby']);
         }
       })
     );
+  }
+
+  /**
+   * Play the victory anthem the first time someone reaches the podium
+   * (winner crossing the finish line). Resets when a new race starts.
+   */
+  private maybePlayVictoryAnthem(state: GameState | null): void {
+    if (!state || state.phase === 'LOBBY' || (state.phase === 'GAME_ROUND' && state.podium.length === 0)) {
+      this.victoryAnthemPlayed = false;
+      return;
+    }
+    if (state.podium.length > 0 && !this.victoryAnthemPlayed) {
+      this.victoryAnthemPlayed = true;
+      this.audio.playVictoryAnthem();
+    }
   }
 
   /**
@@ -165,6 +190,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   pad(option: PadOption): void {
     if (!option.enabled || !option.velocity) return;
 
+    // Unlock AudioContext on the move gesture so the victory anthem can play later.
+    this.audio.unlock();
+
     const state = this.game.state;
     const me = state ? this.myPlayer(state) : undefined;
     const track = state?.trackId ? getTrackById(state.trackId) : undefined;
@@ -185,7 +213,22 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.clearStopPenaltyTimer();
+    this.removeAudioUnlock?.();
+    this.removeAudioUnlock = null;
+    this.audio.stop();
     this.subs.forEach((s) => s.unsubscribe());
+  }
+
+  /** Any tap/click on the race screen unlocks Web Audio for the victory anthem. */
+  private armAudioUnlock(): void {
+    if (typeof window === 'undefined') return;
+    const unlock = () => {
+      this.audio.unlock();
+      this.removeAudioUnlock?.();
+      this.removeAudioUnlock = null;
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    this.removeAudioUnlock = () => window.removeEventListener('pointerdown', unlock);
   }
 
   currentPlayerName(): string {
@@ -253,10 +296,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.showReplay = false;
   }
 
-  get isHost(): boolean {
-    return this.game.isHost;
-  }
-
   playAgain(): void {
     this.showCelebration = false;
     this.showReplay = false;
@@ -266,6 +305,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   backToMenu(): void {
     this.showCelebration = false;
     this.showReplay = false;
+    this.victoryAnthemPlayed = false;
+    this.audio.stop();
     this.game.reset();
     this.room.reset();
     this.ws.disconnect();
