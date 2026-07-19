@@ -5,6 +5,7 @@ import {
   OnDestroy,
   OnInit,
   Output,
+  inject,
 } from '@angular/core';
 import { TranslateModule } from '@ngx-translate/core';
 import {
@@ -14,6 +15,7 @@ import {
   PlayerStatus,
   Vector2D,
 } from '../../core/models/ws-types';
+import { ReplayShareService } from '../../core/services/replay-share.service';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 interface ReplayPlayerState {
@@ -165,16 +167,30 @@ type Speed = (typeof SPEEDS)[number];
   standalone: true,
   imports: [TrackCanvasComponent, TranslateModule],
   template: `
-    <div class="mt-4 rounded-2xl bg-slate-800 p-4">
-      <div class="mb-3 flex items-center justify-between">
+    <div class="mt-4 rounded-2xl bg-slate-800 p-4" [class.mt-0]="standalone">
+      <div class="mb-3 flex items-center justify-between gap-2">
         <h3 class="text-base font-bold text-orange-400">{{ 'game.replayTitle' | translate }}</h3>
-        <button
-          type="button"
-          (click)="close()"
-          class="rounded-lg bg-slate-700 px-3 py-1 text-sm text-slate-300 active:bg-slate-600"
-        >
-          {{ 'game.replayClose' | translate }}
-        </button>
+        <div class="flex shrink-0 items-center gap-2">
+          @if (frames.length > 0) {
+            <button
+              type="button"
+              (click)="share()"
+              [disabled]="sharing"
+              class="rounded-lg bg-orange-500/20 px-3 py-1 text-sm font-medium text-orange-300 active:bg-orange-500/30 disabled:opacity-50"
+            >
+              {{ shareCopied ? ('common.copied' | translate) : ('game.replayShare' | translate) }}
+            </button>
+          }
+          @if (!standalone) {
+            <button
+              type="button"
+              (click)="close()"
+              class="rounded-lg bg-slate-700 px-3 py-1 text-sm text-slate-300 active:bg-slate-600"
+            >
+              {{ 'game.replayClose' | translate }}
+            </button>
+          }
+        </div>
       </div>
 
       @if (frames.length === 0) {
@@ -265,23 +281,35 @@ type Speed = (typeof SPEEDS)[number];
             </button>
           }
         </div>
+
+        @if (shareError) {
+          <p class="mt-2 text-center text-xs text-red-400">{{ 'game.replayShareError' | translate }}</p>
+        }
       }
     </div>
   `,
 })
 export class ReplayViewerComponent implements OnInit, OnDestroy {
   @Input() state!: GameState;
+  /** When true, hide the close button (used on the public /replay page). */
+  @Input() standalone = false;
   @Output() closed = new EventEmitter<void>();
+
+  private readonly shareService = inject(ReplayShareService);
 
   frames: ReplayFrame[] = [];
   currentIndex = 0;
   isPlaying = false;
   playbackSpeed: Speed = 2;
   replayState: GameState | null = null;
+  sharing = false;
+  shareCopied = false;
+  shareError = false;
 
   readonly speeds = SPEEDS;
 
   private playInterval: ReturnType<typeof setInterval> | null = null;
+  private shareCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 
   get currentFrame(): ReplayFrame | null {
     return this.frames[this.currentIndex] ?? null;
@@ -394,7 +422,41 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
     this.closed.emit();
   }
 
+  async share(): Promise<void> {
+    if (this.sharing || !this.state) return;
+    this.sharing = true;
+    this.shareError = false;
+    try {
+      const url = await this.shareService.buildShareUrl(this.state);
+      if (!url) {
+        this.shareError = true;
+        return;
+      }
+      if (typeof navigator.share === 'function') {
+        try {
+          await navigator.share({ title: 'Dot Race Replay', url });
+          return;
+        } catch (err) {
+          // User cancelled or share unsupported for this payload — fall through to clipboard.
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+        }
+      }
+      await navigator.clipboard.writeText(url);
+      this.shareCopied = true;
+      if (this.shareCopiedTimer) clearTimeout(this.shareCopiedTimer);
+      this.shareCopiedTimer = setTimeout(() => {
+        this.shareCopied = false;
+        this.shareCopiedTimer = null;
+      }, 2000);
+    } catch {
+      this.shareError = true;
+    } finally {
+      this.sharing = false;
+    }
+  }
+
   ngOnDestroy(): void {
     this.pause();
+    if (this.shareCopiedTimer) clearTimeout(this.shareCopiedTimer);
   }
 }
