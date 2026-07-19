@@ -1,18 +1,20 @@
-# Victory theme audio
+# Victory theme (MIDI)
 
-Place a licensed MP3 here named:
+Place a licensed Standard MIDI (`.mid`) file here named:
 
 ```
-tema-da-vitoria.mp3
+tema-da-vitoria.mid
 ```
 
-The game plays this file when the winner crosses the finish line.
+The game plays it with a chiptune-style square/triangle synth when the
+winner crosses the finish line (similar vibe to 8-bit / VRC7 covers).
 
 ## Important — copyright
 
 The classic Globo F1 **Tema da Vitória** (Eduardo Souto Neto, arrangement by
-Roupa Nova) is protected by copyright. Do **not** commit an unlicensed
-recording of that track to this repository.
+Roupa Nova) is protected by copyright **in every format** — including MIDI
+transcriptions and 8-bit covers (e.g. SoundCloud VRC7 arrangements).
 
-Only add a file you have permission to redistribute (e.g. a licensed copy,
-an original recording you own, or another track you choose for the game).
+Do **not** commit an unlicensed MIDI of that composition.
+
+Only add a `.mid` you have permission to redistribute.
