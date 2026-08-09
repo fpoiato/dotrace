@@ -182,6 +182,8 @@ export interface RaceTelemetrySnapshot {
 }
 
 export type ClientAction =
+  | 'HELLO'
+  | 'PING'
   | 'CREATE_ROOM'
   | 'JOIN_ROOM'
   | 'REJOIN_ROOM'
@@ -203,6 +205,8 @@ export type RelayEventType =
   | 'GAME_OVER';
 
 export type ServerEvent =
+  | 'CONNECTED'
+  | 'PONG'
   | 'ROOM_CREATED'
   | 'ROOM_REJOINED'
   | 'JOIN_PENDING'
@@ -218,7 +222,9 @@ export type ServerEvent =
   | 'RELAY'
   | 'PLAYER_ACTION'
   | 'TOP10'
-  | 'RACE_STATS_SAVED';
+  | 'RACE_STATS_SAVED'
+  | 'RELAY_ACK'
+  | 'FORWARD_ACK';
 
 export interface WsEnvelope<T = unknown> {
   action: ClientAction | ServerEvent | 'message';

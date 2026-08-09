@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * Agentive Client entry point — wires WebSocket I/O, state parsing, and BotBrain.
+ * Agentive Client entry point — wires WebSocket push, HTTP commands, and BotBrain.
  *
  * Usage:
- *   WS_URL=wss://… ROOM_CODE=ABCDE NICKNAME=AgentBot npm run dev
+ *   WS_URL=wss://… API_URL=https://… ROOM_CODE=ABCDE NICKNAME=AgentBot npm run dev
  *   npm run dev -- ABCDE AgentBot
  */
 import { getTrackById } from '../../shared/tracks';
 import { GameState, SubmitMoveAction, WsEnvelope } from '../../shared/ws-types';
 import { BotBrain } from './bot-brain';
 import { loadConfig } from './config';
+import { HttpClient } from './http-client';
 import { extractConnectionId, parseRelayEnvelope } from './state-parser';
 import { WsClient } from './ws-client';
 
@@ -47,37 +48,63 @@ class AgentiveClient {
 
   constructor(
     private readonly ws: WsClient,
+    private readonly http: HttpClient,
     private readonly roomCode: string,
     private readonly nickname: string
   ) {}
 
   async start(): Promise<void> {
     this.ws.onMessage((envelope) => this.handleMessage(envelope));
-    this.ws.onReconnect(() => this.rejoinRoom());
+    this.ws.onReconnect(() => {
+      void this.rejoinRoom();
+    });
     await this.ws.connect();
-    this.joinRoom();
+    await this.joinRoom();
   }
 
-  private joinRoom(): void {
+  private async joinRoom(): Promise<void> {
+    const connectionId = this.ws.getConnectionId();
+    if (!connectionId) {
+      throw new Error('No connectionId after WebSocket HELLO');
+    }
     console.log(`[JOIN] Room ${this.roomCode} as ${this.nickname}`);
-    this.ws.send('JOIN_ROOM', { nickname: this.nickname, roomCode: this.roomCode }, this.roomCode);
+    const response = await this.http.postAction(
+      'JOIN_ROOM',
+      { nickname: this.nickname, roomCode: this.roomCode },
+      connectionId,
+      this.roomCode
+    );
+    this.handleMessage(response);
   }
 
-  rejoinRoom(): void {
+  async rejoinRoom(): Promise<void> {
+    const connectionId = this.ws.getConnectionId();
+    if (!connectionId) {
+      await this.joinRoom();
+      return;
+    }
     if (!this.connectionId) {
-      this.joinRoom();
+      await this.joinRoom();
       return;
     }
     console.log(`[REJOIN] Room ${this.roomCode}`);
-    this.ws.send(
-      'REJOIN_ROOM',
-      {
-        nickname: this.nickname,
-        roomCode: this.roomCode,
-        previousConnectionId: this.connectionId,
-      },
-      this.roomCode
-    );
+    try {
+      const response = await this.http.postAction(
+        'REJOIN_ROOM',
+        {
+          nickname: this.nickname,
+          roomCode: this.roomCode,
+          previousConnectionId: this.connectionId,
+        },
+        connectionId,
+        this.roomCode
+      );
+      this.ws.publishLocal(response);
+      this.handleMessage(response);
+    } catch (err) {
+      console.warn('[REJOIN FAILED]', err instanceof Error ? err.message : err);
+      await this.joinRoom();
+    }
   }
 
   private handleMessage(envelope: WsEnvelope): void {
@@ -140,6 +167,8 @@ class AgentiveClient {
 
     const acceleration = this.brain.computeNextMove(ctx.car, ctx.track, trackDef);
     const outbound = buildMoveEnvelope(this.roomCode, acceleration, ctx.car.velocity);
+    const connectionId = this.ws.getConnectionId();
+    if (!connectionId) return;
 
     console.log(
       `[MOVE] relay=${ctx.relayType} accel=(${acceleration.dx},${acceleration.dy}) ` +
@@ -147,16 +176,14 @@ class AgentiveClient {
     );
 
     this.moveInFlight = true;
-    this.ws.send(
-      outbound.action,
-      outbound.payload,
-      outbound.roomCode
-    );
-
-    // Host will broadcast TURN_ADVANCED; allow next move after state sync.
-    setTimeout(() => {
-      this.moveInFlight = false;
-    }, 500);
+    void this.http
+      .postAction(outbound.action, outbound.payload, connectionId, outbound.roomCode)
+      .catch((err) => console.warn('[MOVE FAILED]', err instanceof Error ? err.message : err))
+      .finally(() => {
+        setTimeout(() => {
+          this.moveInFlight = false;
+        }, 500);
+      });
   }
 
   private resolveTrack(envelope: WsEnvelope) {
@@ -170,7 +197,8 @@ class AgentiveClient {
 async function main(): Promise<void> {
   const config = loadConfig();
   const ws = new WsClient(config.wsUrl);
-  const client = new AgentiveClient(ws, config.roomCode, config.nickname);
+  const http = new HttpClient(config.apiUrl);
+  const client = new AgentiveClient(ws, http, config.roomCode, config.nickname);
 
   process.on('SIGINT', () => {
     console.log('\n[SHUTDOWN]');

@@ -26,7 +26,8 @@ export interface ConnectionRecord {
 }
 
 const GHOST_PREFIX = 'ghost#';
-const GHOST_TTL_SECONDS = 600;
+/** Keep disconnected players rejoinable longer (mobile background / lock screen). */
+const GHOST_TTL_SECONDS = 3600;
 
 const PLAYER_COLORS = [
   '#EF4444',

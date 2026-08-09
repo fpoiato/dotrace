@@ -31,6 +31,7 @@ import {
   zeroVector,
   buildRaceTelemetry,
 } from '../models/ws-types';
+import { ApiService } from './api.service';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
@@ -38,6 +39,7 @@ import { WebSocketService } from './websocket.service';
 @Injectable({ providedIn: 'root' })
 export class GameEngineService implements OnDestroy {
   private readonly ws = inject(WebSocketService);
+  private readonly api = inject(ApiService);
   private readonly roomService = inject(RoomService);
   private readonly session = inject(SessionStorageService);
 
@@ -167,7 +169,9 @@ export class GameEngineService implements OnDestroy {
     if (this.isHost) {
       this.applyMove(room.connectionId, vector);
     } else {
-      this.ws.send('FORWARD_TO_HOST', { action: 'SUBMIT_MOVE', vector }, room.roomCode);
+      void this.api
+        .postAction('FORWARD_TO_HOST', { action: 'SUBMIT_MOVE', vector }, room.roomCode)
+        .catch((err) => console.warn('Move forward failed', err));
     }
   }
 
@@ -365,7 +369,9 @@ export class GameEngineService implements OnDestroy {
     if (!room) return;
     const stats = buildRaceStatDeltas(state);
     if (stats.length === 0) return;
-    this.ws.send('SUBMIT_RACE_STATS', { stats }, room.roomCode);
+    void this.api
+      .postAction('SUBMIT_RACE_STATS', { stats }, room.roomCode)
+      .catch((err) => console.warn('Race stats submit failed', err));
   }
 
   /**
@@ -425,7 +431,9 @@ export class GameEngineService implements OnDestroy {
   private requestHostStateRecovery(): void {
     const room = this.roomService.room;
     if (!room) return;
-    this.ws.send('REQUEST_HOST_STATE', {}, room.roomCode);
+    void this.api
+      .postAction('REQUEST_HOST_STATE', {}, room.roomCode)
+      .catch((err) => console.warn('Host state request failed', err));
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     this.hostRecoveryTimer = setTimeout(() => this.fallbackRecovery(), 5000);
   }
@@ -435,7 +443,9 @@ export class GameEngineService implements OnDestroy {
     const room = this.roomService.room;
     if (!state || !room || room.isHost) return;
     if (state.phase === 'LOBBY') return;
-    this.ws.send('HOST_STATE_RESPONSE', { targetHostId: requesterId, state }, room.roomCode);
+    void this.api
+      .postAction('HOST_STATE_RESPONSE', { targetHostId: requesterId, state }, room.roomCode)
+      .catch((err) => console.warn('Host state response failed', err));
   }
 
   private applyHostSnapshot(state: GameState): void {
@@ -637,7 +647,9 @@ export class GameEngineService implements OnDestroy {
     if (!room?.isHost) return;
     const telemetry = buildRaceTelemetry(state);
     const relayMeta = telemetry ? { ...meta, telemetry } : meta;
-    this.ws.send('RELAY', { type, state, meta: relayMeta }, room.roomCode);
+    void this.api
+      .postAction('RELAY', { type, state, meta: relayMeta }, room.roomCode)
+      .catch((err) => console.warn('Relay failed', err));
   }
 
   currentPlayer(): Player | null {
