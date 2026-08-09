@@ -5,10 +5,16 @@ import {
   Table,
 } from 'aws-cdk-lib/aws-dynamodb';
 import {
+  CorsHttpMethod,
+  HttpApi,
+  HttpMethod,
   WebSocketApi,
   WebSocketStage,
 } from 'aws-cdk-lib/aws-apigatewayv2';
-import { WebSocketLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  HttpLambdaIntegration,
+  WebSocketLambdaIntegration,
+} from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
@@ -85,10 +91,22 @@ export class DotRaceWsStack extends Stack {
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
+    const httpFn = new NodejsFunction(this, 'HttpHandler', {
+      entry: lambdaEntry('http'),
+      handler: 'handler',
+      runtime: Runtime.NODEJS_20_X,
+      timeout: Duration.seconds(30),
+      memorySize: 256,
+      environment: lambdaEnv,
+      bundling: { externalModules: ['@aws-sdk/*'] },
+    });
+
     connectionsTable.grantReadWriteData(connectFn);
     connectionsTable.grantReadWriteData(disconnectFn);
     connectionsTable.grantReadWriteData(messageFn);
+    connectionsTable.grantReadWriteData(httpFn);
     leaderboardTable.grantReadWriteData(messageFn);
+    leaderboardTable.grantReadWriteData(httpFn);
 
     const webSocketApi = new WebSocketApi(this, 'DotRaceWebSocketApi', {
       connectRouteOptions: {
@@ -115,6 +133,7 @@ export class DotRaceWsStack extends Stack {
     const endpoint = stage.url.replace('wss://', 'https://');
     messageFn.addEnvironment('WEBSOCKET_ENDPOINT', endpoint);
     disconnectFn.addEnvironment('WEBSOCKET_ENDPOINT', endpoint);
+    httpFn.addEnvironment('WEBSOCKET_ENDPOINT', endpoint);
 
     const manageConnectionsPolicy = new PolicyStatement({
       actions: ['execute-api:ManageConnections'],
@@ -124,9 +143,38 @@ export class DotRaceWsStack extends Stack {
     });
     messageFn.addToRolePolicy(manageConnectionsPolicy);
     disconnectFn.addToRolePolicy(manageConnectionsPolicy);
+    httpFn.addToRolePolicy(manageConnectionsPolicy);
+
+    // HTTP API for client→server commands (async / resilient to mobile WS drops).
+    const httpApi = new HttpApi(this, 'DotRaceHttpApi', {
+      apiName: 'DotRaceHttpApi',
+      description: 'Dot Race client command API (POST actions, GET top10)',
+      corsPreflight: {
+        allowHeaders: ['Content-Type', 'X-Connection-Id'],
+        allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST, CorsHttpMethod.OPTIONS],
+        allowOrigins: ['*'],
+        maxAge: Duration.days(1),
+      },
+    });
+
+    const httpIntegration = new HttpLambdaIntegration('HttpIntegration', httpFn);
+
+    httpApi.addRoutes({
+      path: '/actions',
+      methods: [HttpMethod.POST],
+      integration: httpIntegration,
+    });
+
+    httpApi.addRoutes({
+      path: '/top10',
+      methods: [HttpMethod.GET],
+      integration: httpIntegration,
+    });
 
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
+    new CfnOutput(this, 'HttpApiUrl', { value: httpApi.apiEndpoint });
+    new CfnOutput(this, 'HttpApiId', { value: httpApi.httpApiId });
     new CfnOutput(this, 'ConnectionsTableName', { value: connectionsTable.tableName });
     new CfnOutput(this, 'LeaderboardTableName', { value: leaderboardTable.tableName });
   }

@@ -79,6 +79,8 @@ export function parseRelayEnvelope(
 /** Extract connectionId from lobby lifecycle events. */
 export function extractConnectionId(envelope: WsEnvelope): string | null {
   if (
+    envelope.action === 'CONNECTED' ||
+    envelope.action === 'ROOM_CREATED' ||
     envelope.action === 'JOIN_PENDING' ||
     envelope.action === 'PLAYER_APPROVED' ||
     envelope.action === 'ROOM_REJOINED'

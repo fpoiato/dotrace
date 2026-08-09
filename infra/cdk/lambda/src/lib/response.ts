@@ -6,6 +6,7 @@ export interface WsEnvelope {
   action?: string;
   payload?: unknown;
   roomCode?: string;
+  connectionId?: string;
 }
 
 export function parseBody<T>(event: { body?: string | null }): T | undefined {

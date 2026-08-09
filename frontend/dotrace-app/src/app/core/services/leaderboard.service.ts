@@ -1,11 +1,11 @@
 import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, firstValueFrom, timeout } from 'rxjs';
+import { BehaviorSubject } from 'rxjs';
 import { Top10Entry } from '../models/ws-types';
-import { WebSocketService } from './websocket.service';
+import { ApiService } from './api.service';
 
 @Injectable({ providedIn: 'root' })
 export class LeaderboardService {
-  private readonly ws = inject(WebSocketService);
+  private readonly api = inject(ApiService);
   private readonly top10Subject = new BehaviorSubject<Top10Entry[]>([]);
   private readonly loadingSubject = new BehaviorSubject<boolean>(false);
 
@@ -17,18 +17,13 @@ export class LeaderboardService {
   }
 
   /**
-   * Connect (if needed), ask the server for the global Top 10, and cache it.
-   * Safe to call from the landing page before joining a room.
+   * Fetch the global Top 10 over HTTP — no WebSocket required on the landing page.
    */
   async refreshTop10(): Promise<Top10Entry[]> {
     this.loadingSubject.next(true);
     try {
-      await this.ws.connect();
-      this.ws.send('GET_TOP10', {});
-      const payload = await firstValueFrom(
-        this.ws.onAction<{ entries: Top10Entry[] }>('TOP10').pipe(timeout(8000))
-      );
-      const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+      const response = await this.api.getTop10<{ entries: Top10Entry[] }>();
+      const entries = Array.isArray(response?.payload?.entries) ? response.payload.entries : [];
       this.top10Subject.next(entries);
       return entries;
     } catch {

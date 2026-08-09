@@ -1,8 +1,10 @@
 /** Runtime configuration loaded from environment variables or CLI args. */
 
 export interface BotConfig {
-  /** WebSocket endpoint (default matches local dev stub; override with deployed API Gateway URL). */
+  /** WebSocket endpoint (push channel). */
   wsUrl: string;
+  /** HTTP API endpoint for client→server commands (no trailing slash). */
+  apiUrl: string;
   /** Five-letter room code to join. */
   roomCode: string;
   /** Display name shown in the lobby and race. */
@@ -25,6 +27,7 @@ export function loadConfig(): BotConfig {
 
   return {
     wsUrl: process.env.WS_URL ?? 'ws://localhost:8080/game',
+    apiUrl: (process.env.API_URL ?? 'http://localhost:3001').replace(/\/$/, ''),
     roomCode,
     nickname,
   };

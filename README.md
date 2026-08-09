@@ -1,6 +1,6 @@
 # Dot Race (Vector Rally)
 
-Turn-based vector racing party game — mobile-first Angular frontend, API Gateway WebSocket backend, host-authoritative ephemeral game state.
+Turn-based vector racing party game — mobile-first Angular frontend, API Gateway WebSocket (push) + HTTP API (commands), host-authoritative ephemeral game state.
 
 **Live:** [https://dotrace.fpoiato.com](https://dotrace.fpoiato.com)
 
@@ -9,7 +9,7 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | Path | Purpose |
 |------|---------|
 | `frontend/dotrace-app` | Angular 19 + Tailwind 3.4 + ngx-translate (pt-BR / en) |
-| `infra/cdk` | DynamoDB `DotRaceConnections`, WebSocket Lambdas |
+| `infra/cdk` | DynamoDB, WebSocket API, HTTP API (commands), Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
 | `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
 | `pipeline/` | CodeBuild buildspec |
