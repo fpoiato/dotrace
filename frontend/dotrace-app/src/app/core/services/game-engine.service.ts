@@ -522,6 +522,12 @@ export class GameEngineService implements OnDestroy {
     const state = this.state;
     if (!state) return;
 
+    // AI Lambdas disconnect in finally() right after GAME_OVER. Keep them in
+    // the roster so the in-app replay still has nickname/color for their trail.
+    if (state.phase === 'GAME_OVER') {
+      return;
+    }
+
     // Capture whose turn it is BEFORE mutating turnOrder — filtering shifts
     // indexes and would otherwise hand the turn to the wrong player.
     const currentId = state.turnOrder[state.currentTurnIndex];
