@@ -1,6 +1,15 @@
 import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
-import { Player, RoomRejoinedPayload, WsEnvelope } from '../models/ws-types';
+import {
+  BOT_ID_PREFIX,
+  BotDifficulty,
+  MAX_BOTS,
+  MAX_PLAYERS,
+  PLAYER_COLORS,
+  Player,
+  RoomRejoinedPayload,
+  WsEnvelope,
+} from '../models/ws-types';
 import { ApiService } from './api.service';
 import { WebSocketService } from './websocket.service';
 
@@ -19,6 +28,8 @@ export class RoomService {
   private readonly playersSubject = new BehaviorSubject<Player[]>([]);
   private readonly pendingSubject = new BehaviorSubject<Player[]>([]);
   private rejoinInFlight: Promise<void> | null = null;
+  /** Monotonic counter so every synthetic bot gets a unique connection id. */
+  private botSeq = 0;
 
   readonly room$ = this.roomSubject.asObservable();
   readonly players$ = this.playersSubject.asObservable();
@@ -311,6 +322,68 @@ export class RoomService {
       `Bora jogar Dot Race! Código da sala: ${roomCode}\n${this.getInviteUrl(roomCode)}`
     );
     return `https://wa.me/?text=${text}`;
+  }
+
+  /** Computer-controlled players currently in the lobby. */
+  get bots(): Player[] {
+    return this.playersSubject.value.filter((p) => p.isBot);
+  }
+
+  /**
+   * Add a local computer opponent (host only). Bots live purely in the host's
+   * memory — they never touch the server — and the game engine drives them.
+   */
+  addBot(difficulty: BotDifficulty = 'normal'): void {
+    const room = this.room;
+    if (!room?.isHost) return;
+    const players = this.playersSubject.value;
+    const botCount = players.filter((p) => p.isBot).length;
+    if (botCount >= MAX_BOTS || players.length >= MAX_PLAYERS) return;
+
+    const joinOrder = players.reduce((max, p) => Math.max(max, p.joinOrder), 0) + 1;
+    const bot: Player = {
+      connectionId: `${BOT_ID_PREFIX}${++this.botSeq}`,
+      nickname: `CPU ${botCount + 1}`,
+      color: this.pickBotColor(players),
+      isHost: false,
+      joinOrder,
+      status: 'approved',
+      isBot: true,
+      botDifficulty: difficulty,
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 0 },
+      isOffTrack: false,
+      trail: [],
+      lap: 1,
+    };
+    this.playersSubject.next([...players, bot]);
+  }
+
+  /** Remove the most recently added computer opponent (host only). */
+  removeLastBot(): void {
+    const room = this.room;
+    if (!room?.isHost) return;
+    const players = this.playersSubject.value;
+    let lastBotIndex = -1;
+    players.forEach((p, i) => {
+      if (p.isBot) lastBotIndex = i;
+    });
+    if (lastBotIndex < 0) return;
+    this.playersSubject.next(players.filter((_, i) => i !== lastBotIndex));
+  }
+
+  /** Update the skill level of every computer opponent (host only). */
+  setBotsDifficulty(difficulty: BotDifficulty): void {
+    const room = this.room;
+    if (!room?.isHost) return;
+    this.playersSubject.next(
+      this.playersSubject.value.map((p) => (p.isBot ? { ...p, botDifficulty: difficulty } : p))
+    );
+  }
+
+  private pickBotColor(players: Player[]): string {
+    const used = new Set(players.map((p) => p.color));
+    return PLAYER_COLORS.find((c) => !used.has(c)) ?? PLAYER_COLORS[players.length % PLAYER_COLORS.length];
   }
 
   reset(): void {
