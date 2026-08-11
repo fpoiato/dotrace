@@ -165,8 +165,19 @@ class AgentiveClient {
 
     if (!ctx.isMyTurn || this.moveInFlight) return;
 
-    const acceleration = this.brain.computeNextMove(ctx.car, ctx.track, trackDef);
-    const outbound = buildMoveEnvelope(this.roomCode, acceleration, ctx.car.velocity);
+    const acceleration = this.brain.computeNextMove(
+      {
+        position: ctx.myPlayer.position,
+        velocity: ctx.myPlayer.velocity,
+        isOffTrack: ctx.myPlayer.isOffTrack,
+        passedCheckpoint: ctx.myPlayer.passedCheckpoint,
+      },
+      trackDef,
+      ctx.gameState.players,
+      ctx.gameState.round,
+      ctx.myPlayer.connectionId
+    );
+    const outbound = buildMoveEnvelope(this.roomCode, acceleration, ctx.myPlayer.velocity);
     const connectionId = this.ws.getConnectionId();
     if (!connectionId) return;
 

@@ -21,6 +21,9 @@
   "lobby.reject": "Recusar",
   "lobby.startRace": "Iniciar Corrida",
   "lobby.startPractice": "Iniciar Treino",
+  "lobby.startVsComputer": "Correr contra o Computador",
+  "lobby.addComputer": "Adicionar computador",
+  "lobby.removeBot": "Remover",
   "lobby.selectTrack": "Escolher pista",
   "lobby.selectTrackPlaceholder": "Toque para escolher uma pista",
   "lobby.laps": "Voltas",
@@ -30,7 +33,8 @@
   "lobby.invite": "Copiar link de convite",
   "lobby.whatsapp": "Compartilhar no WhatsApp",
   "lobby.waitHost": "Aguardando o host iniciar…",
-  "lobby.practiceHint": "Sozinho? Comece um treino ou convide amigos para entrar",
+  "lobby.practiceHint": "Sozinho? Adicione um computador, comece um treino ou convide amigos",
+  "lobby.vsComputerHint": "Os computadores jogam automaticamente na vez deles",
   "lobby.youAreHost": "Você é o host",
   "game.gridOrder": "Classificação — rolagem de dados",
   "game.raceOn": "Vai!",
@@ -114,5 +118,6 @@
   "common.error": "Algo deu errado",
   "common.close": "Fechar",
   "common.copied": "Copiado!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "common.cpu": "CPU"
 }

@@ -21,6 +21,9 @@
   "lobby.reject": "Reject",
   "lobby.startRace": "Start Race",
   "lobby.startPractice": "Start Practice",
+  "lobby.startVsComputer": "Race vs Computer",
+  "lobby.addComputer": "Add computer",
+  "lobby.removeBot": "Remove",
   "lobby.selectTrack": "Select track",
   "lobby.selectTrackPlaceholder": "Tap to choose a track",
   "lobby.laps": "Laps",
@@ -30,7 +33,8 @@
   "lobby.invite": "Copy invite link",
   "lobby.whatsapp": "Share on WhatsApp",
   "lobby.waitHost": "Waiting for host to start…",
-  "lobby.practiceHint": "Riding solo? Start a practice race or invite friends to join",
+  "lobby.practiceHint": "Riding solo? Add a computer, start a practice race, or invite friends",
+  "lobby.vsComputerHint": "Computers move automatically on their turn",
   "lobby.youAreHost": "You are the host",
   "game.gridOrder": "Grid qualifying — dice rolls",
   "game.raceOn": "Go!",
@@ -114,5 +118,6 @@
   "common.error": "Something went wrong",
   "common.close": "Close",
   "common.copied": "Copied!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "common.cpu": "CPU"
 }

@@ -11,7 +11,8 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | `frontend/dotrace-app` | Angular 19 + Tailwind 3.4 + ngx-translate (pt-BR / en) |
 | `infra/cdk` | DynamoDB, WebSocket API, HTTP API (commands), Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
-| `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
+| `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`, `bot-brain.ts`) |
+| `bot/` | Headless Agentive Client (joins rooms over WS/HTTP; shares `bot-brain`) |
 | `pipeline/` | CodeBuild buildspec |
 | `.github/workflows/` | CI/CD on push to `main` (`ci-cd.yml`) |
 

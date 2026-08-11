@@ -1,5 +1,6 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subscription } from 'rxjs';
+import { chooseBotVelocity } from '../models/bot-brain';
 import { getTrackById } from '../models/tracks';
 import {
   GameMode,
@@ -12,9 +13,6 @@ import {
   applyGrassPenalty,
   canPlayerMove,
   createInitialState,
-  createLobbyPlayer,
-  getTileAt,
-  getValidMoves,
   isGameOver,
   isGrassShortcut,
   isTimedMode,
@@ -30,11 +28,17 @@ import {
   buildRaceStatDeltas,
   zeroVector,
   buildRaceTelemetry,
+  toLobbyPlayer,
+  getTileAt,
+  getValidMoves,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
+
+/** Delay before a computer opponent plays, so humans can see the turn change. */
+const BOT_THINK_MS = 750;
 
 @Injectable({ providedIn: 'root' })
 export class GameEngineService implements OnDestroy {
@@ -49,6 +53,7 @@ export class GameEngineService implements OnDestroy {
   private messageSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
+  private botTimer: ReturnType<typeof setTimeout> | null = null;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
 
@@ -124,9 +129,7 @@ export class GameEngineService implements OnDestroy {
     // Rebuild the roster from players$ (the single source of truth) so anyone
     // approved after the track was selected is included in the race.
     const state = createInitialState(
-      lobbyPlayers.map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      ),
+      lobbyPlayers.map((p) => toLobbyPlayer(p)),
       room.connectionId
     );
     state.trackId = trackId;
@@ -356,6 +359,7 @@ export class GameEngineService implements OnDestroy {
   private tryEndRace(state: GameState): boolean {
     if (state.phase === 'GAME_OVER' || !isGameOver(state)) return false;
     state.phase = 'GAME_OVER';
+    this.clearBotTimer();
     updateSessionStats(state);
     this.setStateAndRelay('GAME_OVER', state);
     this.submitGlobalRaceStats(state);
@@ -388,12 +392,11 @@ export class GameEngineService implements OnDestroy {
       clearTimeout(this.gridOrderTimer);
       this.gridOrderTimer = null;
     }
+    this.clearBotTimer();
 
     const players = this.roomService.players
       .filter((p) => p.status === 'approved')
-      .map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      );
+      .map((p) => toLobbyPlayer(p));
     const state = createInitialState(players, room.connectionId);
     state.trackId = current.trackId || '';
     state.totalLaps = [1, 2, 3].includes(current.totalLaps) ? current.totalLaps : 1;
@@ -411,9 +414,7 @@ export class GameEngineService implements OnDestroy {
     const room = this.roomService.room!;
     const players = this.roomService.players
       .filter((p) => p.status === 'approved')
-      .map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      );
+      .map((p) => toLobbyPlayer(p));
     const state = createInitialState(players, room.connectionId);
     const saved = this.session.load();
     if (saved?.trackId) state.trackId = saved.trackId;
@@ -461,6 +462,7 @@ export class GameEngineService implements OnDestroy {
       p.isHost = p.connectionId === state.hostId;
     }
     this.emit(state);
+    this.rehydrateBotsFromState(state);
 
     // Purge the disconnected old host from the recovered snapshot and let
     // every peer converge on the cleaned state.
@@ -470,6 +472,15 @@ export class GameEngineService implements OnDestroy {
       this.removePlayerFromState(goneId);
     } else {
       this.setStateAndRelay('STATE_SYNC', state);
+    }
+  }
+
+  /** After host promotion, restore synthetic bots that lived only in GameState. */
+  private rehydrateBotsFromState(state: GameState): void {
+    for (const bot of state.players) {
+      if (!bot.isBot) continue;
+      if (this.roomService.players.some((r) => r.connectionId === bot.connectionId)) continue;
+      this.roomService.restoreBot(toLobbyPlayer(bot));
     }
   }
 
@@ -599,6 +610,7 @@ export class GameEngineService implements OnDestroy {
       merged.grassCuts = state.players[idx].grassCuts;
       merged.gearPenaltyUntilRound = state.players[idx].gearPenaltyUntilRound;
       merged.stopUntil = state.players[idx].stopUntil;
+      merged.isBot = state.players[idx].isBot;
       state.players[idx] = merged;
     } else {
       state.players.push(merged);
@@ -641,6 +653,84 @@ export class GameEngineService implements OnDestroy {
     }
   }
 
+  /**
+   * Host-only: refresh lobby GameState players from RoomService (includes local bots)
+   * and relay so guests see computer opponents in the lobby list.
+   */
+  syncLobbyRoster(): void {
+    if (!this.isHost) return;
+    const room = this.roomService.room;
+    if (!room) return;
+    const state = this.state ?? this.bootstrapLobbyState();
+    if (state.phase !== 'LOBBY') return;
+    state.players = this.roomService.players
+      .filter((p) => p.status === 'approved')
+      .map((p) => toLobbyPlayer(p));
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
+  private clearBotTimer(): void {
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
+  }
+
+  /** After any host state change, queue computer moves when it is their turn. */
+  private scheduleBots(): void {
+    if (!this.isHost) return;
+    this.clearBotTimer();
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') return;
+
+    if (isTimedMode(state)) {
+      const readyBot = state.players.find(
+        (p) => p.isBot && canPlayerMove(state, p.connectionId)
+      );
+      if (readyBot) {
+        this.botTimer = setTimeout(() => this.playBotMove(readyBot.connectionId), BOT_THINK_MS);
+        return;
+      }
+      // Resume after the soonest grass-stop penalty among unfinished bots.
+      const now = Date.now();
+      let wakeIn = Number.POSITIVE_INFINITY;
+      for (const p of state.players) {
+        if (!p.isBot || p.finishOrder !== undefined || !p.stopUntil) continue;
+        const wait = p.stopUntil - now;
+        if (wait > 0 && wait < wakeIn) wakeIn = wait;
+      }
+      if (Number.isFinite(wakeIn)) {
+        this.botTimer = setTimeout(() => this.scheduleBots(), wakeIn + 50);
+      }
+      return;
+    }
+
+    const currentId = state.turnOrder[state.currentTurnIndex];
+    const current = state.players.find((p) => p.connectionId === currentId);
+    if (!current?.isBot || !canPlayerMove(state, current.connectionId)) return;
+    this.botTimer = setTimeout(() => this.playBotMove(current.connectionId), BOT_THINK_MS);
+  }
+
+  private playBotMove(botId: string): void {
+    this.botTimer = null;
+    if (!this.isHost) return;
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') return;
+    if (!canPlayerMove(state, botId)) return;
+
+    const player = state.players.find((p) => p.connectionId === botId);
+    const track = state.trackId ? getTrackById(state.trackId) : undefined;
+    if (!player?.isBot || !track) return;
+
+    const vector = chooseBotVelocity({
+      player,
+      track,
+      others: state.players,
+      round: state.round,
+    });
+    this.applyMove(botId, vector);
+  }
+
   private setStateAndRelay(type: RelayPayload['type'], state: GameState, meta?: Record<string, unknown>): void {
     this.emit(state);
     const room = this.roomService.room;
@@ -650,6 +740,7 @@ export class GameEngineService implements OnDestroy {
     void this.api
       .postAction('RELAY', { type, state, meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
+    this.scheduleBots();
   }
 
   currentPlayer(): Player | null {
@@ -676,10 +767,12 @@ export class GameEngineService implements OnDestroy {
     this.messageSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimer();
   }
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimer();
     this.stateSubject.next(null);
   }
 }

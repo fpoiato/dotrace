@@ -42,6 +42,7 @@ import {
   createInitialState,
   buildRaceStatDeltas,
 } from '../../../shared/ws-types';
+import { chooseBotVelocity } from '../../../shared/bot-brain';
 import { TRACKS } from '../../../shared/tracks';
 import { buildRankKey, nicknameKey } from '../lambda/src/lib/leaderboard';
 
@@ -700,6 +701,45 @@ describe('lap splits and session ranking', () => {
       bestLapMs: 40_000,
       bestLapRounds: 9,
     });
+  });
+
+  it('excludes computer opponents from global deltas', () => {
+    const ana = racePlayer({ finishOrder: 1 });
+    const cpu = makePlayer({
+      connectionId: 'bot-1',
+      nickname: 'CPU 1',
+      isBot: true,
+      finishOrder: 2,
+      lapTimes: [startedAt + 50_000],
+      lapRounds: [10],
+    });
+    const state = createInitialState([ana, cpu], 'c1');
+    state.raceStartedAt = startedAt;
+    state.players = [ana, cpu];
+
+    const deltas = buildRaceStatDeltas(state);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].nickname).toBe('Ana');
+  });
+});
+
+describe('computer opponent brain', () => {
+  it('returns a legal velocity on Monza from a standing start', () => {
+    const track = TRACKS.find((t) => t.id === 'monza')!;
+    const player = makePlayer({
+      connectionId: 'bot',
+      isBot: true,
+      position: { ...track.startLine[0] },
+      velocity: { x: 0, y: 0 },
+    });
+    const velocity = chooseBotVelocity({
+      player,
+      track,
+      others: [player],
+      round: 1,
+    });
+    const valid = getValidMoves(player, track, [player], 1);
+    expect(valid.some((m) => m.velocity.x === velocity.x && m.velocity.y === velocity.y)).toBe(true);
   });
 });
 

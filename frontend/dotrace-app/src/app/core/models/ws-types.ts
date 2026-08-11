@@ -57,6 +57,8 @@ export interface Player {
   trail: Vector2D[];
   /** Current lap, 1-based. */
   lap: number;
+  /** Host-local computer opponent (no WebSocket connection). */
+  isBot?: boolean;
   /** Set once the car has passed the far-side checkpoint (lap validity gate). */
   passedCheckpoint?: boolean;
   diceRoll?: number;
@@ -330,9 +332,10 @@ export function createLobbyPlayer(
   nickname: string,
   isHost: boolean,
   joinOrder: number,
-  color: string
+  color: string,
+  isBot = false
 ): Player {
-  return {
+  const player: Player = {
     connectionId,
     nickname,
     color,
@@ -345,6 +348,22 @@ export function createLobbyPlayer(
     trail: [],
     lap: 1,
   };
+  if (isBot) player.isBot = true;
+  return player;
+}
+
+/** Rebuild a lobby-ready Player, preserving host-local bot flag. */
+export function toLobbyPlayer(
+  p: Pick<Player, 'connectionId' | 'nickname' | 'isHost' | 'joinOrder' | 'color' | 'isBot'>
+): Player {
+  return createLobbyPlayer(
+    p.connectionId,
+    p.nickname,
+    p.isHost,
+    p.joinOrder,
+    p.color,
+    !!p.isBot
+  );
 }
 
 export function createInitialState(players: Player[], hostId: string): GameState {
@@ -868,20 +887,23 @@ export interface Top10Entry {
 
 /**
  * Build host-submitted per-race deltas from the finished GameState.
- * One entry per player who took part; counters are 0/1 for this race only.
+ * One entry per human player who took part; counters are 0/1 for this race only.
+ * Computer opponents are excluded from the global nickname leaderboard.
  */
 export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
-  return state.players.map((p) => {
-    const delta: RaceStatDelta = {
-      nickname: p.nickname,
-      races: 1,
-      wins: p.finishOrder === 1 ? 1 : 0,
-      podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
-    };
-    const lapMs = bestLapMs(p, state.raceStartedAt);
-    if (lapMs !== undefined) delta.bestLapMs = lapMs;
-    const rounds = bestLapRounds(p);
-    if (rounds !== undefined) delta.bestLapRounds = rounds;
-    return delta;
-  });
+  return state.players
+    .filter((p) => !p.isBot)
+    .map((p) => {
+      const delta: RaceStatDelta = {
+        nickname: p.nickname,
+        races: 1,
+        wins: p.finishOrder === 1 ? 1 : 0,
+        podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
+      };
+      const lapMs = bestLapMs(p, state.raceStartedAt);
+      if (lapMs !== undefined) delta.bestLapMs = lapMs;
+      const rounds = bestLapRounds(p);
+      if (rounds !== undefined) delta.bestLapRounds = rounds;
+      return delta;
+    });
 }

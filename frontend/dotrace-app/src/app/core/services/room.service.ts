@@ -1,6 +1,13 @@
 import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
-import { Player, RoomRejoinedPayload, WsEnvelope } from '../models/ws-types';
+import {
+  MAX_PLAYERS,
+  PLAYER_COLORS,
+  Player,
+  RoomRejoinedPayload,
+  WsEnvelope,
+  createLobbyPlayer,
+} from '../models/ws-types';
 import { ApiService } from './api.service';
 import { WebSocketService } from './websocket.service';
 
@@ -88,7 +95,7 @@ export class RoomService {
       connectionId: payload.connectionId,
     };
     this.roomSubject.next(context);
-    this.playersSubject.next(payload.players.map((p) => this.normalize(p)));
+    this.playersSubject.next(this.mergeServerPlayers(payload.players));
     this.pendingSubject.next(payload.pending.map((p) => this.normalize(p)));
   }
 
@@ -100,7 +107,65 @@ export class RoomService {
       isOffTrack: p.isOffTrack ?? false,
       trail: p.trail ?? [],
       lap: p.lap ?? 1,
+      isBot: p.isBot === true ? true : undefined,
     };
+  }
+
+  /** Keep host-local computer opponents when the server replaces the human roster. */
+  private mergeServerPlayers(serverPlayers: Player[]): Player[] {
+    const bots = this.playersSubject.value.filter((p) => p.isBot);
+    const humans = serverPlayers.map((pl) => this.normalize(pl)).filter((p) => !p.isBot);
+    return [...humans, ...bots].sort((a, b) => a.joinOrder - b.joinOrder);
+  }
+
+  /**
+   * Host-only: add a local computer opponent (no WebSocket / DynamoDB row).
+   * Returns the new bot, or null when the roster is full / caller is not host.
+   */
+  addBot(nickname?: string): Player | null {
+    const room = this.room;
+    if (!room?.isHost) return null;
+    const players = this.playersSubject.value;
+    if (players.length >= MAX_PLAYERS) return null;
+
+    const usedColors = new Set(players.map((p) => p.color));
+    const color =
+      PLAYER_COLORS.find((c) => !usedColors.has(c)) ??
+      PLAYER_COLORS[players.length % PLAYER_COLORS.length];
+    const botIndex = players.filter((p) => p.isBot).length + 1;
+    const joinOrder = Math.max(0, ...players.map((p) => p.joinOrder), -1) + 1;
+    const bot = createLobbyPlayer(
+      `bot-${Date.now()}-${botIndex}`,
+      nickname?.trim() || `CPU ${botIndex}`,
+      false,
+      joinOrder,
+      color,
+      true
+    );
+    this.playersSubject.next([...players, bot]);
+    return bot;
+  }
+
+  /** Host-only: remove a local computer opponent from the lobby roster. */
+  removeBot(connectionId: string): boolean {
+    if (!this.room?.isHost) return false;
+    const before = this.playersSubject.value;
+    const target = before.find((p) => p.connectionId === connectionId && p.isBot);
+    if (!target) return false;
+    this.playersSubject.next(before.filter((p) => p.connectionId !== connectionId));
+    return true;
+  }
+
+  /** Host-only: re-attach a bot identity after host failover (preserves connectionId). */
+  restoreBot(bot: Player): boolean {
+    if (!this.room?.isHost || !bot.isBot) return false;
+    const players = this.playersSubject.value;
+    if (players.some((p) => p.connectionId === bot.connectionId)) return true;
+    if (players.length >= MAX_PLAYERS) return false;
+    this.playersSubject.next(
+      [...players, this.normalize(bot)].sort((a, b) => a.joinOrder - b.joinOrder)
+    );
+    return true;
   }
 
   async createRoom(nickname: string): Promise<string> {
@@ -192,14 +257,14 @@ export class RoomService {
       const subs = [
         this.ws.onAction<Player & { players?: Player[] }>('PLAYER_APPROVED').subscribe((p) => {
           if (p.players?.length) {
-            this.playersSubject.next(
-              p.players.map((pl) => this.normalize(pl)).sort((a, b) => a.joinOrder - b.joinOrder)
-            );
+            this.playersSubject.next(this.mergeServerPlayers(p.players));
           } else {
-            this.playersSubject.next([
-              ...this.playersSubject.value.filter((x) => x.connectionId !== p.connectionId),
-              this.normalize(p),
-            ]);
+            const without = this.playersSubject.value.filter(
+              (x) => x.connectionId !== p.connectionId
+            );
+            this.playersSubject.next(
+              [...without, this.normalize(p)].sort((a, b) => a.joinOrder - b.joinOrder)
+            );
           }
           this.pendingSubject.next(
             this.pendingSubject.value.filter((x) => x.connectionId !== p.connectionId)
@@ -257,11 +322,12 @@ export class RoomService {
                 isHost: p.player.isHost,
               });
             }
+            const bots = this.playersSubject.value.filter((x) => x.isBot);
+            const humans = this.playersSubject.value
+              .filter((x) => !x.isBot && x.connectionId !== p.oldConnectionId)
+              .concat(this.normalize(p.player));
             this.playersSubject.next(
-              this.playersSubject.value
-                .filter((x) => x.connectionId !== p.oldConnectionId)
-                .concat(this.normalize(p.player))
-                .sort((a, b) => a.joinOrder - b.joinOrder)
+              [...humans, ...bots].sort((a, b) => a.joinOrder - b.joinOrder)
             );
             observer.next();
           }),
