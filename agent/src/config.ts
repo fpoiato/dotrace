@@ -1,4 +1,5 @@
 /** Runtime configuration for the AI player, from env vars or CLI args. */
+import { AiDifficulty, DIFFICULTY_TUNING, difficultyFromUnknown } from './difficulty';
 
 export interface AgentConfig {
   /** WebSocket endpoint (push channel). */
@@ -15,6 +16,8 @@ export interface AgentConfig {
   region: string;
   /** 'bedrock' uses the LLM brain; 'heuristic' skips Bedrock entirely. */
   brain: 'bedrock' | 'heuristic';
+  /** easy | medium | hard | pro — tunes speed, mistakes, gear cap. */
+  difficulty: AiDifficulty;
   /** Artificial delay before each move (ms) so the race feels natural. */
   moveDelayMs: number;
 }
@@ -33,6 +36,8 @@ export function loadConfig(): AgentConfig {
   const roomCode = requireRoomCode(process.env.ROOM_CODE ?? process.argv[2] ?? '');
   const nickname = (process.env.NICKNAME ?? process.argv[3] ?? 'AI Pilot').trim();
   const brain = process.env.BRAIN === 'heuristic' ? 'heuristic' : 'bedrock';
+  const difficulty = difficultyFromUnknown(process.env.DIFFICULTY);
+  const defaultDelay = DIFFICULTY_TUNING[difficulty].moveDelayMs;
 
   return {
     wsUrl: process.env.WS_URL ?? 'ws://localhost:8080/game',
@@ -42,6 +47,7 @@ export function loadConfig(): AgentConfig {
     modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
     region: process.env.AWS_REGION ?? 'us-east-1',
     brain,
-    moveDelayMs: Number(process.env.MOVE_DELAY_MS ?? 400),
+    difficulty,
+    moveDelayMs: Number(process.env.MOVE_DELAY_MS ?? defaultDelay),
   };
 }

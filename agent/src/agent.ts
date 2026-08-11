@@ -92,14 +92,17 @@ export async function raceLoop(
 
 function buildBrain(config: AgentConfig): MoveBrain {
   if (config.brain === 'heuristic') {
-    console.log(`[BRAIN] heuristic style=${config.nickname}`);
-    return new HeuristicBrain(config.nickname);
+    console.log(`[BRAIN] heuristic style=${config.nickname} difficulty=${config.difficulty}`);
+    return new HeuristicBrain({ styleOrSeed: config.nickname, difficulty: config.difficulty });
   }
-  console.log(`[BRAIN] bedrock model=${config.modelId} region=${config.region}`);
+  console.log(
+    `[BRAIN] bedrock model=${config.modelId} region=${config.region} difficulty=${config.difficulty}`
+  );
   return new BedrockBrain({
     modelId: config.modelId,
     region: config.region,
     fallbackSeed: config.nickname,
+    difficulty: config.difficulty,
   });
 }
 

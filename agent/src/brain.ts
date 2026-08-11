@@ -11,11 +11,20 @@ import {
   BedrockRuntimeClient,
   ConverseCommand,
 } from '@aws-sdk/client-bedrock-runtime';
+import {
+  AiDifficulty,
+  DIFFICULTY_TUNING,
+  DifficultyTuning,
+  difficultyFromUnknown,
+} from './difficulty';
 import type { AnnotatedMove, BoardSummary } from './tools';
 
 export interface MoveBrain {
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove>;
 }
+
+export type { AiDifficulty } from './difficulty';
+export { AI_DIFFICULTIES, DIFFICULTY_NICK_SUFFIX, DIFFICULTY_TUNING } from './difficulty';
 
 // ------------------------------------------------------------- heuristic
 
@@ -29,7 +38,7 @@ export interface PilotStyle {
   caution: number;
   /** Soft ±1 nudge on target gear. */
   gearBias: number;
-  /** Deterministic salt for near-tie breakers. */
+  /** Deterministic salt for near-tie breakers / mistakes. */
   salt: number;
 }
 
@@ -50,38 +59,73 @@ export function styleFromSeed(seed: string): PilotStyle {
   };
 }
 
+export interface HeuristicBrainOptions {
+  styleOrSeed?: PilotStyle | string;
+  difficulty?: AiDifficulty;
+}
+
 /**
- * Track-aware racer:
+ * Track-aware racer with difficulty tuning:
  * - Follow the asphalt corridor via directed pathDistance / pathProgress
  * - Accelerate when clearAhead is long and under a soft target speed
  * - Brake when overspeed or the runway ahead is short
- * - Never prefer grass shortcuts when a clean move exists
  * - Optional PilotStyle so multiple bots don't drive as clones
+ * - Easy/medium may intentionally pick a near-best move (mistakes)
  */
 export class HeuristicBrain implements MoveBrain {
   private readonly style: PilotStyle;
+  private readonly tuning: DifficultyTuning;
 
-  constructor(styleOrSeed?: PilotStyle | string) {
-    if (typeof styleOrSeed === 'string') {
-      this.style = styleFromSeed(styleOrSeed);
+  constructor(styleOrSeed?: PilotStyle | string | HeuristicBrainOptions, difficulty?: AiDifficulty) {
+    // HeuristicBrainOptions is a plain bag; PilotStyle always has seed + salt.
+    if (
+      styleOrSeed &&
+      typeof styleOrSeed === 'object' &&
+      !('salt' in styleOrSeed && 'seed' in styleOrSeed)
+    ) {
+      const opts = styleOrSeed as HeuristicBrainOptions;
+      this.style =
+        typeof opts.styleOrSeed === 'string' || opts.styleOrSeed === undefined
+          ? styleFromSeed(opts.styleOrSeed ?? 'default')
+          : opts.styleOrSeed;
+      this.tuning = DIFFICULTY_TUNING[difficultyFromUnknown(opts.difficulty)];
+    } else if (typeof styleOrSeed === 'string' || styleOrSeed === undefined) {
+      this.style = styleFromSeed(styleOrSeed ?? 'default');
+      this.tuning = DIFFICULTY_TUNING[difficultyFromUnknown(difficulty)];
     } else {
-      this.style = styleOrSeed ?? styleFromSeed('default');
+      this.style = styleOrSeed;
+      this.tuning = DIFFICULTY_TUNING[difficultyFromUnknown(difficulty)];
     }
+  }
+
+  /** Active difficulty preset (for move delay / logging). */
+  get difficulty(): AiDifficulty {
+    return this.tuning.id;
+  }
+
+  get moveDelayMs(): number {
+    return this.tuning.moveDelayMs;
   }
 
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
     const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
     const currentGear = summary.gear;
     const bestClear = moves.reduce((max, m) => Math.max(max, m.clearAhead), 0);
-    const { aggression, caution, gearBias, salt } = this.style;
-    // Soft target: leave buffer vs runway; sqrt keeps gear modest into mid corners.
+    const { aggression: styleAgg, caution: styleCau, gearBias: styleBias, salt } = this.style;
+    const t = this.tuning;
+    const aggression = styleAgg * t.aggression;
+    const caution = styleCau * t.caution;
+    const gearBias = styleBias + t.gearBias;
+
     const targetGear = Math.max(
       1,
-      Math.min(6, Math.floor(Math.sqrt(Math.max(1, bestClear * 1.6))) + gearBias)
+      Math.min(
+        t.maxGear,
+        Math.floor(Math.sqrt(Math.max(1, bestClear * t.clearSqrtScale))) + gearBias
+      )
     );
 
-    let best = moves[0];
-    let bestScore = Number.NEGATIVE_INFINITY;
+    const scored: Array<{ move: AnnotatedMove; score: number }> = [];
 
     for (const move of moves) {
       let score = 0;
@@ -93,18 +137,19 @@ export class HeuristicBrain implements MoveBrain {
       if (move.grassShortcut) score -= 10_000;
       if (move.landingTile === 'grass' || move.landingTile === 'rumble') score -= 5_000;
 
+      // Soft gear cap: discourage (don't hard-filter) moves above difficulty max.
+      if (move.gear > t.maxGear) score -= 400 * (move.gear - t.maxGear);
+
       if (summary.goal === 'checkpoint' && move.entersCheckpoint) score += 2_000;
       if (summary.goal === 'finish' && move.crossesFinish) score += 2_000;
 
-      // Primary: progress along the track graph (not Euclidean to a centroid).
-      score += move.pathProgress * 120;
+      score += move.pathProgress * t.pathWeight;
       if (!Number.isFinite(move.pathDistance)) {
         score -= 10_000;
       } else {
         score -= move.pathDistance * 3;
       }
 
-      // Legacy Chebyshev distance as a weak tie-break only.
       score -= move.distanceToGoal;
 
       if (move.overspeed) score -= 600 * caution;
@@ -114,9 +159,8 @@ export class HeuristicBrain implements MoveBrain {
 
       const delta = move.gear - currentGear;
 
-      // Accelerate on open asphalt when under target.
       if (
-        move.clearAhead >= 4 &&
+        move.clearAhead >= t.clearToAccel &&
         move.gear < targetGear &&
         delta > 0 &&
         !move.overspeed &&
@@ -124,12 +168,10 @@ export class HeuristicBrain implements MoveBrain {
       ) {
         score += (55 + delta * 25) * aggression;
       }
-      // Nudge off the line at the start.
       if (currentGear === 0 && move.gear === 1 && move.pathProgress > 0) {
         score += 60;
       }
 
-      // Brake into corners / when runway is short.
       if ((move.overspeed || move.clearAhead <= 2) && delta < 0) {
         score += (70 + Math.abs(delta) * 25) * caution;
       }
@@ -142,21 +184,45 @@ export class HeuristicBrain implements MoveBrain {
 
       if (move.pathProgress < 0) score -= 100;
 
-      // Prefer carrying useful speed when the road is clear (secondary).
       if (move.clearAhead >= 5 && !move.overspeed) {
         score += move.gear * 4 * aggression;
       }
 
-      // Style-salted micro tie-break so equal scores don't always pick moves[0].
       score += ((move.index * 31 + salt) % 11) * 0.05;
 
-      if (score > bestScore) {
-        bestScore = score;
-        best = move;
-      }
+      scored.push({ move, score });
     }
 
+    scored.sort((a, b) => b.score - a.score);
+    const best = this.pickWithMistakes(scored, salt);
     return Promise.resolve(best);
+  }
+
+  /** Easy/medium: sometimes take 2nd/3rd best clean move so the pilot feels beatable. */
+  private pickWithMistakes(
+    scored: Array<{ move: AnnotatedMove; score: number }>,
+    salt: number
+  ): AnnotatedMove {
+    const t = this.tuning;
+    const clean = scored.filter(
+      (s) => !s.move.grassShortcut && (s.move.velocity.x !== 0 || s.move.velocity.y !== 0)
+    );
+    const pool = (clean.length > 0 ? clean : scored).slice(0, Math.max(1, t.topK));
+    if (pool.length === 1 || t.mistakeChance <= 0) {
+      return pool[0]!.move;
+    }
+
+    // Deterministic "RNG" from salt + best move so replays / twins stay stable
+    // for a given nickname, but still diverge across pilots.
+    const roll = ((salt * 17 + pool[0]!.move.index * 13) % 1000) / 1000;
+    if (roll >= t.mistakeChance) {
+      return pool[0]!.move;
+    }
+    // Intentionally skip the top pick so the mistake is visible.
+    const alt = pool.slice(1);
+    if (alt.length === 0) return pool[0]!.move;
+    const pick = (salt + pool[0]!.move.index) % alt.length;
+    return alt[pick]!.move;
   }
 }
 
@@ -204,6 +270,8 @@ export interface BedrockBrainOptions {
   fallbackSeed?: string;
   /** Max wait for Converse before falling back (ms). */
   timeoutMs?: number;
+  /** Difficulty applied to the heuristic fallback / quality floor. */
+  difficulty?: AiDifficulty;
 }
 
 /**
@@ -239,15 +307,25 @@ export class BedrockBrain implements MoveBrain {
   private readonly modelId: string;
   private readonly maxTokens: number;
   private readonly timeoutMs: number;
+  readonly difficulty: AiDifficulty;
 
   constructor(options: BedrockBrainOptions) {
     this.modelId = options.modelId;
+    this.difficulty = difficultyFromUnknown(options.difficulty);
     this.client =
       options.client ?? new BedrockRuntimeClient({ region: options.region });
     this.fallback =
-      options.fallback ?? new HeuristicBrain(options.fallbackSeed ?? 'bedrock-fallback');
+      options.fallback ??
+      new HeuristicBrain({
+        styleOrSeed: options.fallbackSeed ?? 'bedrock-fallback',
+        difficulty: this.difficulty,
+      });
     this.maxTokens = options.maxTokens ?? 200;
     this.timeoutMs = options.timeoutMs ?? 6_000;
+  }
+
+  get moveDelayMs(): number {
+    return DIFFICULTY_TUNING[this.difficulty].moveDelayMs;
   }
 
   async pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
