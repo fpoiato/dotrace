@@ -8,7 +8,8 @@
  * removes the player from the race.
  *
  * Env: WS_URL, API_URL, BEDROCK_MODEL_ID, MOVE_DELAY_MS, BRAIN (defaults to
- * 'heuristic' — the track-aware planner; set 'bedrock' to try Nova Micro).
+ * 'bedrock' — Nova Micro with track-aware heuristic fallback; set 'heuristic'
+ * to skip the LLM).
  */
 import { raceLoop } from '../../../../agent/src/agent';
 import { BedrockBrain, HeuristicBrain, MoveBrain } from '../../../../agent/src/brain';
@@ -23,17 +24,15 @@ export interface SpawnAiPlayerEvent {
 }
 
 function buildBrain(event: SpawnAiPlayerEvent): MoveBrain {
-  // Default heuristic: Bedrock cannot see the circuit geometry well even with
-  // annotated moves; the track-aware planner owns racing line + accel/brake.
-  const mode = event.brain ?? process.env.BRAIN ?? 'heuristic';
-  if (mode === 'bedrock') {
-    // Falls back to the heuristic automatically on any model failure.
-    return new BedrockBrain({
-      modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
-      region: process.env.AWS_REGION ?? 'us-east-1',
-    });
+  const mode = event.brain ?? process.env.BRAIN ?? 'bedrock';
+  if (mode === 'heuristic') {
+    return new HeuristicBrain();
   }
-  return new HeuristicBrain();
+  // Falls back to the track-aware heuristic on any model failure.
+  return new BedrockBrain({
+    modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
+    region: process.env.AWS_REGION ?? 'us-east-1',
+  });
 }
 
 export const handler = async (event: SpawnAiPlayerEvent): Promise<void> => {
