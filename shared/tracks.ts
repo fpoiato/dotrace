@@ -186,6 +186,32 @@ function sealRumbleGaps(grid: TileType[][], maxGap = 4): void {
   for (const [x, y] of fill) grid[y][x] = 'rumble';
 }
 
+/**
+ * Densify the centerline polyline into ~2 samples per tile, preserving the
+ * spec's race-direction ordering. The loop is closed (specs repeat the first
+ * point at the end); the duplicate closing sample is dropped so consumers
+ * can index it modulo the length.
+ */
+function densifyCenterline(points: Vector2D[]): Vector2D[] {
+  const line: Vector2D[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(dist * 2));
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      const p = {
+        x: Math.round(a.x + (b.x - a.x) * t),
+        y: Math.round(a.y + (b.y - a.y) * t),
+      };
+      const last = line[line.length - 1];
+      if (!last || last.x !== p.x || last.y !== p.y) line.push(p);
+    }
+  }
+  return line;
+}
+
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
   const width = spec.width ?? GRID_W;
   const height = spec.height ?? GRID_H;
@@ -205,6 +231,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     startLine: spec.startLine,
     arrows: spec.arrows,
     checkpoint: spec.checkpoint,
+    racingLine: densifyCenterline(spec.centerline),
   };
 }
 

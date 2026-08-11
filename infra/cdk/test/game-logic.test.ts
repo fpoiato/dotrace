@@ -59,6 +59,7 @@ function makeTrack(): TrackDefinition {
     grid,
     startLine: [{ x: 0, y: 0 }],
     arrows: [],
+    racingLine: [{ x: 0, y: 0 }],
   };
 }
 
