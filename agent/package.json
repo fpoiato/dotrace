@@ -1,0 +1,30 @@
+{
+  "name": "dotrace-ai-player",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI network player for Dot Race — Bedrock-powered agent + MCP server",
+  "main": "dist/agent.js",
+  "scripts": {
+    "build": "esbuild src/agent.ts src/mcp-server.ts --bundle --platform=node --outdir=dist --packages=external",
+    "start": "node dist/agent.js",
+    "dev": "tsx src/agent.ts",
+    "mcp": "tsx src/mcp-server.ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.18.2",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.25.5",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.4",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

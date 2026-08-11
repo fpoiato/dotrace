@@ -194,7 +194,8 @@ export type ClientAction =
   | 'HOST_STATE_RESPONSE'
   | 'FORWARD_TO_HOST'
   | 'SUBMIT_RACE_STATS'
-  | 'GET_TOP10';
+  | 'GET_TOP10'
+  | 'SPAWN_AI_PLAYER';
 
 export type RelayEventType =
   | 'STATE_SYNC'
@@ -224,7 +225,8 @@ export type ServerEvent =
   | 'TOP10'
   | 'RACE_STATS_SAVED'
   | 'RELAY_ACK'
-  | 'FORWARD_ACK';
+  | 'FORWARD_ACK'
+  | 'AI_PLAYER_SPAWNING';
 
 export interface WsEnvelope<T = unknown> {
   action: ClientAction | ServerEvent | 'message';

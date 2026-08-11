@@ -12,6 +12,8 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | `infra/cdk` | DynamoDB, WebSocket API, HTTP API (commands), Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
 | `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
+| `bot/` | Headless heuristic client (joins rooms as a player) |
+| `agent/` | AI player — Bedrock-powered agent + MCP server (see `agent/README.md`) |
 | `pipeline/` | CodeBuild buildspec |
 | `.github/workflows/` | CI/CD on push to `main` (`ci-cd.yml`) |
 

@@ -4,7 +4,8 @@
   "workspaces": [
     "frontend/dotrace-app",
     "infra/cdk",
-    "bot"
+    "bot",
+    "agent"
   ],
   "scripts": {
     "start": "npm run start --workspace=frontend/dotrace-app",
@@ -14,6 +15,10 @@
     "test": "npm run test --workspace=infra/cdk",
     "bot:build": "npm run build --workspace=bot",
     "bot:start": "npm run start --workspace=bot",
-    "bot:test": "npm run test --workspace=bot"
+    "bot:test": "npm run test --workspace=bot",
+    "agent:build": "npm run build --workspace=agent",
+    "agent:start": "npm run start --workspace=agent",
+    "agent:mcp": "npm run mcp --workspace=agent",
+    "agent:test": "npm run test --workspace=agent"
   }
 }
