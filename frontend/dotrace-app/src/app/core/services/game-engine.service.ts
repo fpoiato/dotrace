@@ -32,9 +32,21 @@ import {
   buildRaceTelemetry,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
+import { BotDriverService } from './bot-driver.service';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
+
+/** Delay between computer-controlled car moves (paces solo/vs-CPU races). */
+const BOT_TICK_MS = 750;
+
+/**
+ * TURNS-mode safety net: if no racer completes a lap for this many rounds the
+ * race is force-ended. Guarantees a race can never hang because a computer car
+ * gets boxed in or stuck circling a tricky section (only bites well past a
+ * normal lap length, so real races are unaffected).
+ */
+const STALL_ROUND_LIMIT = 100;
 
 @Injectable({ providedIn: 'root' })
 export class GameEngineService implements OnDestroy {
@@ -42,6 +54,7 @@ export class GameEngineService implements OnDestroy {
   private readonly api = inject(ApiService);
   private readonly roomService = inject(RoomService);
   private readonly session = inject(SessionStorageService);
+  private readonly botDriver = inject(BotDriverService);
 
   private readonly stateSubject = new BehaviorSubject<GameState | null>(null);
   readonly state$ = this.stateSubject.asObservable();
@@ -49,6 +62,10 @@ export class GameEngineService implements OnDestroy {
   private messageSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Polling timer that drives computer-controlled cars on the host. */
+  private botTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Last round any racer completed a lap (host-side stall detection). */
+  private lastLapProgressRound = 0;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
 
@@ -146,7 +163,9 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      this.lastLapProgressRound = state.round;
       this.setStateAndRelay('GRID_ORDER_DONE', state);
+      this.startBotLoop();
       return;
     }
 
@@ -202,7 +221,9 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    this.lastLapProgressRound = state.round;
     this.setStateAndRelay('GRID_ORDER_DONE', state);
+    this.startBotLoop();
   }
 
   private placePlayersOnStartLine(
@@ -294,6 +315,7 @@ export class GameEngineService implements OnDestroy {
       const now = Date.now();
       player.lapTimes = [...(player.lapTimes ?? []), now];
       player.lapRounds = [...(player.lapRounds ?? []), state.round];
+      this.lastLapProgressRound = state.round;
 
       if (player.lap < state.totalLaps) {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
@@ -346,7 +368,37 @@ export class GameEngineService implements OnDestroy {
     if (state.currentTurnIndex <= prevIndex) {
       state.round += 1;
     }
+
+    // Safety net: a race that goes too long without a single lap completion is
+    // force-ended so a stuck computer car can never soft-lock the game.
+    if (state.round - this.lastLapProgressRound > STALL_ROUND_LIMIT) {
+      this.forceFinishRemaining(state);
+      if (this.tryEndRace(state)) return;
+    }
+
     this.setStateAndRelay('TURN_ADVANCED', state, meta);
+  }
+
+  /**
+   * Assign a finishing position to every car still racing (best lap progress
+   * first), so an otherwise-stalled race can resolve to GAME_OVER.
+   */
+  private forceFinishRemaining(state: GameState): void {
+    const now = Date.now();
+    const remaining = state.players
+      .filter((p) => p.finishOrder === undefined)
+      .sort((a, b) => b.lap - a.lap);
+    for (const player of remaining) {
+      const pos = state.podium.length + 1;
+      player.finishOrder = pos;
+      player.finishRound = state.round;
+      player.finishedAt = now;
+      state.podium.push({
+        connectionId: player.connectionId,
+        nickname: player.nickname,
+        position: pos,
+      });
+    }
   }
 
   /**
@@ -356,6 +408,7 @@ export class GameEngineService implements OnDestroy {
   private tryEndRace(state: GameState): boolean {
     if (state.phase === 'GAME_OVER' || !isGameOver(state)) return false;
     state.phase = 'GAME_OVER';
+    this.stopBotLoop();
     updateSessionStats(state);
     this.setStateAndRelay('GAME_OVER', state);
     this.submitGlobalRaceStats(state);
@@ -384,6 +437,7 @@ export class GameEngineService implements OnDestroy {
     const room = this.roomService.room;
     if (!current || !room || current.phase !== 'GAME_OVER') return;
 
+    this.stopBotLoop();
     if (this.gridOrderTimer) {
       clearTimeout(this.gridOrderTimer);
       this.gridOrderTimer = null;
@@ -461,6 +515,11 @@ export class GameEngineService implements OnDestroy {
       p.isHost = p.connectionId === state.hostId;
     }
     this.emit(state);
+
+    // The promoted host inherits responsibility for driving any bots. Reset the
+    // stall clock so takeover mid-race doesn't trip the safety net immediately.
+    this.lastLapProgressRound = state.round;
+    if (state.phase === 'GAME_ROUND') this.startBotLoop();
 
     // Purge the disconnected old host from the recovered snapshot and let
     // every peer converge on the cleaned state.
@@ -666,6 +725,61 @@ export class GameEngineService implements OnDestroy {
     return canPlayerMove(state, id);
   }
 
+  /**
+   * Begin driving any computer-controlled cars. Only the host runs this; a
+   * plain poll keeps the logic re-entrancy-safe (each move mutates the shared
+   * state and relays it, then the next tick reads the fresh state).
+   */
+  private startBotLoop(): void {
+    this.stopBotLoop();
+    const state = this.state;
+    if (!this.isHost || !state) return;
+    if (!state.players.some((p) => p.isBot)) return;
+    this.botDriver.resetTracking();
+    this.scheduleBotTick();
+  }
+
+  private stopBotLoop(): void {
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
+  }
+
+  private scheduleBotTick(): void {
+    if (this.botTimer) return;
+    this.botTimer = setTimeout(() => this.botTick(), BOT_TICK_MS);
+  }
+
+  private botTick(): void {
+    this.botTimer = null;
+    if (!this.isHost) return;
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') return;
+    const track = getTrackById(state.trackId);
+    if (!track) return;
+
+    const bots = state.players.filter((p) => p.isBot && p.finishOrder === undefined);
+    if (bots.length === 0) return;
+
+    if (isTimedMode(state)) {
+      // Simultaneous race: nudge every eligible bot one step this tick.
+      for (const bot of bots) {
+        if (!canPlayerMove(state, bot.connectionId)) continue;
+        this.applyMove(bot.connectionId, this.botDriver.pickMove(bot, state, track));
+        if (this.state?.phase !== 'GAME_ROUND') break;
+      }
+    } else {
+      // Turn-based: act only when it is a bot's turn, one move per tick.
+      const current = this.currentPlayer();
+      if (current?.isBot && current.finishOrder === undefined) {
+        this.applyMove(current.connectionId, this.botDriver.pickMove(current, state, track));
+      }
+    }
+
+    this.scheduleBotTick();
+  }
+
   ensureLobbyState(): void {
     if (!this.state && this.roomService.room) {
       this.bootstrapLobbyState();
@@ -676,10 +790,12 @@ export class GameEngineService implements OnDestroy {
     this.messageSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.stopBotLoop();
   }
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.stopBotLoop();
     this.stateSubject.next(null);
   }
 }
