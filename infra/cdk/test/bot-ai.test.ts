@@ -14,6 +14,7 @@ import {
   Vector2D,
   applyGrassPenalty,
   createBotPlayer,
+  createLobbyPlayer,
   gearOf,
   getTileAt,
   getValidMoves,
@@ -26,6 +27,8 @@ import {
 import { TRACKS, getTrackById } from '../../../shared/tracks';
 import {
   botProfile,
+  botThinkMs,
+  botTurnDelayMs,
   lapProgress,
   planBotMove,
   remainingFor,
@@ -428,6 +431,72 @@ describe('bots can actually drive', () => {
       recovered = !bot.isOffTrack;
     }
     expect(recovered).toBe(true);
+  });
+});
+
+describe('when the host should play a bot move', () => {
+  const track = getTrackById('monza')!;
+
+  function twoUp(gameMode: 'TURNS' | 'TIMED' = 'TURNS'): {
+    state: GameState;
+    human: Player;
+    bot: Player;
+  } {
+    const human = createLobbyPlayer('human', 'Ana', true, 0, '#EF4444');
+    const bot = createBotPlayer('Ayrton', 1, '#3B82F6', 'MEDIUM', 'a');
+    const state = makeState(track, [human, bot]);
+    state.gameMode = gameMode;
+    return { state, human, bot };
+  }
+
+  it('waits for the bot to be on turn in a turn-based race', () => {
+    const { state, bot } = twoUp();
+    expect(botTurnDelayMs(state, bot)).toBeNull();
+    state.currentTurnIndex = 1;
+    expect(botTurnDelayMs(state, bot)).toBe(botThinkMs('MEDIUM'));
+  });
+
+  it('never plays a bot outside an active race', () => {
+    const { state, bot } = twoUp();
+    state.currentTurnIndex = 1;
+    for (const phase of ['LOBBY', 'GRID_ORDER', 'GAME_OVER'] as const) {
+      state.phase = phase;
+      expect(botTurnDelayMs(state, bot)).toBeNull();
+    }
+  });
+
+  it('never plays a bot that has already finished', () => {
+    const { state, bot } = twoUp();
+    state.currentTurnIndex = 1;
+    bot.finishOrder = 1;
+    expect(botTurnDelayMs(state, bot)).toBeNull();
+  });
+
+  it('lets every bot move whenever it likes in a timed race', () => {
+    const { state, bot } = twoUp('TIMED');
+    expect(state.currentTurnIndex).toBe(0);
+    expect(botTurnDelayMs(state, bot)).toBe(botThinkMs('MEDIUM'));
+  });
+
+  it('sits out a timed stop penalty instead of giving up on the bot', () => {
+    const { state, bot } = twoUp('TIMED');
+    const now = 10_000;
+    bot.stopUntil = now + 5_000;
+    const wait = botTurnDelayMs(state, bot, now);
+    expect(wait).not.toBeNull();
+    expect(wait!).toBeGreaterThan(5_000);
+
+    // Once it has run out, the bot goes back to its usual thinking pause.
+    expect(botTurnDelayMs(state, bot, now + 6_000)).toBe(botThinkMs('MEDIUM'));
+  });
+
+  it('gives weaker bots a longer pause, so they read as slower to decide', () => {
+    const { state, bot } = twoUp();
+    state.currentTurnIndex = 1;
+    bot.botSkill = 'EASY';
+    const easy = botTurnDelayMs(state, bot)!;
+    bot.botSkill = 'HARD';
+    expect(botTurnDelayMs(state, bot)!).toBeLessThan(easy);
   });
 });
 

@@ -2,15 +2,21 @@ import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
 import {
+  BotSkill,
+  DEFAULT_BOT_SKILL,
   GameMode,
   GameState,
+  MAX_BOTS,
+  MAX_PLAYERS,
   MIN_PLAYERS,
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
   Vector2D,
   applyGrassPenalty,
+  botsOf,
   canPlayerMove,
+  createBotPlayer,
   createInitialState,
   createLobbyPlayer,
   getTileAt,
@@ -19,7 +25,9 @@ import {
   isGrassShortcut,
   isTimedMode,
   landingPosition,
+  lobbyRosterWithBots,
   nextActiveTurnIndex,
+  pickBotIdentity,
   pushReplayMove,
   pushTrail,
   remapSessionStatsConnectionId,
@@ -31,6 +39,7 @@ import {
   zeroVector,
   buildRaceTelemetry,
 } from '../models/ws-types';
+import { botTurnDelayMs, chooseBotMove } from '../models/bot-ai';
 import { ApiService } from './api.service';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
@@ -47,8 +56,11 @@ export class GameEngineService implements OnDestroy {
   readonly state$ = this.stateSubject.asObservable();
 
   private messageSub: Subscription | null = null;
+  private roomSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pending "thinking" pause per CPU racer, keyed by its synthetic id. */
+  private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
 
@@ -64,6 +76,7 @@ export class GameEngineService implements OnDestroy {
    */
   private emit(state: GameState): void {
     this.stateSubject.next(structuredClone(state));
+    this.scheduleBotTurns();
   }
 
   get isHost(): boolean {
@@ -77,6 +90,10 @@ export class GameEngineService implements OnDestroy {
   init(): void {
     if (this.messageSub) return;
     this.messageSub = this.ws.messages$.subscribe((msg) => this.handleMessage(msg.action, msg.payload));
+    // Being promoted to host mid-race means taking over its CPU racers. The
+    // host flag lands on a different stream than the state snapshot, so watch
+    // it directly rather than waiting for the next relay to notice.
+    this.roomSub = this.roomService.room$.subscribe(() => this.scheduleBotTurns());
   }
 
   selectTrack(trackId: string): void {
@@ -106,6 +123,87 @@ export class GameEngineService implements OnDestroy {
     this.setStateAndRelay('STATE_SYNC', state);
   }
 
+  /** CPU racers currently on the grid, in join order. */
+  get bots(): Player[] {
+    return botsOf(this.state?.players ?? []);
+  }
+
+  /** Difficulty shown in the lobby — one setting for the whole CPU field. */
+  get botSkill(): BotSkill {
+    return this.bots[0]?.botSkill ?? this.session.load()?.botSkill ?? DEFAULT_BOT_SKILL;
+  }
+
+  canAddBot(): boolean {
+    const humans = this.roomService.players.filter((p) => p.status === 'approved').length;
+    const bots = this.bots.length;
+    return bots < MAX_BOTS && humans + bots < MAX_PLAYERS;
+  }
+
+  /**
+   * Host-only: put another CPU racer on the grid.
+   *
+   * Bots exist only in game state — no WebSocket connection, no DynamoDB
+   * record. The host drives them locally and every other client learns about
+   * them through the ordinary RELAY snapshots, so they need no server support.
+   */
+  addBot(skill: BotSkill = this.botSkill): void {
+    if (!this.isHost || !this.canAddBot()) return;
+    const state = this.state ?? this.bootstrapLobbyState();
+    if (state.phase !== 'LOBBY') return;
+
+    const bots = botsOf(state.players);
+    const identity = pickBotIdentity(this.lobbyRoster(bots));
+    this.session.save({ botSkill: skill });
+    // Join order is provisional: setLobbyRoster renumbers the CPU field behind
+    // whoever the server has approved by then.
+    this.setLobbyRoster(state, [
+      ...bots,
+      createBotPlayer(identity.nickname, bots.length, identity.color, skill),
+    ]);
+  }
+
+  /** Host-only: take a CPU racer off the grid (the newest one by default). */
+  removeBot(connectionId?: string): void {
+    if (!this.isHost) return;
+    const state = this.state;
+    if (!state || state.phase !== 'LOBBY') return;
+
+    const bots = botsOf(state.players);
+    if (bots.length === 0) return;
+    const target = connectionId ?? bots[bots.length - 1].connectionId;
+    this.setLobbyRoster(
+      state,
+      bots.filter((b) => b.connectionId !== target)
+    );
+  }
+
+  /** Host-only: set the difficulty of the whole CPU field. */
+  setBotSkill(skill: BotSkill): void {
+    if (!this.isHost) return;
+    const state = this.state ?? this.bootstrapLobbyState();
+    if (state.phase !== 'LOBBY') return;
+    this.session.save({ botSkill: skill });
+    this.setLobbyRoster(
+      state,
+      botsOf(state.players).map((b) => ({ ...b, botSkill: skill }))
+    );
+  }
+
+  /** Rebuilt from players$ every time, so late joiners are never left out. */
+  private lobbyRoster(bots: Player[]): Player[] {
+    const humans = this.roomService.players
+      .filter((p) => p.status === 'approved')
+      .map((p) =>
+        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+      );
+    return lobbyRosterWithBots(humans, bots);
+  }
+
+  private setLobbyRoster(state: GameState, bots: Player[]): void {
+    state.players = this.lobbyRoster(bots);
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
   startRace(): void {
     if (!this.isHost) return;
     const room = this.roomService.room;
@@ -122,11 +220,10 @@ export class GameEngineService implements OnDestroy {
     const sessionStats = prev?.sessionStats;
 
     // Rebuild the roster from players$ (the single source of truth) so anyone
-    // approved after the track was selected is included in the race.
+    // approved after the track was selected is included in the race, keeping
+    // the CPU racers the host added in the lobby.
     const state = createInitialState(
-      lobbyPlayers.map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      ),
+      this.lobbyRoster(botsOf(prev?.players ?? [])),
       room.connectionId
     );
     state.trackId = trackId;
@@ -330,6 +427,68 @@ export class GameEngineService implements OnDestroy {
     this.afterMove(state);
   }
 
+  /**
+   * Host-only: keep a pending move armed for every CPU racer that is due to
+   * play. Driven off every state emission, so a bot picks up its turn whatever
+   * moved the race on — a human, another bot, or a player rejoining.
+   */
+  private scheduleBotTurns(): void {
+    const state = this.state;
+    if (!this.isHost || !state || state.phase !== 'GAME_ROUND') {
+      this.clearBotTimers();
+      return;
+    }
+
+    const due = new Map<string, number>();
+    for (const bot of botsOf(state.players)) {
+      const wait = botTurnDelayMs(state, bot);
+      if (wait !== null) due.set(bot.connectionId, wait);
+    }
+
+    for (const [id, timer] of this.botTimers) {
+      if (due.has(id)) continue;
+      clearTimeout(timer);
+      this.botTimers.delete(id);
+    }
+
+    for (const [id, wait] of due) {
+      if (this.botTimers.has(id)) continue;
+      this.botTimers.set(
+        id,
+        setTimeout(() => {
+          this.botTimers.delete(id);
+          this.playBotTurn(id);
+        }, wait)
+      );
+    }
+  }
+
+  private playBotTurn(connectionId: string): void {
+    const state = this.state;
+    if (!this.isHost || !state || state.phase !== 'GAME_ROUND') return;
+
+    const bot = state.players.find((p) => p.connectionId === connectionId);
+    const track = getTrackById(state.trackId);
+    // The race may have moved on while the bot was "thinking".
+    if (!bot || !track || !canPlayerMove(state, connectionId)) {
+      this.scheduleBotTurns();
+      return;
+    }
+
+    const vector = chooseBotMove(state, bot, track);
+    if (!vector) {
+      this.scheduleBotTurns();
+      return;
+    }
+    // Straight through the same validation a forwarded human move gets.
+    this.applyMove(connectionId, vector);
+  }
+
+  private clearBotTimers(): void {
+    for (const timer of this.botTimers.values()) clearTimeout(timer);
+    this.botTimers.clear();
+  }
+
   private afterMove(state: GameState, meta?: Record<string, unknown>): void {
     if (isTimedMode(state)) {
       this.setStateAndRelay('TURN_ADVANCED', state, meta);
@@ -389,12 +548,10 @@ export class GameEngineService implements OnDestroy {
       this.gridOrderTimer = null;
     }
 
-    const players = this.roomService.players
-      .filter((p) => p.status === 'approved')
-      .map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      );
-    const state = createInitialState(players, room.connectionId);
+    const state = createInitialState(
+      this.lobbyRoster(botsOf(current.players)),
+      room.connectionId
+    );
     state.trackId = current.trackId || '';
     state.totalLaps = [1, 2, 3].includes(current.totalLaps) ? current.totalLaps : 1;
     state.gameMode = current.gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
@@ -409,12 +566,10 @@ export class GameEngineService implements OnDestroy {
 
   private bootstrapLobbyState(): GameState {
     const room = this.roomService.room!;
-    const players = this.roomService.players
-      .filter((p) => p.status === 'approved')
-      .map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      );
-    const state = createInitialState(players, room.connectionId);
+    const state = createInitialState(
+      this.lobbyRoster(botsOf(this.state?.players ?? [])),
+      room.connectionId
+    );
     const saved = this.session.load();
     if (saved?.trackId) state.trackId = saved.trackId;
     if (saved?.laps) state.totalLaps = saved.laps;
@@ -674,12 +829,15 @@ export class GameEngineService implements OnDestroy {
 
   ngOnDestroy(): void {
     this.messageSub?.unsubscribe();
+    this.roomSub?.unsubscribe();
+    this.clearBotTimers();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
   }
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimers();
     this.stateSubject.next(null);
   }
 }

@@ -9,6 +9,11 @@
               <span class="flex items-center gap-2">
                 <span class="h-3 w-3 rounded-full" [style.background]="p.color"></span>
                 {{ p.nickname }}
+                @if (isBotId(p.connectionId)) {
+                  <span class="rounded-full bg-sky-900 px-2 py-0.5 text-xs font-semibold text-sky-300">
+                    {{ 'common.cpu' | translate }}
+                  </span>
+                }
               </span>
               <span class="text-2xl font-bold">🎲 {{ p.diceRoll ?? state.diceRolls[p.connectionId] }}</span>
             </li>
@@ -28,6 +33,8 @@
         } @else if (state.phase === 'GAME_ROUND') {
           @if (state.gameMode === 'TIMED') {
             <span class="text-slate-400">{{ 'game.timedRace' | translate }}</span>
+          } @else if (currentPlayerIsBot()) {
+            <span class="text-sky-400">{{ 'game.waitBot' | translate: { name: currentPlayerName() } }}</span>
           } @else {
             <span class="text-slate-400">{{ 'game.waitTurn' | translate: { name: currentPlayerName() } }}</span>
           }
@@ -126,7 +133,12 @@
             <ul class="space-y-1 border-t border-slate-700 px-4 py-2 font-mono text-xs text-slate-400">
               @for (p of snap.players; track p.connectionId) {
                 <li class="flex items-center justify-between gap-2">
-                  <span class="truncate">{{ p.nickname }}</span>
+                  <span class="truncate">
+                    {{ p.nickname }}
+                    @if (isBotId(p.connectionId)) {
+                      <span class="text-sky-400">· {{ 'common.cpu' | translate }}</span>
+                    }
+                  </span>
                   <span class="shrink-0 text-slate-500">
                     ({{ p.position.x }}, {{ p.position.y }}) · L{{ p.lap }}
                     @if (p.finishOrder !== undefined) {

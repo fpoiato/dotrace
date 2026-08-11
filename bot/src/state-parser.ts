@@ -4,47 +4,14 @@ import {
   RelayPayload,
   WsEnvelope,
   canPlayerMove,
-  isGearLimited,
 } from '../../shared/ws-types';
-
-/** Car kinematics extracted from a Player record. */
-export interface CarState {
-  position: { x: number; y: number };
-  velocity: { x: number; y: number };
-  isOffTrack: boolean;
-}
-
-/** Minimal track context the brain needs for move filtering. */
-export interface TrackState {
-  trackId: string;
-  width: number;
-  height: number;
-}
 
 /** Parsed inbound turn context after a RELAY broadcast. */
 export interface TurnContext {
   gameState: GameState;
   myPlayer: Player;
-  car: CarState;
-  track: TrackState;
   isMyTurn: boolean;
   relayType: string;
-}
-
-function toCarState(player: Player, round: number): CarState {
-  return {
-    position: { ...player.position },
-    velocity: { ...player.velocity },
-    isOffTrack: isGearLimited(player, round),
-  };
-}
-
-function toTrackState(state: GameState, trackWidth: number, trackHeight: number): TrackState {
-  return {
-    trackId: state.trackId,
-    width: trackWidth,
-    height: trackHeight,
-  };
 }
 
 /**
@@ -53,9 +20,7 @@ function toTrackState(state: GameState, trackWidth: number, trackHeight: number)
  */
 export function parseRelayEnvelope(
   envelope: WsEnvelope,
-  connectionId: string,
-  trackWidth: number,
-  trackHeight: number
+  connectionId: string
 ): TurnContext | null {
   if (envelope.action !== 'RELAY') return null;
 
@@ -69,8 +34,6 @@ export function parseRelayEnvelope(
   return {
     gameState,
     myPlayer,
-    car: toCarState(myPlayer, gameState.round),
-    track: toTrackState(gameState, trackWidth, trackHeight),
     isMyTurn: canPlayerMove(gameState, connectionId),
     relayType: payload.type,
   };

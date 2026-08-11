@@ -1,32 +1,67 @@
-import { createLobbyPlayer, getValidMoves } from '../../shared/ws-types';
+import {
+  GameState,
+  RelayPayload,
+  WsEnvelope,
+  createLobbyPlayer,
+  getValidMoves,
+} from '../../shared/ws-types';
 import { getTrackById } from '../../shared/tracks';
 import { BotBrain } from '../src/bot-brain';
+import { parseRelayEnvelope } from '../src/state-parser';
 
+/**
+ * The planner itself is covered in infra/cdk/test/bot-ai.test.ts; these tests
+ * only check that the headless client feeds it the right thing and gets a move
+ * the server will accept.
+ */
 describe('BotBrain', () => {
   const track = getTrackById('monza')!;
-  const player = createLobbyPlayer('bot', 'Bot', false, 1, '#3B82F6');
-  player.position = { x: 12, y: 28 };
-  player.velocity = { x: 0, y: 0 };
 
-  it('returns acceleration in {-1,0,1} that matches a valid move', () => {
-    const brain = new BotBrain();
-    const car = {
-      position: { ...player.position },
-      velocity: { ...player.velocity },
-      isOffTrack: false,
+  function relay(): { envelope: WsEnvelope; state: GameState } {
+    const player = createLobbyPlayer('bot', 'Bot', false, 1, '#3B82F6');
+    player.position = { ...track.startLine[0] };
+    player.velocity = { x: 0, y: 0 };
+    player.passedCheckpoint = false;
+
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [player],
+      hostId: 'host',
+      trackId: track.id,
+      turnOrder: ['bot'],
+      currentTurnIndex: 0,
+      round: 1,
+      totalLaps: 1,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [],
+      replayLog: [],
     };
-    const trackState = { trackId: track.id, width: track.width, height: track.height };
+    const payload: RelayPayload = { type: 'TURN_ADVANCED', state };
+    return { envelope: { action: 'RELAY', payload }, state };
+  }
 
-    const { dx, dy } = brain.computeNextMove(car, trackState, track);
-    expect(dx).toBeGreaterThanOrEqual(-1);
-    expect(dx).toBeLessThanOrEqual(1);
-    expect(dy).toBeGreaterThanOrEqual(-1);
-    expect(dy).toBeLessThanOrEqual(1);
+  it('plays a move the host would accept', () => {
+    const { envelope, state } = relay();
+    const ctx = parseRelayEnvelope(envelope, 'bot')!;
+    expect(ctx.isMyTurn).toBe(true);
 
-    const nextVelocity = { x: car.velocity.x + dx, y: car.velocity.y + dy };
-    const valid = getValidMoves(player, track);
-    expect(valid.some((m) => m.velocity.x === nextVelocity.x && m.velocity.y === nextVelocity.y)).toBe(
-      true
-    );
+    const vector = new BotBrain().computeNextMove(ctx, track)!;
+    const valid = getValidMoves(state.players[0], track, state.players, state.round);
+    expect(
+      valid.some((m) => m.velocity.x === vector.x && m.velocity.y === vector.y)
+    ).toBe(true);
+  });
+
+  it('pulls away from the grid rather than sitting still', () => {
+    const { envelope } = relay();
+    const ctx = parseRelayEnvelope(envelope, 'bot')!;
+    const vector = new BotBrain().computeNextMove(ctx, track)!;
+    expect(Math.abs(vector.x) + Math.abs(vector.y)).toBeGreaterThan(0);
+  });
+
+  it('ignores relays for a room it is not racing in', () => {
+    const { envelope } = relay();
+    expect(parseRelayEnvelope(envelope, 'someone-else')).toBeNull();
   });
 });

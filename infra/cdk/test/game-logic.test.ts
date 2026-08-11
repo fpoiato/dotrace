@@ -41,6 +41,16 @@ import {
   remapSessionStatsConnectionId,
   createInitialState,
   buildRaceStatDeltas,
+  BOT_ID_PREFIX,
+  BOT_NAMES,
+  PLAYER_COLORS,
+  botsOf,
+  createBotPlayer,
+  humansOf,
+  isBot,
+  isBotId,
+  lobbyRosterWithBots,
+  pickBotIdentity,
 } from '../../../shared/ws-types';
 import { TRACKS } from '../../../shared/tracks';
 import { buildRankKey, nicknameKey } from '../lambda/src/lib/leaderboard';
@@ -705,6 +715,116 @@ describe('lap splits and session ranking', () => {
       bestLapMs: 40_000,
       bestLapRounds: 9,
     });
+  });
+});
+
+describe('CPU racers', () => {
+  it('marks bots with a synthetic id that cannot be a real connection', () => {
+    const bot = createBotPlayer('Ayrton', 3, '#3B82F6', 'HARD', 'seed');
+    expect(bot.connectionId).toBe(`${BOT_ID_PREFIX}seed`);
+    expect(bot.isBot).toBe(true);
+    expect(bot.botSkill).toBe('HARD');
+    expect(bot.status).toBe('approved');
+    expect(bot.isHost).toBe(false);
+    expect(isBot(bot)).toBe(true);
+    expect(isBotId(bot.connectionId)).toBe(true);
+  });
+
+  it('recognises a bot from its id alone, as a relayed snapshot has it', () => {
+    // Older hosts may relay state without the isBot flag set.
+    expect(isBot({ connectionId: `${BOT_ID_PREFIX}x` })).toBe(true);
+    expect(isBot({ connectionId: 'abc123' })).toBe(false);
+  });
+
+  it('splits a roster into humans and bots', () => {
+    const ana = createLobbyPlayer('a', 'Ana', true, 0, '#EF4444');
+    const bot = createBotPlayer('Ayrton', 1, '#3B82F6');
+    expect(humansOf([ana, bot])).toEqual([ana]);
+    expect(botsOf([ana, bot])).toEqual([bot]);
+  });
+
+  it('hands out a free driver name and colour', () => {
+    const taken = [createLobbyPlayer('a', BOT_NAMES[0], true, 0, PLAYER_COLORS[0])];
+    const first = pickBotIdentity(taken);
+    expect(first.nickname).toBe(BOT_NAMES[1]);
+    expect(first.color).toBe(PLAYER_COLORS[1]);
+  });
+
+  it('keeps handing out identities once the whole grid is full', () => {
+    const taken = PLAYER_COLORS.map((color, i) =>
+      createLobbyPlayer(`p${i}`, BOT_NAMES[i], false, i, color)
+    );
+    const identity = pickBotIdentity(taken);
+    expect(identity.nickname).toBeTruthy();
+    expect(identity.color).toBeTruthy();
+  });
+
+  it('lines bots up behind the humans on the grid', () => {
+    const humans = [
+      createLobbyPlayer('a', 'Ana', true, 0, '#EF4444'),
+      createLobbyPlayer('b', 'Bob', false, 4, '#3B82F6'),
+    ];
+    const bots = [createBotPlayer('Ayrton', 99, '#22C55E'), createBotPlayer('Nelson', 99, '#EAB308')];
+    const roster = lobbyRosterWithBots(humans, bots);
+    expect(roster.map((p) => p.nickname)).toEqual(['Ana', 'Bob', 'Ayrton', 'Nelson']);
+    expect(roster.map((p) => p.joinOrder)).toEqual([0, 4, 5, 6]);
+  });
+
+  it('renumbers bots so a late joiner still starts ahead of them', () => {
+    const bots = [createBotPlayer('Ayrton', 1, '#22C55E')];
+    const alone = lobbyRosterWithBots(
+      [createLobbyPlayer('a', 'Ana', true, 0, '#EF4444')],
+      bots
+    );
+    expect(alone[1].joinOrder).toBe(1);
+
+    const joined = lobbyRosterWithBots(
+      [
+        createLobbyPlayer('a', 'Ana', true, 0, '#EF4444'),
+        createLobbyPlayer('b', 'Bob', false, 1, '#3B82F6'),
+      ],
+      bots
+    );
+    expect(joined.map((p) => p.nickname)).toEqual(['Ana', 'Bob', 'Ayrton']);
+    expect(joined[2].joinOrder).toBe(2);
+  });
+
+  it('leaves players still waiting for approval off the grid', () => {
+    const pending = createLobbyPlayer('b', 'Bob', false, 1, '#3B82F6');
+    pending.status = 'pending';
+    const roster = lobbyRosterWithBots(
+      [createLobbyPlayer('a', 'Ana', true, 0, '#EF4444'), pending],
+      [createBotPlayer('Ayrton', 9, '#22C55E')]
+    );
+    expect(roster.map((p) => p.nickname)).toEqual(['Ana', 'Ayrton']);
+  });
+
+  it('keeps bots out of the global nickname leaderboard', () => {
+    const ana = createLobbyPlayer('a', 'Ana', true, 0, '#EF4444');
+    ana.finishOrder = 2;
+    const bot = createBotPlayer('Ayrton', 1, '#3B82F6');
+    bot.finishOrder = 1;
+
+    const state = createInitialState([ana, bot], 'a');
+    state.players = [ana, bot];
+
+    const deltas = buildRaceStatDeltas(state);
+    expect(deltas.map((d) => d.nickname)).toEqual(['Ana']);
+  });
+
+  it('does count bots in the room\u2019s own session ranking', () => {
+    const ana = createLobbyPlayer('a', 'Ana', true, 0, '#EF4444');
+    ana.finishOrder = 2;
+    const bot = createBotPlayer('Ayrton', 1, '#3B82F6');
+    bot.finishOrder = 1;
+
+    const state = createInitialState([ana, bot], 'a');
+    state.players = [ana, bot];
+    updateSessionStats(state);
+
+    const ranking = buildSessionRanking(state);
+    expect(ranking[0]).toMatchObject({ nickname: 'Ayrton', wins: 1 });
+    expect(ranking[1]).toMatchObject({ nickname: 'Ana', wins: 0, podiums: 1 });
   });
 });
 

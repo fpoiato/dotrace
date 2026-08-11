@@ -10,6 +10,8 @@ export interface SessionData {
   trackId?: string;
   laps?: number;
   gameMode?: 'TURNS' | 'TIMED';
+  /** Difficulty last chosen for CPU racers. */
+  botSkill?: 'EASY' | 'MEDIUM' | 'HARD';
 }
 
 const KEY = 'dotrace-session';

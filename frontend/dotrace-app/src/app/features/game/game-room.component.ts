@@ -12,6 +12,7 @@ import {
   formatRaceTime,
   getTileAt,
   getValidMoves,
+  isBot,
   isGearLimited,
   isGrassShortcut,
   landingPosition,
@@ -233,6 +234,16 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   currentPlayerName(): string {
     return this.game.currentPlayer()?.nickname ?? '…';
+  }
+
+  /** Whose turn it is, when that is a CPU racer rather than a human. */
+  currentPlayerIsBot(): boolean {
+    const current = this.game.currentPlayer();
+    return !!current && isBot(current);
+  }
+
+  isBotId(connectionId: string): boolean {
+    return isBot({ connectionId });
   }
 
   myPlayer(state: GameState): Player | undefined {

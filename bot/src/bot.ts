@@ -7,7 +7,7 @@
  *   npm run dev -- ABCDE AgentBot
  */
 import { getTrackById } from '../../shared/tracks';
-import { GameState, SubmitMoveAction, WsEnvelope } from '../../shared/ws-types';
+import { GameState, SubmitMoveAction, Vector2D, WsEnvelope } from '../../shared/ws-types';
 import { BotBrain } from './bot-brain';
 import { loadConfig } from './config';
 import { HttpClient } from './http-client';
@@ -21,17 +21,7 @@ interface SubmitMoveOutbound {
   payload: SubmitMoveAction;
 }
 
-function buildMoveEnvelope(
-  roomCode: string,
-  acceleration: { dx: number; dy: number },
-  currentVelocity: { x: number; y: number }
-): SubmitMoveOutbound {
-  // Server validates the new velocity vector, not the raw acceleration delta.
-  const vector = {
-    x: currentVelocity.x + acceleration.dx,
-    y: currentVelocity.y + acceleration.dy,
-  };
-
+function buildMoveEnvelope(roomCode: string, vector: Vector2D): SubmitMoveOutbound {
   return {
     action: 'FORWARD_TO_HOST',
     roomCode,
@@ -153,26 +143,22 @@ class AgentiveClient {
     const trackDef = this.resolveTrack(envelope);
     if (!trackDef) return;
 
-    const ctx = parseRelayEnvelope(
-      envelope,
-      this.connectionId,
-      trackDef.width,
-      trackDef.height
-    );
+    const ctx = parseRelayEnvelope(envelope, this.connectionId);
     if (!ctx) return;
 
     this.lastGameState = ctx.gameState;
 
     if (!ctx.isMyTurn || this.moveInFlight) return;
 
-    const acceleration = this.brain.computeNextMove(ctx.car, ctx.track, trackDef);
-    const outbound = buildMoveEnvelope(this.roomCode, acceleration, ctx.car.velocity);
+    const vector = this.brain.computeNextMove(ctx, trackDef);
+    if (!vector) return;
+    const outbound = buildMoveEnvelope(this.roomCode, vector);
     const connectionId = this.ws.getConnectionId();
     if (!connectionId) return;
 
     console.log(
-      `[MOVE] relay=${ctx.relayType} accel=(${acceleration.dx},${acceleration.dy}) ` +
-        `→ velocity=(${outbound.payload.vector.x},${outbound.payload.vector.y})`
+      `[MOVE] relay=${ctx.relayType} lap=${ctx.myPlayer.lap} ` +
+        `velocity=(${vector.x},${vector.y})`
     );
 
     this.moveInFlight = true;

@@ -60,5 +60,6 @@ export class HowToPlayComponent implements OnInit, OnDestroy {
     { n: 5, icon: '🌿' },
     { n: 6, icon: '📳' },
     { n: 7, icon: '🏆' },
+    { n: 8, icon: '🤖' },
   ];
 }

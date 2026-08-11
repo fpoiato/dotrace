@@ -4,7 +4,14 @@ import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode } from '../../core/models/ws-types';
+import {
+  BOT_SKILLS,
+  BotSkill,
+  GAME_MODES,
+  GameMode,
+  MAX_BOTS,
+  Player,
+} from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -31,8 +38,12 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedTrackId = '';
   selectedLaps = 1;
   selectedGameMode: GameMode = 'TURNS';
+  selectedBotSkill: BotSkill = 'MEDIUM';
+  bots: Player[] = [];
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
+  readonly botSkills = BOT_SKILLS;
+  readonly maxBots = MAX_BOTS;
   readonly practiceHintKey = 'lobby.practiceHint';
   copied = false;
   showHowTo = false;
@@ -54,6 +65,8 @@ export class LobbyComponent implements OnInit, OnDestroy {
         if (state?.trackId) this.selectedTrackId = state.trackId;
         if (state?.totalLaps) this.selectedLaps = state.totalLaps;
         if (state?.gameMode) this.selectedGameMode = state.gameMode;
+        this.bots = this.game.bots;
+        this.selectedBotSkill = this.game.botSkill;
         if (state && state.phase !== 'LOBBY') {
           void this.router.navigate(['/game']);
         }
@@ -75,12 +88,30 @@ export class LobbyComponent implements OnInit, OnDestroy {
     return getTrackById(trackId)?.nameKey ?? '';
   }
 
+  /** Alone on the grid: no humans to wait for and no CPU field either. */
   isPractice(playerCount: number): boolean {
-    return playerCount <= 1;
+    return playerCount <= 1 && this.bots.length === 0;
   }
 
   startLabelKey(playerCount: number): string {
     return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
+  }
+
+  canAddBot(): boolean {
+    return this.game.canAddBot();
+  }
+
+  addBot(): void {
+    this.game.addBot(this.selectedBotSkill);
+  }
+
+  removeBot(connectionId: string): void {
+    this.game.removeBot(connectionId);
+  }
+
+  selectBotSkill(skill: BotSkill): void {
+    this.selectedBotSkill = skill;
+    this.game.setBotSkill(skill);
   }
 
   approve(id: string): void {

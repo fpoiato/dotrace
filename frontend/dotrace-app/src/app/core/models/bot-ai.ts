@@ -36,9 +36,11 @@ import {
   getValidMoves,
   isGearLimited,
   isGrassShortcut,
+  isTimedMode,
   isValidGearChange,
   landingPosition,
   posKey,
+  remainingStopMs,
   segmentCrossesFinish,
   segmentEntersRect,
   zeroVector,
@@ -130,6 +132,32 @@ export function botProfile(skill: BotSkill | undefined): BotProfile {
 /** How long the host should wait before playing this bot's move. */
 export function botThinkMs(skill: BotSkill | undefined): number {
   return botProfile(skill).thinkMs;
+}
+
+/** Grace period after a stop penalty expires before a bot moves again. */
+const STOP_PENALTY_GRACE_MS = 150;
+
+/**
+ * How long the host should wait before playing this bot's move, or null when
+ * the bot is not due to move at all. The pause is what makes a CPU move read as
+ * a deliberate move rather than a teleport.
+ */
+export function botTurnDelayMs(
+  state: GameState,
+  bot: Player,
+  now = Date.now()
+): number | null {
+  if (state.phase !== 'GAME_ROUND') return null;
+  if (bot.finishOrder !== undefined) return null;
+
+  const think = botThinkMs(bot.botSkill);
+  if (isTimedMode(state)) {
+    // Everyone races at once, so the only thing holding a bot back is a
+    // grass-cut stop penalty. Wait it out rather than giving up on the bot:
+    // nothing else will emit game state while the penalty ticks down.
+    return Math.max(think, remainingStopMs(bot, now) + STOP_PENALTY_GRACE_MS);
+  }
+  return state.turnOrder[state.currentTurnIndex] === bot.connectionId ? think : null;
 }
 
 // Keyed on the track object rather than its id: tracks are module-level

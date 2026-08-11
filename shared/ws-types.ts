@@ -424,6 +424,21 @@ export function createBotPlayer(
   return bot;
 }
 
+/**
+ * The lobby roster: everyone the server has approved, in join order, with the
+ * host's CPU racers lined up behind them.
+ *
+ * Join order decides the starting grid, and bots are renumbered every time so a
+ * human approved after the bots were added still lines up ahead of them.
+ */
+export function lobbyRosterWithBots(humans: Player[], bots: Player[]): Player[] {
+  const field = humans
+    .filter((p) => p.status === 'approved')
+    .sort((a, b) => a.joinOrder - b.joinOrder);
+  const behind = field.reduce((max, p) => Math.max(max, p.joinOrder), -1) + 1;
+  return [...field, ...bots.map((b, i) => ({ ...b, joinOrder: behind + i }))];
+}
+
 /** First driver name and palette colour not already taken in the room. */
 export function pickBotIdentity(
   taken: Player[]

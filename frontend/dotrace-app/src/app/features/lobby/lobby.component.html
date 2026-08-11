@@ -51,6 +51,39 @@
         }
       </div>
 
+      <h2 class="mb-1 text-sm font-medium text-slate-400">{{ 'lobby.bots' | translate }}</h2>
+      <p class="mb-2 text-xs text-slate-500">{{ 'lobby.botsHint' | translate }}</p>
+      <div class="mb-3 grid grid-cols-3 gap-3">
+        @for (skill of botSkills; track skill) {
+          <button
+            type="button"
+            (click)="selectBotSkill(skill)"
+            class="min-h-12 rounded-xl border-2 px-2 text-sm font-semibold transition"
+            [class]="selectedBotSkill === skill ? 'border-sky-500 bg-sky-500/20' : 'border-slate-600'"
+          >
+            {{ 'lobby.botSkill.' + skill | translate }}
+          </button>
+        }
+      </div>
+      <div class="mb-6 flex items-center gap-2">
+        <button
+          type="button"
+          (click)="addBot()"
+          [disabled]="!canAddBot()"
+          class="min-h-12 flex-1 rounded-xl bg-sky-700 text-sm font-semibold disabled:opacity-40"
+        >
+          {{ 'lobby.addBot' | translate }}
+        </button>
+        <button
+          type="button"
+          (click)="removeBot(bots[bots.length - 1].connectionId)"
+          [disabled]="bots.length === 0"
+          class="min-h-12 flex-1 rounded-xl bg-slate-700 text-sm font-semibold disabled:opacity-40"
+        >
+          {{ 'lobby.removeBot' | translate }}
+        </button>
+      </div>
+
       <div class="mb-4 flex gap-2">
         <button
           type="button"
@@ -88,6 +121,25 @@
           <span class="flex-1 font-medium">{{ p.nickname }}</span>
           @if (p.isHost) {
             <span class="text-xs text-orange-400">{{ 'common.host' | translate }}</span>
+          }
+        </li>
+      }
+      @for (b of bots; track b.connectionId) {
+        <li class="flex min-h-12 items-center gap-3 rounded-xl bg-slate-800 px-4">
+          <span class="h-4 w-4 rounded-full" [style.background]="b.color"></span>
+          <span class="flex-1 font-medium">{{ b.nickname }}</span>
+          <span class="rounded-full bg-sky-900 px-2 py-0.5 text-xs font-semibold text-sky-300">
+            {{ 'common.cpu' | translate }} · {{ 'lobby.botSkill.' + b.botSkill | translate }}
+          </span>
+          @if (room.isHost) {
+            <button
+              type="button"
+              (click)="removeBot(b.connectionId)"
+              [attr.aria-label]="'lobby.removeBot' | translate"
+              class="min-h-9 min-w-9 rounded-lg bg-slate-700 text-sm text-slate-300"
+            >
+              ✕
+            </button>
           }
         </li>
       }
