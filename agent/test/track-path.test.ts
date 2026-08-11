@@ -4,6 +4,7 @@ import { HeuristicBrain } from '../src/brain';
 import {
   asphaltLookahead,
   buildDistanceField,
+  describeTrackSituation,
   isAsphalt,
   pathDistance,
   segmentGoals,
@@ -32,6 +33,29 @@ describe('track path field', () => {
     const intoCorner = asphaltLookahead(track, { x: 70, y: 48 }, { x: 3, y: 0 });
     expect(straight).toBeGreaterThanOrEqual(4);
     expect(intoCorner).toBeLessThan(straight);
+  });
+
+  it('describes where the car is on the directed racing line', () => {
+    const onStraight = describeTrackSituation(
+      track,
+      { x: 50, y: 48 },
+      { x: 2, y: 0 },
+      false
+    );
+    expect(onStraight.trackId).toBe('monza');
+    expect(onStraight.alignment).toBe('with_traffic');
+    expect(onStraight.lapProgressPct).toBeGreaterThan(0);
+    expect(onStraight.cellsToGoal).toBeGreaterThan(10);
+    expect(onStraight.ahead.length).toBeGreaterThan(0);
+    expect(onStraight.suggestedMaxGear).toBeGreaterThanOrEqual(1);
+
+    const wrongWay = describeTrackSituation(
+      track,
+      { x: 50, y: 48 },
+      { x: -2, y: 0 },
+      false
+    );
+    expect(wrongWay.alignment).toBe('against');
   });
 });
 

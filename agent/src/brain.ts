@@ -163,7 +163,17 @@ export class HeuristicBrain implements MoveBrain {
 // --------------------------------------------------------------- bedrock
 
 const SYSTEM_PROMPT = `You are a race driver in Vector Rally, a grid-based racing game with momentum.
-Each turn you pick ONE move from a numbered list of legal moves. Rules of thumb:
+Each turn you pick ONE move from a numbered list of legal moves.
+
+You receive "situation" describing WHERE you are on the circuit:
+- lapProgressPct: how far along the directed racing line this lap (0–100).
+- raceHeading: the direction the racing line wants you to go RIGHT NOW.
+- travelHeading / alignment: your velocity vs raceHeading. Prefer "with_traffic"; never choose a move that stays "against" when a with_traffic option exists.
+- cellsToCorner / ahead[].turn: upcoming bends — brake before hairpin/left/right when cellsToCorner is small; accelerate on long straights (suggestedMaxGear).
+- cellsToGoal: remaining racing-line distance to checkpoint or finish.
+- lateralOffset: how far you are from the ideal line (keep it small).
+
+Rules of thumb:
 - NEVER pick velocity {"x":0,"y":0} unless it is the ONLY legal move — standing still wastes the turn.
 - Moves flagged "grassShortcut" incur heavy penalties: avoid them unless every move has one.
 - Before "passedCheckpoint" is true you must route through the checkpoint zone; prefer moves with "entersCheckpoint".
@@ -171,7 +181,8 @@ Each turn you pick ONE move from a numbered list of legal moves. Rules of thumb:
 - Prefer higher "pathProgress" and lower "pathDistance" (asphalt corridor toward the goal) — this is the racing line.
 - Never pick negative pathProgress when a positive option exists (that is driving the wrong way).
 - "clearAhead" is how many asphalt cells you can keep flying at the new velocity; accelerate when it is large, brake when it is small or "overspeed" is true.
-- Lower "distanceToGoal" is a weak hint only; trust pathDistance over it.
+- Aim gear near situation.suggestedMaxGear when alignment is with_traffic.
+- Lower "distanceToGoal" is a weak hint only; trust pathDistance and situation over it.
 Respond with ONLY a JSON object: {"moveIndex": <number>} — no prose.`;
 
 /** Narrow client surface so tests can stub Bedrock without the real SDK. */
@@ -313,7 +324,22 @@ export class BedrockBrain implements MoveBrain {
 
   private buildPrompt(summary: BoardSummary, moves: AnnotatedMove[]): string {
     return JSON.stringify({
-      race: summary,
+      race: {
+        round: summary.round,
+        lap: summary.lap,
+        totalLaps: summary.totalLaps,
+        position: summary.position,
+        velocity: summary.velocity,
+        gear: summary.gear,
+        passedCheckpoint: summary.passedCheckpoint,
+        gearLimited: summary.gearLimited,
+        goal: summary.goal,
+        goalPoint: summary.goalPoint,
+        situation: summary.situation,
+        opponents: summary.opponents,
+      },
+      // Hint: best pathProgress among legal moves (model should meet or beat this).
+      bestPathProgress: moves.reduce((m, x) => Math.max(m, x.pathProgress), Number.NEGATIVE_INFINITY),
       legalMoves: moves.map((m) => ({
         moveIndex: m.index,
         velocity: m.velocity,
