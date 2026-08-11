@@ -43,7 +43,7 @@ import {
   buildRaceStatDeltas,
 } from '../../../shared/ws-types';
 import { TRACKS } from '../../../shared/tracks';
-import { buildRankKey, nicknameKey } from '../lambda/src/lib/leaderboard';
+import { buildRankKey, compareLeaderboardEntries, nicknameKey } from '../lambda/src/lib/leaderboard';
 
 function makeTrack(): TrackDefinition {
   // 6x4: all track except a grass border on the right column.
@@ -709,14 +709,46 @@ describe('global leaderboard rank keys', () => {
   });
 
   it('orders higher wins before lower wins (ascending rankKey)', () => {
-    const high = buildRankKey(5, 1, 'ana');
-    const low = buildRankKey(2, 8, 'bob');
+    const high = buildRankKey(5, 30_000, 8, 'ana');
+    const low = buildRankKey(2, 10_000, 3, 'bob');
     expect(high < low).toBe(true);
   });
 
-  it('breaks ties by podiums then nickname', () => {
-    const morePodiums = buildRankKey(3, 5, 'zoe');
-    const fewerPodiums = buildRankKey(3, 2, 'amy');
-    expect(morePodiums < fewerPodiums).toBe(true);
+  it('with equal wins, prefers lower best-lap time', () => {
+    const faster = buildRankKey(3, 20_000, 9, 'zoe');
+    const slower = buildRankKey(3, 40_000, 4, 'amy');
+    expect(faster < slower).toBe(true);
+  });
+
+  it('with equal wins and time, prefers fewer rounds', () => {
+    const fewer = buildRankKey(3, 20_000, 4, 'zoe');
+    const more = buildRankKey(3, 20_000, 8, 'amy');
+    expect(fewer < more).toBe(true);
+  });
+
+  it('missing bests sort after real bests for the same wins', () => {
+    const withBest = buildRankKey(2, 50_000, 10, 'ana');
+    const without = buildRankKey(2, undefined, undefined, 'bob');
+    expect(withBest < without).toBe(true);
+  });
+});
+
+describe('compareLeaderboardEntries', () => {
+  it('sorts by wins, then best lap time, then rounds, then name', () => {
+    const rows = [
+      { nickname: 'slow-champ', wins: 5, bestLapMs: 90_000, bestLapRounds: 20 },
+      { nickname: 'fast-rookie', wins: 1, bestLapMs: 15_000, bestLapRounds: 4 },
+      { nickname: 'same-wins-slower', wins: 5, bestLapMs: 60_000, bestLapRounds: 10 },
+      { nickname: 'same-wins-faster', wins: 5, bestLapMs: 40_000, bestLapRounds: 12 },
+      { nickname: 'same-time-fewer-r', wins: 5, bestLapMs: 40_000, bestLapRounds: 8 },
+    ];
+    rows.sort(compareLeaderboardEntries);
+    expect(rows.map((r) => r.nickname)).toEqual([
+      'same-time-fewer-r', // 5 wins, 40s, 8r
+      'same-wins-faster', // 5 wins, 40s, 12r
+      'same-wins-slower', // 5 wins, 60s
+      'slow-champ', // 5 wins, 90s
+      'fast-rookie', // 1 win
+    ]);
   });
 });
