@@ -205,6 +205,8 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     startLine: spec.startLine,
     arrows: spec.arrows,
     checkpoint: spec.checkpoint,
+    // The AI racing line: race-direction polyline (closed loop).
+    centerline: spec.centerline.map((p) => ({ ...p })),
   };
 }
 

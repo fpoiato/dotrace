@@ -41,6 +41,8 @@ export interface TrackDefinition {
    * "finishing" by reversing over the line on turn one.
    */
   checkpoint?: CheckpointRect;
+  /** Ordered race-direction polyline the AI follows (closed loop). */
+  centerline?: Vector2D[];
 }
 
 export interface Player {
@@ -50,6 +52,11 @@ export interface Player {
   isHost: boolean;
   joinOrder: number;
   status: PlayerStatus;
+  /**
+   * Computer-controlled driver. Bots exist only inside the host's GameState
+   * (no WebSocket connection, no room membership) and are driven by the host.
+   */
+  isBot?: boolean;
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
@@ -159,6 +166,12 @@ export interface GameState {
    * Updated once when a race transitions to GAME_OVER; preserved on return-to-lobby.
    */
   sessionStats?: SessionPlayerStats[];
+  /**
+   * How many computer-controlled drivers the host added in the lobby.
+   * Bots are materialized into `players` when the race starts; in LOBBY this
+   * is the negotiated count so guests can see it. Persisted across rematches.
+   */
+  botCount?: number;
 }
 
 /** Per-player snapshot for telemetry and live standings. */
@@ -291,7 +304,7 @@ export interface SelectTrackAction {
 export type PlayerGameAction = SubmitMoveAction | SelectTrackAction;
 
 export const MAX_PLAYERS = 12;
-// A lone host may start a race as solo practice mode.
+// A lone host may start a race: solo practice (no bots) or a race vs bots.
 export const MIN_PLAYERS = 1;
 export const LAP_OPTIONS = [1, 2, 3] as const;
 export const ROOM_CODE_LENGTH = 5;
@@ -344,6 +357,24 @@ export function createLobbyPlayer(
     isOffTrack: false,
     trail: [],
     lap: 1,
+  };
+}
+
+/** Connection-id prefix for computer-controlled drivers. */
+export const BOT_PLAYER_PREFIX = 'bot-';
+
+export function isBotId(connectionId: string): boolean {
+  return connectionId.startsWith(BOT_PLAYER_PREFIX);
+}
+
+/**
+ * Virtual driver driven by the host's browser. Stable ids (bot-1, bot-2, …)
+ * keep session stats meaningful across rematches in the same room.
+ */
+export function createBotPlayer(index: number, joinOrder: number, color: string): Player {
+  return {
+    ...createLobbyPlayer(`${BOT_PLAYER_PREFIX}${index}`, `Bot ${index}`, false, joinOrder, color),
+    isBot: true,
   };
 }
 
@@ -868,10 +899,11 @@ export interface Top10Entry {
 
 /**
  * Build host-submitted per-race deltas from the finished GameState.
- * One entry per player who took part; counters are 0/1 for this race only.
+ * One entry per human player who took part; counters are 0/1 for this race
+ * only. Bots are excluded so the global leaderboard stays human-only.
  */
 export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
-  return state.players.map((p) => {
+  return state.players.filter((p) => !p.isBot).map((p) => {
     const delta: RaceStatDelta = {
       nickname: p.nickname,
       races: 1,
