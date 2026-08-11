@@ -30,9 +30,14 @@ export async function raceLoop(
       return;
     }
 
+    // Let the GRID_ORDER_DONE / TURN_ADVANCED relay settle so we plan from the
+    // host's placed positions, not a stale lobby snapshot.
+    await sleep(150);
+
     const state = session.getState();
     const player = session.getMyPlayer();
     if (!state || !player) continue;
+    if (!session.isMyTurn()) continue;
 
     const track = getTrackById(state.trackId);
     if (!track) {
@@ -47,6 +52,7 @@ export async function raceLoop(
 
     console.log(
       `[MOVE] round=${state.round} lap=${player.lap}/${state.totalLaps} ` +
+        `pos=(${player.position.x},${player.position.y}) ` +
         `velocity=(${chosen.velocity.x},${chosen.velocity.y}) ` +
         `landing=(${chosen.landing.x},${chosen.landing.y}) goal=${summary.goal}`
     );
@@ -54,12 +60,14 @@ export async function raceLoop(
     if (moveDelayMs > 0) await sleep(moveDelayMs);
     try {
       await session.submitMove(chosen.velocity);
+      // Do not re-enter waitForTurn while the cached state still says it is
+      // our turn — that caused a second SUBMIT_MOVE (often standstill) before
+      // the host relayed TURN_ADVANCED.
+      await session.waitUntilNotMyTurn();
     } catch (err) {
       console.warn('[MOVE FAILED]', err instanceof Error ? err.message : err);
       await sleep(1000);
     }
-    // Yield until the host relays the applied move (turn passes to the next player).
-    await sleep(250);
   }
 }
 

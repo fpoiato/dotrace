@@ -185,6 +185,22 @@ export class GameSession {
     ).then(() => this.lastState?.phase !== 'GAME_OVER');
   }
 
+  /**
+   * Block until the host has applied our move and advanced the turn (or the
+   * race ended). Prevents the race loop from double-submitting while the
+   * cached state still says isMyTurn.
+   */
+  waitUntilNotMyTurn(timeoutMs = 30_000): Promise<void> {
+    return this.waitFor(
+      () => {
+        if (this.lastState?.phase === 'GAME_OVER') return true;
+        return this.isMyTurn() ? false : true;
+      },
+      timeoutMs,
+      'turn end'
+    );
+  }
+
   private waitFor(
     check: () => boolean | Error,
     timeoutMs: number,

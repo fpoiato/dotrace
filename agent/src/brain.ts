@@ -22,14 +22,21 @@ export interface MoveBrain {
 /**
  * Deterministic racer: never cut grass, chase the checkpoint before the
  * finish, otherwise minimize distance to the goal at the highest safe gear.
+ * Prefer moving over standing still when any non-zero legal move exists.
  */
 export class HeuristicBrain implements MoveBrain {
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
+    const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
     let best = moves[0];
     let bestScore = Number.NEGATIVE_INFINITY;
 
     for (const move of moves) {
       let score = 0;
+
+      // Standing still is legal but wastes the turn — only keep it as last resort.
+      if (hasMotion && move.velocity.x === 0 && move.velocity.y === 0) {
+        score -= 50_000;
+      }
 
       // Legal-but-costly moves: grass shortcuts stop the car and cap the gear.
       if (move.grassShortcut) score -= 10_000;
@@ -56,6 +63,7 @@ export class HeuristicBrain implements MoveBrain {
 
 const SYSTEM_PROMPT = `You are a race driver in Vector Rally, a grid-based racing game with momentum.
 Each turn you pick ONE move from a numbered list of legal moves. Rules of thumb:
+- NEVER pick velocity {"x":0,"y":0} unless it is the ONLY legal move — standing still wastes the turn.
 - Moves flagged "grassShortcut" incur heavy penalties: avoid them unless every move has one.
 - Before "passedCheckpoint" is true you must route through the checkpoint zone; prefer moves with "entersCheckpoint".
 - After the checkpoint, head for the finish; moves with "crossesFinish" complete the lap.
@@ -114,7 +122,16 @@ export class BedrockBrain implements MoveBrain {
       const index = this.parseMoveIndex(text);
 
       if (index !== null && index >= 0 && index < moves.length) {
-        return moves[index];
+        const chosen = moves[index];
+        // Nova Micro often "plays safe" with (0,0). That is legal but looks
+        // like the pilot skipped — fall back when any moving option exists.
+        const stationary = chosen.velocity.x === 0 && chosen.velocity.y === 0;
+        const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
+        if (stationary && hasMotion) {
+          console.warn('[BRAIN] Model picked standstill — using heuristic');
+          return this.fallback.pickMove(summary, moves);
+        }
+        return chosen;
       }
       console.warn(`[BRAIN] Model returned invalid move index (${text.slice(0, 80)}) — using heuristic`);
     } catch (err) {
