@@ -69,7 +69,9 @@ export async function raceLoop(
       `[MOVE] round=${state.round} lap=${player.lap}/${state.totalLaps} ` +
         `pos=(${player.position.x},${player.position.y}) ` +
         `velocity=(${chosen.velocity.x},${chosen.velocity.y}) ` +
-        `landing=(${chosen.landing.x},${chosen.landing.y}) goal=${summary.goal}`
+        `landing=(${chosen.landing.x},${chosen.landing.y}) goal=${summary.goal} ` +
+        `align=${summary.situation.alignment} progress=${summary.situation.lapProgressPct}% ` +
+        `cornerIn=${summary.situation.cellsToCorner ?? '∞'}`
     );
 
     if (moveDelayMs > 0) await sleep(moveDelayMs);

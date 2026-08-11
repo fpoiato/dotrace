@@ -97,6 +97,8 @@ describe('goalPoint', () => {
 describe('buildBoardSummary', () => {
   it('summarizes my car and opponents without leaking my own record', () => {
     const { state, me } = raceState();
+    me.velocity = { x: 2, y: 0 };
+    me.position = { x: 50, y: 48 };
     const summary = buildBoardSummary(me, state, track);
 
     expect(summary.position).toEqual(me.position);
@@ -105,6 +107,9 @@ describe('buildBoardSummary', () => {
     expect(summary.goal).toBe('checkpoint');
     expect(summary.opponents).toHaveLength(1);
     expect(summary.opponents[0].nickname).toBe('Host');
+    expect(summary.situation.trackId).toBe('monza');
+    expect(summary.situation.alignment).toBe('with_traffic');
+    expect(summary.situation.ahead.length).toBeGreaterThan(0);
   });
 });
 

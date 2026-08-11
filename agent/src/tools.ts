@@ -19,7 +19,15 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
 } from '../../shared/ws-types';
-import { annotatePath, segmentGoals, sharedPathCache } from './track-path';
+import {
+  annotatePath,
+  describeTrackSituation,
+  segmentGoals,
+  sharedPathCache,
+  type TrackSituation,
+} from './track-path';
+
+export type { TrackSituation };
 
 export interface AnnotatedMove {
   /** Stable index the brain answers with. */
@@ -62,6 +70,8 @@ export interface BoardSummary {
   /** 'checkpoint' until the checkpoint is passed, then 'finish'. */
   goal: 'checkpoint' | 'finish';
   goalPoint: Vector2D;
+  /** Where we are on the directed circuit (for LLM / logs). */
+  situation: TrackSituation;
   opponents: {
     nickname: string;
     position: Vector2D;
@@ -163,6 +173,12 @@ export function buildBoardSummary(
     gearLimited: isGearLimited(player, state.round),
     goal,
     goalPoint: point,
+    situation: describeTrackSituation(
+      track,
+      player.position,
+      player.velocity,
+      player.passedCheckpoint ?? false
+    ),
     opponents: state.players
       .filter((p) => p.connectionId !== player.connectionId)
       .map((p) => ({
