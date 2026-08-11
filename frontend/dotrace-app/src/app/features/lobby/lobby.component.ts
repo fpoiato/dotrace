@@ -41,8 +41,10 @@ export class LobbyComponent implements OnInit, OnDestroy {
   aiError = false;
   private readonly subs: Subscription[] = [];
 
-  /** Racing-flavored names for AI pilots, picked in order of availability. */
-  private readonly aiNames = ['AI Nova', 'AI Turbo', 'AI Bolt', 'AI Vega', 'AI Comet', 'AI Dash'];
+  /** Names for heuristic bots (local planner). */
+  private readonly botNames = ['Bot Alfa', 'Bot Turbo', 'Bot Apex', 'Bot Drift', 'Bot Nitro', 'Bot Pulse'];
+  /** Names for Bedrock IA pilots. */
+  private readonly iaNames = ['IA Nova', 'IA Micro', 'IA Vega', 'IA Comet', 'IA Bolt', 'IA Dash'];
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -97,16 +99,28 @@ export class LobbyComponent implements OnInit, OnDestroy {
     return players.length < this.maxPlayers;
   }
 
-  async addAiPilot(players: Player[]): Promise<void> {
+  async addBotPilot(players: Player[]): Promise<void> {
+    await this.spawnPilot(players, 'heuristic', this.botNames);
+  }
+
+  async addIaPilot(players: Player[]): Promise<void> {
+    await this.spawnPilot(players, 'bedrock', this.iaNames);
+  }
+
+  private async spawnPilot(
+    players: Player[],
+    brain: 'bedrock' | 'heuristic',
+    names: string[]
+  ): Promise<void> {
     if (this.aiSpawning) return;
     const taken = new Set(players.map((p) => p.nickname.toLowerCase()));
-    const nickname = this.aiNames.find((n) => !taken.has(n.toLowerCase()));
+    const nickname = names.find((n) => !taken.has(n.toLowerCase()));
     if (!nickname) return;
 
     this.aiSpawning = true;
     this.aiError = false;
     try {
-      await this.room.spawnAiPlayer(nickname);
+      await this.room.spawnAiPlayer(nickname, brain);
       // The AI joins and is auto-approved server-side; roster updates arrive
       // via the PLAYER_APPROVED broadcast. Keep the button locked briefly so
       // a double tap does not spawn two pilots with the same name.

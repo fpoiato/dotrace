@@ -7,9 +7,8 @@
  * (timeout / crash) the WebSocket closes and the normal disconnect flow
  * removes the player from the race.
  *
- * Env: WS_URL, API_URL, BEDROCK_MODEL_ID, MOVE_DELAY_MS, BRAIN (defaults to
- * 'bedrock' — Nova Micro with track-aware heuristic fallback; set 'heuristic'
- * to skip the LLM).
+ * Env: WS_URL, API_URL, BEDROCK_MODEL_ID, MOVE_DELAY_MS, BRAIN (fallback when
+ * the spawn payload omits `brain`). Host chooses per pilot: bedrock | heuristic.
  */
 import { raceLoop } from '../../../../agent/src/agent';
 import { BedrockBrain, HeuristicBrain, MoveBrain } from '../../../../agent/src/brain';
@@ -24,15 +23,17 @@ export interface SpawnAiPlayerEvent {
 }
 
 function buildBrain(event: SpawnAiPlayerEvent): MoveBrain {
-  const mode = event.brain ?? process.env.BRAIN ?? 'bedrock';
-  if (mode === 'heuristic') {
-    return new HeuristicBrain();
+  const mode = event.brain ?? process.env.BRAIN ?? 'heuristic';
+  if (mode === 'bedrock') {
+    console.log(`[AI] brain=bedrock nickname=${event.nickname}`);
+    return new BedrockBrain({
+      modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
+      region: process.env.AWS_REGION ?? 'us-east-1',
+      fallbackSeed: event.nickname,
+    });
   }
-  // Falls back to the track-aware heuristic on any model failure.
-  return new BedrockBrain({
-    modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
-    region: process.env.AWS_REGION ?? 'us-east-1',
-  });
+  console.log(`[AI] brain=heuristic nickname=${event.nickname}`);
+  return new HeuristicBrain(event.nickname);
 }
 
 export const handler = async (event: SpawnAiPlayerEvent): Promise<void> => {
@@ -52,11 +53,13 @@ export const handler = async (event: SpawnAiPlayerEvent): Promise<void> => {
     event.nickname
   );
 
-  console.log(`[AI] Joining room ${event.roomCode} as ${event.nickname}`);
+  console.log(
+    `[AI] Joining room ${event.roomCode} as ${event.nickname} brain=${event.brain ?? process.env.BRAIN ?? 'heuristic'}`
+  );
   try {
     await session.join();
     await session.waitForApproval(90_000);
-    console.log('[AI] Approved — racing');
+    console.log('[AI] Approved — waiting for race / racing');
     await raceLoop(session, buildBrain(event), Number(process.env.MOVE_DELAY_MS ?? 600));
     console.log('[AI] Race finished');
   } finally {

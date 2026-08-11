@@ -19,22 +19,65 @@ export interface MoveBrain {
 
 // ------------------------------------------------------------- heuristic
 
+/** Per-pilot driving style so two bots on adjacent grid slots diverge. */
+export interface PilotStyle {
+  /** Display / seed label. */
+  seed: string;
+  /** Scales acceleration bonuses (higher = pushes gear harder). */
+  aggression: number;
+  /** Scales braking / overspeed penalties (higher = lifts earlier). */
+  caution: number;
+  /** Soft ±1 nudge on target gear. */
+  gearBias: number;
+  /** Deterministic salt for near-tie breakers. */
+  salt: number;
+}
+
+/** Stable style derived from nickname (or any seed string). */
+export function styleFromSeed(seed: string): PilotStyle {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const u = (shift: number) => ((h >>> shift) & 255) / 255;
+  return {
+    seed,
+    aggression: 0.7 + u(0) * 0.7,
+    caution: 0.7 + u(8) * 0.7,
+    gearBias: Math.floor(u(16) * 3) - 1,
+    salt: (h >>> 0) % 997,
+  };
+}
+
 /**
  * Track-aware racer:
- * - Follow the asphalt corridor via BFS pathDistance / pathProgress
+ * - Follow the asphalt corridor via directed pathDistance / pathProgress
  * - Accelerate when clearAhead is long and under a soft target speed
  * - Brake when overspeed or the runway ahead is short
  * - Never prefer grass shortcuts when a clean move exists
+ * - Optional PilotStyle so multiple bots don't drive as clones
  */
 export class HeuristicBrain implements MoveBrain {
+  private readonly style: PilotStyle;
+
+  constructor(styleOrSeed?: PilotStyle | string) {
+    if (typeof styleOrSeed === 'string') {
+      this.style = styleFromSeed(styleOrSeed);
+    } else {
+      this.style = styleOrSeed ?? styleFromSeed('default');
+    }
+  }
+
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
     const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
     const currentGear = summary.gear;
     const bestClear = moves.reduce((max, m) => Math.max(max, m.clearAhead), 0);
+    const { aggression, caution, gearBias, salt } = this.style;
     // Soft target: leave buffer vs runway; sqrt keeps gear modest into mid corners.
     const targetGear = Math.max(
       1,
-      Math.min(6, Math.floor(Math.sqrt(Math.max(1, bestClear * 1.6))))
+      Math.min(6, Math.floor(Math.sqrt(Math.max(1, bestClear * 1.6))) + gearBias)
     );
 
     let best = moves[0];
@@ -64,10 +107,10 @@ export class HeuristicBrain implements MoveBrain {
       // Legacy Chebyshev distance as a weak tie-break only.
       score -= move.distanceToGoal;
 
-      if (move.overspeed) score -= 600;
-      if (move.clearAhead === 0 && move.gear > 0) score -= 250;
-      if (move.clearAhead <= 1 && move.gear >= 3) score -= 150;
-      if (move.clearAhead <= 2 && move.gear >= 4) score -= 100;
+      if (move.overspeed) score -= 600 * caution;
+      if (move.clearAhead === 0 && move.gear > 0) score -= 250 * caution;
+      if (move.clearAhead <= 1 && move.gear >= 3) score -= 150 * caution;
+      if (move.clearAhead <= 2 && move.gear >= 4) score -= 100 * caution;
 
       const delta = move.gear - currentGear;
 
@@ -79,7 +122,7 @@ export class HeuristicBrain implements MoveBrain {
         !move.overspeed &&
         !move.grassShortcut
       ) {
-        score += 55 + delta * 25;
+        score += (55 + delta * 25) * aggression;
       }
       // Nudge off the line at the start.
       if (currentGear === 0 && move.gear === 1 && move.pathProgress > 0) {
@@ -88,21 +131,24 @@ export class HeuristicBrain implements MoveBrain {
 
       // Brake into corners / when runway is short.
       if ((move.overspeed || move.clearAhead <= 2) && delta < 0) {
-        score += 70 + Math.abs(delta) * 25;
+        score += (70 + Math.abs(delta) * 25) * caution;
       }
       if (move.clearAhead <= 3 && delta > 0) {
-        score -= 80 * delta;
+        score -= 80 * delta * caution;
       }
       if (move.gear >= 3 && move.clearAhead < move.gear) {
-        score -= 45 * (move.gear - move.clearAhead);
+        score -= 45 * (move.gear - move.clearAhead) * caution;
       }
 
       if (move.pathProgress < 0) score -= 100;
 
       // Prefer carrying useful speed when the road is clear (secondary).
       if (move.clearAhead >= 5 && !move.overspeed) {
-        score += move.gear * 4;
+        score += move.gear * 4 * aggression;
       }
+
+      // Style-salted micro tie-break so equal scores don't always pick moves[0].
+      score += ((move.index * 31 + salt) % 11) * 0.05;
 
       if (score > bestScore) {
         bestScore = score;
@@ -142,6 +188,8 @@ export interface BedrockBrainOptions {
   /** Fallback when the model fails; defaults to HeuristicBrain. */
   fallback?: MoveBrain;
   maxTokens?: number;
+  /** Seed for the heuristic fallback so each pilot stays distinct. */
+  fallbackSeed?: string;
 }
 
 export class BedrockBrain implements MoveBrain {
@@ -154,7 +202,8 @@ export class BedrockBrain implements MoveBrain {
     this.modelId = options.modelId;
     this.client =
       options.client ?? new BedrockRuntimeClient({ region: options.region });
-    this.fallback = options.fallback ?? new HeuristicBrain();
+    this.fallback =
+      options.fallback ?? new HeuristicBrain(options.fallbackSeed ?? 'bedrock-fallback');
     this.maxTokens = options.maxTokens ?? 200;
   }
 

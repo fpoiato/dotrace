@@ -23,8 +23,23 @@ export async function raceLoop(
   brain: MoveBrain,
   moveDelayMs: number
 ): Promise<void> {
+  // Spawn happens in the lobby — wait through host setup / grid order without
+  // burning the per-turn timeout (that used to drop AI pilots before the race).
+  const started = await session.waitUntilRacing();
+  if (!started) {
+    console.log('[RACE] Game over before start');
+    return;
+  }
+  console.log('[RACE] Green flag — entering turn loop');
+
   for (;;) {
-    const racing = await session.waitForTurn();
+    let racing: boolean;
+    try {
+      racing = await session.waitForTurn();
+    } catch (err) {
+      console.warn('[RACE] waitForTurn failed:', err instanceof Error ? err.message : err);
+      return;
+    }
     if (!racing) {
       console.log('[RACE] Game over');
       return;
@@ -73,11 +88,15 @@ export async function raceLoop(
 
 function buildBrain(config: AgentConfig): MoveBrain {
   if (config.brain === 'heuristic') {
-    console.log('[BRAIN] heuristic');
-    return new HeuristicBrain();
+    console.log(`[BRAIN] heuristic style=${config.nickname}`);
+    return new HeuristicBrain(config.nickname);
   }
   console.log(`[BRAIN] bedrock model=${config.modelId} region=${config.region}`);
-  return new BedrockBrain({ modelId: config.modelId, region: config.region });
+  return new BedrockBrain({
+    modelId: config.modelId,
+    region: config.region,
+    fallbackSeed: config.nickname,
+  });
 }
 
 async function main(): Promise<void> {

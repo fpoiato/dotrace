@@ -115,14 +115,25 @@
     @if (room.isHost) {
       @if (players$ | async; as players) {
         @if (canAddAi(players)) {
-          <button
-            type="button"
-            (click)="addAiPilot(players)"
-            [disabled]="aiSpawning"
-            class="mb-4 min-h-12 w-full rounded-xl border-2 border-dashed border-sky-500 text-sm font-semibold text-sky-300 disabled:opacity-40"
-          >
-            {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addAi') | translate }}
-          </button>
+          <div class="mb-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              (click)="addBotPilot(players)"
+              [disabled]="aiSpawning"
+              class="min-h-12 rounded-xl border-2 border-dashed border-emerald-500 px-2 text-sm font-semibold text-emerald-300 disabled:opacity-40"
+            >
+              {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addBot') | translate }}
+            </button>
+            <button
+              type="button"
+              (click)="addIaPilot(players)"
+              [disabled]="aiSpawning"
+              class="min-h-12 rounded-xl border-2 border-dashed border-sky-500 px-2 text-sm font-semibold text-sky-300 disabled:opacity-40"
+            >
+              {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addIa') | translate }}
+            </button>
+          </div>
+          <p class="mb-4 text-center text-xs text-slate-500">{{ 'lobby.aiHint' | translate }}</p>
           @if (aiError) {
             <p class="mb-2 text-center text-sm text-red-400">{{ 'lobby.aiError' | translate }}</p>
           }

@@ -55,6 +55,25 @@ describe('HeuristicBrain', () => {
     const chosen = await new HeuristicBrain().pickMove(summary, moves);
     expect(chosen.velocity.x !== 0 || chosen.velocity.y !== 0).toBe(true);
   });
+
+  it('gives different styles to different nicknames so twin bots diverge', async () => {
+    // Approaching Parabolica: aggression vs caution trade off (brake vs turn-in).
+    const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
+    me.position = { x: 68, y: 48 };
+    me.velocity = { x: 3, y: 0 };
+    const state = createInitialState([me], 'ai-1');
+    state.phase = 'GAME_ROUND';
+    state.trackId = track.id;
+    state.turnOrder = ['ai-1'];
+    state.round = 1;
+    state.totalLaps = 1;
+    const summary = buildBoardSummary(me, state, track);
+    const moves = listAnnotatedMoves(me, state, track);
+
+    const a = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
+    const b = await new HeuristicBrain('Bot Turbo').pickMove(summary, moves);
+    expect(`${a.velocity.x},${a.velocity.y}`).not.toBe(`${b.velocity.x},${b.velocity.y}`);
+  });
 });
 
 describe('BedrockBrain', () => {

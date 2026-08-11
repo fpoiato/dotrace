@@ -171,10 +171,28 @@ export class GameSession {
   }
 
   /**
+   * Resolves when the race leaves the lobby (GAME_ROUND / GRID_ORDER / GAME_OVER).
+   * AI Lambdas are spawned in the lobby — without a long wait here, a host who
+   * configures the room for >5 minutes causes waitForTurn to time out and the
+   * pilot disconnects before the green flag.
+   */
+  waitUntilRacing(timeoutMs = 1_200_000): Promise<boolean> {
+    return this.waitFor(
+      () => {
+        const phase = this.lastState?.phase;
+        if (!phase || phase === 'LOBBY') return false;
+        return true;
+      },
+      timeoutMs,
+      'race start'
+    ).then(() => this.lastState?.phase !== 'GAME_OVER');
+  }
+
+  /**
    * Resolves true when it is this player's turn, false when the race ended.
    * Rejects on timeout so callers never hang forever.
    */
-  waitForTurn(timeoutMs = 300_000): Promise<boolean> {
+  waitForTurn(timeoutMs = 600_000): Promise<boolean> {
     return this.waitFor(
       () => {
         if (this.lastState?.phase === 'GAME_OVER') return true;

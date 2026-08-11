@@ -134,6 +134,22 @@ describe('GameSession', () => {
     await expect(session.waitForTurn(50)).rejects.toThrow('Timed out');
   });
 
+  it('waitUntilRacing waits through LOBBY then resolves when the race starts', async () => {
+    const { push, session } = setup();
+    await session.join();
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
+
+    const started = session.waitUntilRacing(5_000);
+    const lobby = relayState();
+    lobby.phase = 'LOBBY';
+    push.emit({ action: 'RELAY', payload: { type: 'STATE_SYNC', state: lobby } });
+
+    const racing = relayState();
+    racing.phase = 'GAME_ROUND';
+    push.emit({ action: 'RELAY', payload: { type: 'STATE_SYNC', state: racing } });
+    await expect(started).resolves.toBe(true);
+  });
+
   it('does not downgrade to pending after an earlier PLAYER_APPROVED (auto-approve race)', async () => {
     const { push, session } = setup();
     await session.join();
