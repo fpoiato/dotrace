@@ -11,7 +11,8 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | `frontend/dotrace-app` | Angular 19 + Tailwind 3.4 + ngx-translate (pt-BR / en) |
 | `infra/cdk` | DynamoDB, WebSocket API, HTTP API (commands), Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
-| `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
+| `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) + bot AI (`bot-ai.ts`) |
+| `bot/` | Headless bot client (joins rooms over WS/HTTP and races) |
 | `pipeline/` | CodeBuild buildspec |
 | `.github/workflows/` | CI/CD on push to `main` (`ci-cd.yml`) |
 
@@ -87,6 +88,22 @@ aws codepipeline start-pipeline-execution --name dotrace-game-pipeline --region 
 - **Game state** lives in host memory; synchronized via `RELAY`.
 - Non-host moves use `FORWARD_TO_HOST` → host validates turn + vector math → `RELAY`.
 - Host disconnect promotes next join-order player; `HOST_CHANGED` + state recovery flow.
+
+## Playing vs the computer (bots)
+
+The host can add computer-controlled drivers from the lobby ("Bots (AI)"
+stepper). Bots are virtual players that live only inside the host's game
+state — no connection, no DynamoDB row — and the host's browser drives them
+on their turn (TURNS) or on a fast cadence (TIMED). They take part in grid
+qualifying, podiums, session ranking and replays, but are excluded from the
+global Top 10 leaderboard.
+
+The AI (`shared/bot-ai.ts`, mirrored into the frontend) follows each track's
+racing line: it maximizes forward progress among host-legal moves and runs a
+lookahead rollout so it brakes before corners instead of crashing; off-track
+it switches to a BFS shortest-path recovery back to the asphalt. The same AI
+powers the headless client in `bot/`. Race simulations for every circuit run
+in `npm run bot:test`.
 
 ## Scripts
 
