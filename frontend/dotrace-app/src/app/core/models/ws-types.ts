@@ -50,6 +50,11 @@ export interface Player {
   isHost: boolean;
   joinOrder: number;
   status: PlayerStatus;
+  /**
+   * Host-local computer opponent. Not a real WebSocket connection — the host
+   * runs the AI and applies moves locally. Omitted / false for humans.
+   */
+  isBot?: boolean;
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
@@ -330,7 +335,8 @@ export function createLobbyPlayer(
   nickname: string,
   isHost: boolean,
   joinOrder: number,
-  color: string
+  color: string,
+  isBot = false
 ): Player {
   return {
     connectionId,
@@ -339,12 +345,32 @@ export function createLobbyPlayer(
     isHost,
     joinOrder,
     status: 'approved',
+    ...(isBot ? { isBot: true } : {}),
     position: zeroVector(),
     velocity: zeroVector(),
     isOffTrack: false,
     trail: [],
     lap: 1,
   };
+}
+
+/** Synthetic connection ids for host-local computer opponents. */
+export const BOT_ID_PREFIX = 'bot-';
+
+export function isBotPlayer(player: Pick<Player, 'isBot' | 'connectionId'>): boolean {
+  return player.isBot === true || player.connectionId.startsWith(BOT_ID_PREFIX);
+}
+
+/** Next free bot id like `bot-1`, `bot-2`, … */
+export function nextBotConnectionId(existing: { connectionId: string }[]): string {
+  let n = 1;
+  const used = new Set(existing.map((p) => p.connectionId));
+  while (used.has(`${BOT_ID_PREFIX}${n}`)) n += 1;
+  return `${BOT_ID_PREFIX}${n}`;
+}
+
+export function botNickname(botNumber: number): string {
+  return `CPU ${botNumber}`;
 }
 
 export function createInitialState(players: Player[], hostId: string): GameState {
@@ -871,17 +897,20 @@ export interface Top10Entry {
  * One entry per player who took part; counters are 0/1 for this race only.
  */
 export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
-  return state.players.map((p) => {
-    const delta: RaceStatDelta = {
-      nickname: p.nickname,
-      races: 1,
-      wins: p.finishOrder === 1 ? 1 : 0,
-      podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
-    };
-    const lapMs = bestLapMs(p, state.raceStartedAt);
-    if (lapMs !== undefined) delta.bestLapMs = lapMs;
-    const rounds = bestLapRounds(p);
-    if (rounds !== undefined) delta.bestLapRounds = rounds;
-    return delta;
-  });
+  // Computer opponents must not pollute the global nickname leaderboard.
+  return state.players
+    .filter((p) => !isBotPlayer(p))
+    .map((p) => {
+      const delta: RaceStatDelta = {
+        nickname: p.nickname,
+        races: 1,
+        wins: p.finishOrder === 1 ? 1 : 0,
+        podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
+      };
+      const lapMs = bestLapMs(p, state.raceStartedAt);
+      if (lapMs !== undefined) delta.bestLapMs = lapMs;
+      const rounds = bestLapRounds(p);
+      if (rounds !== undefined) delta.bestLapRounds = rounds;
+      return delta;
+    });
 }

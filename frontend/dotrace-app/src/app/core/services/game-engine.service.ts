@@ -1,5 +1,6 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subscription } from 'rxjs';
+import { BOT_MOVE_DELAY_MS, BOT_TIMED_STAGGER_MS, pickBotMove } from '../models/bot-ai';
 import { getTrackById } from '../models/tracks';
 import {
   GameMode,
@@ -15,6 +16,7 @@ import {
   createLobbyPlayer,
   getTileAt,
   getValidMoves,
+  isBotPlayer,
   isGameOver,
   isGrassShortcut,
   isTimedMode,
@@ -49,6 +51,8 @@ export class GameEngineService implements OnDestroy {
   private messageSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pending host-local AI move timers (cleared on race end / destroy). */
+  private botTimers: ReturnType<typeof setTimeout>[] = [];
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
 
@@ -125,7 +129,14 @@ export class GameEngineService implements OnDestroy {
     // approved after the track was selected is included in the race.
     const state = createInitialState(
       lobbyPlayers.map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+        createLobbyPlayer(
+          p.connectionId,
+          p.nickname,
+          p.isHost,
+          p.joinOrder,
+          p.color,
+          isBotPlayer(p)
+        )
       ),
       room.connectionId
     );
@@ -356,6 +367,7 @@ export class GameEngineService implements OnDestroy {
   private tryEndRace(state: GameState): boolean {
     if (state.phase === 'GAME_OVER' || !isGameOver(state)) return false;
     state.phase = 'GAME_OVER';
+    this.clearBotTimers();
     updateSessionStats(state);
     this.setStateAndRelay('GAME_OVER', state);
     this.submitGlobalRaceStats(state);
@@ -388,11 +400,19 @@ export class GameEngineService implements OnDestroy {
       clearTimeout(this.gridOrderTimer);
       this.gridOrderTimer = null;
     }
+    this.clearBotTimers();
 
     const players = this.roomService.players
       .filter((p) => p.status === 'approved')
       .map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+        createLobbyPlayer(
+          p.connectionId,
+          p.nickname,
+          p.isHost,
+          p.joinOrder,
+          p.color,
+          isBotPlayer(p)
+        )
       );
     const state = createInitialState(players, room.connectionId);
     state.trackId = current.trackId || '';
@@ -412,7 +432,14 @@ export class GameEngineService implements OnDestroy {
     const players = this.roomService.players
       .filter((p) => p.status === 'approved')
       .map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+        createLobbyPlayer(
+          p.connectionId,
+          p.nickname,
+          p.isHost,
+          p.joinOrder,
+          p.color,
+          isBotPlayer(p)
+        )
       );
     const state = createInitialState(players, room.connectionId);
     const saved = this.session.load();
@@ -599,6 +626,7 @@ export class GameEngineService implements OnDestroy {
       merged.grassCuts = state.players[idx].grassCuts;
       merged.gearPenaltyUntilRound = state.players[idx].gearPenaltyUntilRound;
       merged.stopUntil = state.players[idx].stopUntil;
+      merged.isBot = state.players[idx].isBot;
       state.players[idx] = merged;
     } else {
       state.players.push(merged);
@@ -650,6 +678,55 @@ export class GameEngineService implements OnDestroy {
     void this.api
       .postAction('RELAY', { type, state, meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
+
+    // After every host emission, queue computer opponents if it's their turn.
+    this.scheduleBotMoves();
+  }
+
+  /** Cancel any pending AI move timers. */
+  private clearBotTimers(): void {
+    for (const t of this.botTimers) clearTimeout(t);
+    this.botTimers = [];
+  }
+
+  /**
+   * Host-only: if any computer opponent can move, schedule pickBotMove → applyMove
+   * after a short delay so humans can follow the action.
+   */
+  private scheduleBotMoves(): void {
+    if (!this.isHost) return;
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') {
+      this.clearBotTimers();
+      return;
+    }
+
+    this.clearBotTimers();
+
+    const bots = state.players.filter(
+      (p) => isBotPlayer(p) && canPlayerMove(state, p.connectionId)
+    );
+    if (bots.length === 0) return;
+
+    bots.forEach((bot, i) => {
+      const delay = BOT_MOVE_DELAY_MS + (isTimedMode(state) ? i * BOT_TIMED_STAGGER_MS : 0);
+      const timer = setTimeout(() => this.runBotMove(bot.connectionId), delay);
+      this.botTimers.push(timer);
+    });
+  }
+
+  private runBotMove(botId: string): void {
+    if (!this.isHost) return;
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') return;
+    if (!canPlayerMove(state, botId)) return;
+
+    const player = state.players.find((p) => p.connectionId === botId);
+    const track = state.trackId ? getTrackById(state.trackId) : undefined;
+    if (!player || !track || !isBotPlayer(player)) return;
+
+    const vector = pickBotMove(player, track, state.players, state.round);
+    this.applyMove(botId, vector);
   }
 
   currentPlayer(): Player | null {
@@ -676,10 +753,12 @@ export class GameEngineService implements OnDestroy {
     this.messageSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimers();
   }
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimers();
     this.stateSubject.next(null);
   }
 }

@@ -41,8 +41,12 @@ import {
   remapSessionStatsConnectionId,
   createInitialState,
   buildRaceStatDeltas,
+  isBotPlayer,
+  nextBotConnectionId,
+  botNickname,
 } from '../../../shared/ws-types';
 import { TRACKS } from '../../../shared/tracks';
+import { pickBotMove } from '../../../shared/bot-ai';
 import { buildRankKey, nicknameKey } from '../lambda/src/lib/leaderboard';
 
 function makeTrack(): TrackDefinition {
@@ -718,5 +722,72 @@ describe('global leaderboard rank keys', () => {
     const morePodiums = buildRankKey(3, 5, 'zoe');
     const fewerPodiums = buildRankKey(3, 2, 'amy');
     expect(morePodiums < fewerPodiums).toBe(true);
+  });
+});
+
+describe('computer opponents', () => {
+  it('allocates unique bot ids and nicknames', () => {
+    expect(nextBotConnectionId([])).toBe('bot-1');
+    expect(nextBotConnectionId([{ connectionId: 'bot-1' }])).toBe('bot-2');
+    expect(botNickname(1)).toBe('CPU 1');
+    expect(isBotPlayer({ connectionId: 'bot-1', isBot: true })).toBe(true);
+    expect(isBotPlayer({ connectionId: 'human-1' })).toBe(false);
+  });
+
+  it('createLobbyPlayer can mark a computer opponent', () => {
+    const bot = createLobbyPlayer('bot-1', 'CPU 1', false, 1, '#fff', true);
+    expect(bot.isBot).toBe(true);
+    expect(isBotPlayer(bot)).toBe(true);
+  });
+
+  it('excludes bots from global race stat deltas', () => {
+    const human = {
+      ...createLobbyPlayer('a', 'Ana', true, 0, '#fff'),
+      finishOrder: 1 as number,
+      lapTimes: [1_000],
+      lapRounds: [3],
+    };
+    const bot = createLobbyPlayer('bot-1', 'CPU 1', false, 1, '#0f0', true);
+    bot.finishOrder = 2;
+    const state = createInitialState([human, bot], 'a');
+    state.players = [human, bot];
+    state.raceStartedAt = 0;
+
+    const deltas = buildRaceStatDeltas(state);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].nickname).toBe('Ana');
+  });
+
+  it('pickBotMove returns a legal velocity from getValidMoves', () => {
+    const track = TRACKS[0];
+    const start = track.startLine[0];
+    const bot = makePlayer({
+      connectionId: 'bot-1',
+      isBot: true,
+      position: { ...start },
+      velocity: { x: 0, y: 0 },
+    });
+    const vector = pickBotMove(bot, track, [bot], 1);
+    const legal = getValidMoves(bot, track, [bot], 1);
+    expect(legal.some((m) => m.velocity.x === vector.x && m.velocity.y === vector.y)).toBe(
+      true
+    );
+  });
+
+  it('pickBotMove prefers asphalt over grass when both are reachable', () => {
+    const track = makeTrack();
+    // Standing at (3,1) with zero velocity: can reach track or the grass column at x=5.
+    const bot = makePlayer({
+      connectionId: 'bot-1',
+      isBot: true,
+      position: { x: 3, y: 1 },
+      velocity: { x: 0, y: 0 },
+    });
+    const vector = pickBotMove(bot, track, [bot], 1);
+    const landing = {
+      x: bot.position.x + vector.x,
+      y: bot.position.y + vector.y,
+    };
+    expect(track.grid[landing.y][landing.x]).not.toBe('grass');
   });
 });

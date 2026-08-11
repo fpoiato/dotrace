@@ -86,12 +86,37 @@
         <li class="flex min-h-12 items-center gap-3 rounded-xl bg-slate-800 px-4">
           <span class="h-4 w-4 rounded-full" [style.background]="p.color"></span>
           <span class="flex-1 font-medium">{{ p.nickname }}</span>
-          @if (p.isHost) {
+          @if (isBot(p)) {
+            <span class="text-xs text-sky-400">{{ 'lobby.computer' | translate }}</span>
+            @if (room.isHost) {
+              <button
+                type="button"
+                (click)="removeBot(p.connectionId)"
+                class="min-h-10 rounded-lg bg-slate-700 px-3 text-xs text-slate-200 hover:bg-slate-600"
+              >
+                {{ 'lobby.removeComputer' | translate }}
+              </button>
+            }
+          } @else if (p.isHost) {
             <span class="text-xs text-orange-400">{{ 'common.host' | translate }}</span>
           }
         </li>
       }
     </ul>
+
+    @if (room.isHost) {
+      @if (players$ | async; as players) {
+        @if (canAddBot(players.length)) {
+          <button
+            type="button"
+            (click)="addBot()"
+            class="mb-4 min-h-12 w-full rounded-xl border-2 border-dashed border-sky-600/70 bg-sky-500/10 text-sm font-semibold text-sky-300 transition hover:bg-sky-500/20"
+          >
+            {{ 'lobby.addComputer' | translate }}
+          </button>
+        }
+      }
+    }
 
     @if (pending$ | async; as pending) {
       @if (pending.length > 0 && room.isHost) {
@@ -116,6 +141,8 @@
       @if (players$ | async; as players) {
         @if (isPractice(players.length)) {
           <p class="mb-2 text-center text-sm text-sky-400">{{ practiceHintKey | translate }}</p>
+        } @else if (hasBots(players)) {
+          <p class="mb-2 text-center text-sm text-sky-400">{{ vsComputerHintKey | translate }}</p>
         }
         <button
           type="button"

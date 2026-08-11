@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode } from '../../core/models/ws-types';
+import { GAME_MODES, GameMode, MAX_PLAYERS, isBotPlayer } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -27,6 +27,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly players$ = this.room.players$;
   readonly pending$ = this.room.pending$;
   readonly tracks = TRACKS;
+  readonly maxPlayers = MAX_PLAYERS;
 
   selectedTrackId = '';
   selectedLaps = 1;
@@ -34,6 +35,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
   readonly practiceHintKey = 'lobby.practiceHint';
+  readonly vsComputerHintKey = 'lobby.vsComputerHint';
   copied = false;
   showHowTo = false;
   private readonly subs: Subscription[] = [];
@@ -75,12 +77,32 @@ export class LobbyComponent implements OnInit, OnDestroy {
     return getTrackById(trackId)?.nameKey ?? '';
   }
 
+  isBot(player: { isBot?: boolean; connectionId: string }): boolean {
+    return isBotPlayer(player);
+  }
+
   isPractice(playerCount: number): boolean {
     return playerCount <= 1;
   }
 
+  hasBots(players: { isBot?: boolean; connectionId: string }[]): boolean {
+    return players.some((p) => isBotPlayer(p));
+  }
+
+  canAddBot(playerCount: number): boolean {
+    return playerCount < MAX_PLAYERS;
+  }
+
   startLabelKey(playerCount: number): string {
     return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
+  }
+
+  addBot(): void {
+    this.room.addBot();
+  }
+
+  removeBot(connectionId: string): void {
+    this.room.removeBot(connectionId);
   }
 
   approve(id: string): void {
