@@ -4,7 +4,14 @@ import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode } from '../../core/models/ws-types';
+import {
+  BOT_DIFFICULTIES,
+  BotDifficulty,
+  GAME_MODES,
+  GameMode,
+  MAX_BOTS,
+  Player,
+} from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -31,8 +38,11 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedTrackId = '';
   selectedLaps = 1;
   selectedGameMode: GameMode = 'TURNS';
+  selectedBotDifficulty: BotDifficulty = 'normal';
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
+  readonly botDifficulties = BOT_DIFFICULTIES;
+  readonly maxBots = MAX_BOTS;
   readonly practiceHintKey = 'lobby.practiceHint';
   copied = false;
   showHowTo = false;
@@ -81,6 +91,27 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   startLabelKey(playerCount: number): string {
     return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
+  }
+
+  botCount(players: Player[]): number {
+    return players.filter((p) => p.isBot).length;
+  }
+
+  canAddBot(players: Player[]): boolean {
+    return this.botCount(players) < this.maxBots;
+  }
+
+  addBot(): void {
+    this.room.addBot(this.selectedBotDifficulty);
+  }
+
+  removeBot(): void {
+    this.room.removeLastBot();
+  }
+
+  selectBotDifficulty(difficulty: BotDifficulty): void {
+    this.selectedBotDifficulty = difficulty;
+    this.room.setBotsDifficulty(difficulty);
   }
 
   approve(id: string): void {

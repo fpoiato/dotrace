@@ -4,6 +4,7 @@
   "landing.nickname": "Apelido",
   "landing.nicknamePlaceholder": "Seu nome de piloto",
   "landing.createGame": "Criar Jogo",
+  "landing.playVsComputer": "Jogar contra o Computador",
   "landing.joinGame": "Entrar no Jogo",
   "landing.roomCode": "Código da sala",
   "landing.enter": "Entrar",
@@ -27,6 +28,14 @@
   "lobby.gameMode": "Modo de jogo",
   "lobby.mode.TURNS": "Turnos",
   "lobby.mode.TIMED": "Cronometrado",
+  "lobby.cpuOpponents": "Oponentes do computador",
+  "lobby.cpuHint": "Adicione carros da CPU para enfrentar",
+  "lobby.addCpu": "Adicionar oponente do computador",
+  "lobby.removeCpu": "Remover oponente do computador",
+  "lobby.difficulty": "Dificuldade da CPU",
+  "lobby.difficulty.easy": "Fácil",
+  "lobby.difficulty.normal": "Normal",
+  "lobby.difficulty.hard": "Difícil",
   "lobby.invite": "Copiar link de convite",
   "lobby.whatsapp": "Compartilhar no WhatsApp",
   "lobby.waitHost": "Aguardando o host iniciar…",
@@ -114,5 +123,6 @@
   "common.error": "Algo deu errado",
   "common.close": "Fechar",
   "common.copied": "Copiado!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "common.cpu": "CPU"
 }

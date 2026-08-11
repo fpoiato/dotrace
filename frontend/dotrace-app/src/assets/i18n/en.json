@@ -4,6 +4,7 @@
   "landing.nickname": "Nickname",
   "landing.nicknamePlaceholder": "Your racing name",
   "landing.createGame": "Create Game",
+  "landing.playVsComputer": "Play vs Computer",
   "landing.joinGame": "Join Game",
   "landing.roomCode": "Room code",
   "landing.enter": "Enter",
@@ -27,6 +28,14 @@
   "lobby.gameMode": "Game mode",
   "lobby.mode.TURNS": "Turns",
   "lobby.mode.TIMED": "Timed",
+  "lobby.cpuOpponents": "Computer opponents",
+  "lobby.cpuHint": "Add CPU cars to race against",
+  "lobby.addCpu": "Add computer opponent",
+  "lobby.removeCpu": "Remove computer opponent",
+  "lobby.difficulty": "CPU difficulty",
+  "lobby.difficulty.easy": "Easy",
+  "lobby.difficulty.normal": "Normal",
+  "lobby.difficulty.hard": "Hard",
   "lobby.invite": "Copy invite link",
   "lobby.whatsapp": "Share on WhatsApp",
   "lobby.waitHost": "Waiting for host to start…",
@@ -114,5 +123,6 @@
   "common.error": "Something went wrong",
   "common.close": "Close",
   "common.copied": "Copied!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "common.cpu": "CPU"
 }

@@ -79,6 +79,23 @@ export class LandingComponent implements OnInit {
     }
   }
 
+  /** Create a room and drop in one computer opponent for a quick solo race. */
+  async playVsComputer(): Promise<void> {
+    if (!this.nickname.trim()) return;
+    this.loading = true;
+    this.error = '';
+    try {
+      this.session.save({ nickname: this.nickname.trim() });
+      await this.room.createRoom(this.nickname.trim());
+      this.room.addBot('normal');
+      await this.router.navigate(['/lobby']);
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : 'Error';
+    } finally {
+      this.loading = false;
+    }
+  }
+
   async joinGame(): Promise<void> {
     if (!this.nickname.trim() || this.roomCode.trim().length !== 5) return;
     this.loading = true;
