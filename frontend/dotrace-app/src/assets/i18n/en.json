@@ -30,8 +30,12 @@
   "lobby.invite": "Copy invite link",
   "lobby.whatsapp": "Share on WhatsApp",
   "lobby.waitHost": "Waiting for host to start…",
-  "lobby.practiceHint": "Riding solo? Start a practice race or invite friends to join",
+  "lobby.practiceHint": "Riding solo? Start a practice race, add bots, or invite friends to join",
   "lobby.youAreHost": "You are the host",
+  "lobby.bots": "Bots (AI)",
+  "lobby.botsHint": "Computer-controlled opponents",
+  "lobby.addBot": "Add bot",
+  "lobby.removeBot": "Remove bot",
   "game.gridOrder": "Grid qualifying — dice rolls",
   "game.raceOn": "Go!",
   "game.timedRace": "Race in progress",
@@ -114,5 +118,6 @@
   "common.error": "Something went wrong",
   "common.close": "Close",
   "common.copied": "Copied!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "common.bot": "BOT"
 }

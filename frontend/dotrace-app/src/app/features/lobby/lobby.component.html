@@ -51,6 +51,30 @@
         }
       </div>
 
+      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.bots' | translate }}</h2>
+      <div class="mb-6 flex items-center gap-3">
+        <button
+          type="button"
+          (click)="setBotCount(botCount - 1)"
+          [disabled]="botCount <= 0"
+          [attr.aria-label]="'lobby.removeBot' | translate"
+          class="min-h-12 min-w-12 rounded-xl border-2 border-slate-600 text-xl font-bold disabled:opacity-40"
+        >
+          −
+        </button>
+        <span class="min-w-10 text-center text-xl font-bold text-white">{{ botCount }}</span>
+        <button
+          type="button"
+          (click)="setBotCount(botCount + 1)"
+          [disabled]="botCount >= maxBots((players$ | async)?.length ?? 1)"
+          [attr.aria-label]="'lobby.addBot' | translate"
+          class="min-h-12 min-w-12 rounded-xl border-2 border-slate-600 text-xl font-bold disabled:opacity-40"
+        >
+          +
+        </button>
+        <span class="text-xs text-slate-500">{{ 'lobby.botsHint' | translate }}</span>
+      </div>
+
       <div class="mb-4 flex gap-2">
         <button
           type="button"
@@ -78,6 +102,11 @@
       <p class="mb-6 text-sm text-orange-300">
         {{ 'lobby.gameMode' | translate }}: {{ 'lobby.mode.' + selectedGameMode | translate }}
       </p>
+      @if (botCount > 0) {
+        <p class="mb-6 text-sm text-orange-300">
+          {{ 'lobby.bots' | translate }}: {{ botCount }}
+        </p>
+      }
     }
 
     <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.players' | translate }}</h2>
@@ -89,6 +118,14 @@
           @if (p.isHost) {
             <span class="text-xs text-orange-400">{{ 'common.host' | translate }}</span>
           }
+        </li>
+      }
+      @for (n of botRows(); track n) {
+        <li class="flex min-h-12 items-center gap-3 rounded-xl border border-dashed border-slate-700 bg-slate-800/50 px-4">
+          <span class="flex-1 font-medium text-slate-300">Bot {{ n }}</span>
+          <span class="rounded bg-sky-900 px-2 py-0.5 text-xs font-bold text-sky-300">
+            {{ 'common.bot' | translate }}
+          </span>
         </li>
       }
     </ul>

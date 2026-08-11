@@ -10,6 +10,8 @@ export interface SessionData {
   trackId?: string;
   laps?: number;
   gameMode?: 'TURNS' | 'TIMED';
+  /** Computer opponents the host wants in the next race. */
+  botCount?: number;
 }
 
 const KEY = 'dotrace-session';

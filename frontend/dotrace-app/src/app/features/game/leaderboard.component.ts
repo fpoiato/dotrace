@@ -117,6 +117,11 @@ interface LeaderboardRow {
                       [style.background]="row.player.color"
                     ></span>
                     {{ row.player.nickname }}
+                    @if (row.player.isBot) {
+                      <span class="rounded bg-sky-900 px-1.5 py-0.5 text-[10px] font-bold text-sky-300">
+                        {{ 'common.bot' | translate }}
+                      </span>
+                    }
                   </span>
                 </td>
 

@@ -240,6 +240,13 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return state.players.find((p) => p.connectionId === id);
   }
 
+  /** Telemetry rows carry no isBot flag; look it up in the game state. */
+  isBotPlayer(connectionId: string): boolean {
+    return (
+      this.game.state?.players.find((p) => p.connectionId === connectionId)?.isBot ?? false
+    );
+  }
+
   /** TURNS mode: gear-1 cap from a grass penalty (not just standing on grass). */
   hasGearPenalty(state: GameState, player: Player): boolean {
     return isGearLimited(player, state.round) && !player.isOffTrack;

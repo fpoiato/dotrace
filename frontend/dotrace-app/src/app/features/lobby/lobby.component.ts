@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode } from '../../core/models/ws-types';
+import { GAME_MODES, GameMode, MAX_PLAYERS } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -31,6 +31,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedTrackId = '';
   selectedLaps = 1;
   selectedGameMode: GameMode = 'TURNS';
+  botCount = 0;
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
   readonly practiceHintKey = 'lobby.practiceHint';
@@ -54,6 +55,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
         if (state?.trackId) this.selectedTrackId = state.trackId;
         if (state?.totalLaps) this.selectedLaps = state.totalLaps;
         if (state?.gameMode) this.selectedGameMode = state.gameMode;
+        this.botCount = state?.botCount ?? 0;
         if (state && state.phase !== 'LOBBY') {
           void this.router.navigate(['/game']);
         }
@@ -76,11 +78,25 @@ export class LobbyComponent implements OnInit, OnDestroy {
   }
 
   isPractice(playerCount: number): boolean {
-    return playerCount <= 1;
+    return playerCount <= 1 && this.botCount === 0;
   }
 
   startLabelKey(playerCount: number): string {
     return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
+  }
+
+  /** Slots left for computer drivers (humans + bots never exceed the cap). */
+  maxBots(playerCount: number): number {
+    return Math.max(0, MAX_PLAYERS - playerCount);
+  }
+
+  setBotCount(count: number): void {
+    this.game.selectBotCount(count);
+  }
+
+  /** Virtual roster rows shown under the real players ([1..botCount]). */
+  botRows(): number[] {
+    return Array.from({ length: this.botCount }, (_, i) => i + 1);
   }
 
   approve(id: string): void {
