@@ -4,13 +4,13 @@ An AI **network player** for Dot Race. It joins a room through the same
 protocol as any human (`JOIN_ROOM` → host approval → `RELAY` →
 `FORWARD_TO_HOST`/`SUBMIT_MOVE`), and picks moves with either:
 
-- **Heuristic brain** (default in the lobby Lambda) — track-aware planner:
-  BFS distance along asphalt toward checkpoint/finish, accelerate on clear
-  straights, brake before corners, avoid grass. No AWS account needed.
-- **Bedrock brain** — Amazon Bedrock Converse API, model
-  `amazon.nova-micro-v1:0` by default, IAM auth (no API keys). Falls back to
-  the heuristic on any model failure or illegal output. Set `BRAIN=bedrock`
-  to enable.
+- **Bedrock brain** (default in the lobby Lambda) — Amazon Bedrock Converse
+  API, model `amazon.nova-micro-v1:0` by default, IAM auth (no API keys).
+  Falls back to the track-aware heuristic on any model failure or illegal
+  output. Set `BRAIN=heuristic` to skip the LLM.
+- **Heuristic brain** — track-aware planner: directed distance along the
+  racing line, accelerate on clear straights, brake before corners, avoid
+  grass. No AWS account needed.
 
 Moves are always chosen from `getValidMoves()` (the same enumeration the host
 uses to validate), so the agent can never submit an illegal move.
