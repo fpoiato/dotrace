@@ -19,7 +19,7 @@ export interface LeaderboardRecord {
   board: 'global';
   /**
    * GSI sort key — lower sorts first.
-   * Encodes inverted wins/podiums so Query Limit=10 returns the leaders.
+   * Encodes: more wins → lower bestLapMs → lower bestLapRounds → name.
    */
   rankKey: string;
 }
@@ -47,16 +47,57 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.LEADERBOARD_TABLE!;
 const BOARD = 'global';
 const TOP_N = 10;
-const SCORE_PAD = 1_000_000;
+/** Wins inverted into a 6-digit field (supports up to 999_999 wins). */
+const WINS_PAD = 1_000_000;
+/**
+ * Missing / unknown best-lap time sorts last. 10 digits covers ~115 days —
+ * well above any real race lap.
+ */
+const MAX_LAP_MS = 9_999_999_999;
+/** Missing best-lap rounds sorts last (6 digits). */
+const MAX_LAP_ROUNDS = 999_999;
 
 export function nicknameKey(nickname: string): string {
   return nickname.trim().toLowerCase();
 }
 
-export function buildRankKey(wins: number, podiums: number, key: string): string {
-  const w = String(SCORE_PAD - Math.max(0, Math.min(SCORE_PAD - 1, wins))).padStart(6, '0');
-  const p = String(SCORE_PAD - Math.max(0, Math.min(SCORE_PAD - 1, podiums))).padStart(6, '0');
-  return `${w}#${p}#${key}`;
+/**
+ * Ascending DynamoDB sort key for the global board.
+ * Order: more wins → lower bestLapMs → lower bestLapRounds → nicknameKey.
+ */
+export function buildRankKey(
+  wins: number,
+  bestLapMs: number | undefined,
+  bestLapRounds: number | undefined,
+  key: string
+): string {
+  const w = String(WINS_PAD - Math.max(0, Math.min(WINS_PAD - 1, wins))).padStart(6, '0');
+  const lap =
+    typeof bestLapMs === 'number' && bestLapMs > 0 && Number.isFinite(bestLapMs)
+      ? Math.min(MAX_LAP_MS, Math.floor(bestLapMs))
+      : MAX_LAP_MS;
+  const rounds =
+    typeof bestLapRounds === 'number' && bestLapRounds > 0 && Number.isFinite(bestLapRounds)
+      ? Math.min(MAX_LAP_ROUNDS, Math.floor(bestLapRounds))
+      : MAX_LAP_ROUNDS;
+  const lapField = String(lap).padStart(10, '0');
+  const roundsField = String(rounds).padStart(6, '0');
+  return `${w}#${lapField}#${roundsField}#${key}`;
+}
+
+/** Same ordering as buildRankKey — used to sort Top 10 in memory (covers stale keys). */
+export function compareLeaderboardEntries(
+  a: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'>,
+  b: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'>
+): number {
+  if (b.wins !== a.wins) return b.wins - a.wins;
+  const aLap = a.bestLapMs ?? Number.POSITIVE_INFINITY;
+  const bLap = b.bestLapMs ?? Number.POSITIVE_INFINITY;
+  if (aLap !== bLap) return aLap - bLap;
+  const aRounds = a.bestLapRounds ?? Number.POSITIVE_INFINITY;
+  const bRounds = b.bestLapRounds ?? Number.POSITIVE_INFINITY;
+  if (aRounds !== bRounds) return aRounds - bRounds;
+  return a.nickname.localeCompare(b.nickname);
 }
 
 function clampDelta(raw: RaceStatDelta): RaceStatDelta | null {
@@ -83,6 +124,7 @@ function clampDelta(raw: RaceStatDelta): RaceStatDelta | null {
 /**
  * Apply one race's results for a player.
  * Counters are ADD'd; bests use conditional updates when the new value is better.
+ * rankKey is rewritten last so it always reflects the final wins + bests.
  */
 export async function applyRaceStatDelta(raw: RaceStatDelta): Promise<void> {
   const delta = clampDelta(raw);
@@ -100,7 +142,7 @@ export async function applyRaceStatDelta(raw: RaceStatDelta): Promise<void> {
   const key = nicknameKey(delta.nickname);
   const now = Date.now();
 
-  const after = await ddb.send(
+  const afterCounters = await ddb.send(
     new UpdateCommand({
       TableName: TABLE,
       Key: { nicknameKey: key },
@@ -118,33 +160,21 @@ export async function applyRaceStatDelta(raw: RaceStatDelta): Promise<void> {
     })
   );
 
-  const item = after.Attributes as LeaderboardRecord | undefined;
-  const wins = item?.wins ?? delta.wins;
-  const podiums = item?.podiums ?? delta.podiums;
-
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: { nicknameKey: key },
-      UpdateExpression: 'SET rankKey = :rk, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':rk': buildRankKey(wins, podiums, key),
-        ':now': now,
-      },
-    })
-  );
+  let item = afterCounters.Attributes as LeaderboardRecord | undefined;
 
   if (delta.bestLapMs !== undefined) {
     try {
-      await ddb.send(
+      const afterLap = await ddb.send(
         new UpdateCommand({
           TableName: TABLE,
           Key: { nicknameKey: key },
           UpdateExpression: 'SET bestLapMs = :lap, updatedAt = :now',
           ConditionExpression: 'attribute_not_exists(bestLapMs) OR bestLapMs > :lap',
           ExpressionAttributeValues: { ':lap': delta.bestLapMs, ':now': now },
+          ReturnValues: 'ALL_NEW',
         })
       );
+      item = afterLap.Attributes as LeaderboardRecord | undefined;
     } catch (err: unknown) {
       if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
     }
@@ -152,19 +182,37 @@ export async function applyRaceStatDelta(raw: RaceStatDelta): Promise<void> {
 
   if (delta.bestLapRounds !== undefined) {
     try {
-      await ddb.send(
+      const afterRounds = await ddb.send(
         new UpdateCommand({
           TableName: TABLE,
           Key: { nicknameKey: key },
           UpdateExpression: 'SET bestLapRounds = :rounds, updatedAt = :now',
           ConditionExpression: 'attribute_not_exists(bestLapRounds) OR bestLapRounds > :rounds',
           ExpressionAttributeValues: { ':rounds': delta.bestLapRounds, ':now': now },
+          ReturnValues: 'ALL_NEW',
         })
       );
+      item = afterRounds.Attributes as LeaderboardRecord | undefined;
     } catch (err: unknown) {
       if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
     }
   }
+
+  const wins = item?.wins ?? delta.wins;
+  const bestLapMs = item?.bestLapMs;
+  const bestLapRounds = item?.bestLapRounds;
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { nicknameKey: key },
+      UpdateExpression: 'SET rankKey = :rk, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':rk': buildRankKey(wins, bestLapMs, bestLapRounds, key),
+        ':now': now,
+      },
+    })
+  );
 }
 
 export async function applyRaceStatDeltas(deltas: RaceStatDelta[]): Promise<number> {
@@ -180,6 +228,8 @@ export async function applyRaceStatDeltas(deltas: RaceStatDelta[]): Promise<numb
 }
 
 export async function getTop10(): Promise<Top10Entry[]> {
+  // Pull a wider window than Top N so in-memory re-sort can correct entries
+  // that still carry a pre-migration rankKey (wins/podiums only).
   const result = await ddb.send(
     new QueryCommand({
       TableName: TABLE,
@@ -187,11 +237,11 @@ export async function getTop10(): Promise<Top10Entry[]> {
       KeyConditionExpression: 'board = :board',
       ExpressionAttributeValues: { ':board': BOARD },
       ScanIndexForward: true,
-      Limit: TOP_N,
+      Limit: 50,
     })
   );
 
-  return ((result.Items ?? []) as LeaderboardRecord[]).map((row) => ({
+  const entries = ((result.Items ?? []) as LeaderboardRecord[]).map((row) => ({
     nickname: row.displayName || row.nicknameKey,
     races: row.races ?? 0,
     wins: row.wins ?? 0,
@@ -199,4 +249,7 @@ export async function getTop10(): Promise<Top10Entry[]> {
     bestLapMs: row.bestLapMs,
     bestLapRounds: row.bestLapRounds,
   }));
+
+  entries.sort(compareLeaderboardEntries);
+  return entries.slice(0, TOP_N);
 }
