@@ -169,6 +169,7 @@ Each turn you pick ONE move from a numbered list of legal moves. Rules of thumb:
 - Before "passedCheckpoint" is true you must route through the checkpoint zone; prefer moves with "entersCheckpoint".
 - After the checkpoint, head for the finish; moves with "crossesFinish" complete the lap.
 - Prefer higher "pathProgress" and lower "pathDistance" (asphalt corridor toward the goal) — this is the racing line.
+- Never pick negative pathProgress when a positive option exists (that is driving the wrong way).
 - "clearAhead" is how many asphalt cells you can keep flying at the new velocity; accelerate when it is large, brake when it is small or "overspeed" is true.
 - Lower "distanceToGoal" is a weak hint only; trust pathDistance over it.
 Respond with ONLY a JSON object: {"moveIndex": <number>} — no prose.`;
@@ -190,6 +191,35 @@ export interface BedrockBrainOptions {
   maxTokens?: number;
   /** Seed for the heuristic fallback so each pilot stays distinct. */
   fallbackSeed?: string;
+  /** Max wait for Converse before falling back (ms). */
+  timeoutMs?: number;
+}
+
+/**
+ * True when the model pick is clearly worse than the track-aware heuristic.
+ * Nova Micro often crawls at gear 1, cuts grass, or turns against race direction.
+ */
+export function isDominatedByHeuristic(
+  model: AnnotatedMove,
+  heuristic: AnnotatedMove
+): boolean {
+  if (model.index === heuristic.index) return false;
+
+  if (model.grassShortcut && !heuristic.grassShortcut) return true;
+  if (model.overspeed && !heuristic.overspeed) return true;
+  if (model.pathProgress < 0 && heuristic.pathProgress > 0) return true;
+  if (model.pathProgress < heuristic.pathProgress - 0.25) return true;
+
+  // Crawl on an open straight while the heuristic wants more speed.
+  if (
+    heuristic.clearAhead >= 4 &&
+    model.gear < heuristic.gear &&
+    model.pathProgress <= heuristic.pathProgress + 0.1
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export class BedrockBrain implements MoveBrain {
@@ -197,6 +227,7 @@ export class BedrockBrain implements MoveBrain {
   private readonly fallback: MoveBrain;
   private readonly modelId: string;
   private readonly maxTokens: number;
+  private readonly timeoutMs: number;
 
   constructor(options: BedrockBrainOptions) {
     this.modelId = options.modelId;
@@ -205,10 +236,20 @@ export class BedrockBrain implements MoveBrain {
     this.fallback =
       options.fallback ?? new HeuristicBrain(options.fallbackSeed ?? 'bedrock-fallback');
     this.maxTokens = options.maxTokens ?? 200;
+    this.timeoutMs = options.timeoutMs ?? 6_000;
   }
 
   async pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
     if (moves.length === 1) return moves[0];
+
+    // Always know the safe pick first — used as floor quality and as recovery path.
+    const heuristicPick = await this.fallback.pickMove(summary, moves);
+
+    // While gear-capped (grass / off-track), skip the LLM — recovery must be fast
+    // and correct; Nova Micro is slow and often freezes the turn UI.
+    if (summary.gearLimited) {
+      return heuristicPick;
+    }
 
     try {
       const command = new ConverseCommand({
@@ -223,19 +264,24 @@ export class BedrockBrain implements MoveBrain {
         inferenceConfig: { maxTokens: this.maxTokens, temperature: 0.2 },
       });
 
-      const response = await this.client.send(command);
+      const response = await this.sendWithTimeout(command);
       const text = response.output?.message?.content?.[0]?.text ?? '';
       const index = this.parseMoveIndex(text);
 
       if (index !== null && index >= 0 && index < moves.length) {
-        const chosen = moves[index];
-        // Nova Micro often "plays safe" with (0,0). That is legal but looks
-        // like the pilot skipped — fall back when any moving option exists.
+        const chosen = moves[index]!;
         const stationary = chosen.velocity.x === 0 && chosen.velocity.y === 0;
         const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
         if (stationary && hasMotion) {
           console.warn('[BRAIN] Model picked standstill — using heuristic');
-          return this.fallback.pickMove(summary, moves);
+          return heuristicPick;
+        }
+        if (isDominatedByHeuristic(chosen, heuristicPick)) {
+          console.warn(
+            `[BRAIN] Model pick dominated (gear=${chosen.gear} prog=${chosen.pathProgress.toFixed(2)} ` +
+              `vs heuristic gear=${heuristicPick.gear} prog=${heuristicPick.pathProgress.toFixed(2)}) — using heuristic`
+          );
+          return heuristicPick;
         }
         return chosen;
       }
@@ -243,7 +289,26 @@ export class BedrockBrain implements MoveBrain {
     } catch (err) {
       console.warn('[BRAIN] Bedrock call failed — using heuristic:', err instanceof Error ? err.message : err);
     }
-    return this.fallback.pickMove(summary, moves);
+    return heuristicPick;
+  }
+
+  private sendWithTimeout(command: ConverseCommand) {
+    return new Promise<Awaited<ReturnType<ConverseClient['send']>>>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Bedrock timeout after ${this.timeoutMs}ms`)),
+        this.timeoutMs
+      );
+      this.client
+        .send(command)
+        .then((res) => {
+          clearTimeout(timer);
+          resolve(res);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
   }
 
   private buildPrompt(summary: BoardSummary, moves: AnnotatedMove[]): string {
