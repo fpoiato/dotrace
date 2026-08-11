@@ -1,11 +1,5 @@
-import {
-  MAX_GEAR_DELTA,
-  TrackDefinition,
-  Vector2D,
-  getTileAt,
-  isValidGearChange,
-  landingPosition,
-} from '../../shared/ws-types';
+import { BotMemory, chooseBotMove, createBotMemory } from '../../shared/bot-ai';
+import { Player, TrackDefinition, Vector2D, createLobbyPlayer } from '../../shared/ws-types';
 import type { CarState, TrackState } from './state-parser';
 
 export interface Acceleration {
@@ -13,110 +7,64 @@ export interface Acceleration {
   dy: number;
 }
 
-interface CandidateMove {
-  dx: number;
-  dy: number;
-  nextVelocity: Vector2D;
-  landing: Vector2D;
-}
+/** Cars further than this from the last known spot mean a new race started. */
+const TELEPORT_THRESHOLD = 12;
 
 /**
- * Pathfinding stub — enumerates the 9 legal gear changes and picks a
- * placeholder move. Replace the scoring logic with a real planner later.
+ * Adapter between the headless client and the shared racing AI
+ * (shared/bot-ai.ts): keeps per-race line-progress memory and converts the
+ * chosen velocity back into an acceleration delta for the move envelope.
  */
 export class BotBrain {
-  /** Cached finish-line centroid for greedy distance heuristic. */
-  private finishGoal: Vector2D | null = null;
+  private memory: BotMemory | null = null;
+  private memoryTrackId: string | null = null;
+  private lastPosition: Vector2D | null = null;
 
   /**
    * Compute the acceleration (Δv per axis) for the next turn.
    * Returns `{ dx, dy }` where each component is in {-1, 0, 1}.
    */
-  computeNextMove(carState: CarState, trackState: TrackState, track: TrackDefinition): Acceleration {
-    const candidates = this.enumerateCandidates(carState, trackState, track);
-    if (candidates.length === 0) {
-      return { dx: 0, dy: 0 };
-    }
-
-    const goal = this.getFinishGoal(track);
-    const best = this.pickGreedy(candidates, goal);
-    return { dx: best.dx, dy: best.dy };
-  }
-
-  /** All 9 gear-change options, filtered to in-bounds landings. */
-  private enumerateCandidates(
+  computeNextMove(
     carState: CarState,
     trackState: TrackState,
-    track: TrackDefinition
-  ): CandidateMove[] {
-    const { position, velocity, isOffTrack } = carState;
-    const candidates: CandidateMove[] = [];
-
-    for (let dx = -MAX_GEAR_DELTA; dx <= MAX_GEAR_DELTA; dx++) {
-      for (let dy = -MAX_GEAR_DELTA; dy <= MAX_GEAR_DELTA; dy++) {
-        const nextVelocity: Vector2D = { x: velocity.x + dx, y: velocity.y + dy };
-
-        if (!isValidGearChange(velocity, nextVelocity, isOffTrack)) continue;
-
-        const landing = landingPosition(position, nextVelocity);
-        if (!this.isInBounds(landing, trackState)) continue;
-        if (getTileAt(track, landing.x, landing.y) === null) continue;
-
-        candidates.push({ dx, dy, nextVelocity, landing });
-      }
+    track: TrackDefinition,
+    others: Player[] = [],
+    round = 1
+  ): Acceleration {
+    // A teleport (back to the start grid) means a new race: re-anchor.
+    const teleported =
+      this.lastPosition !== null &&
+      Math.hypot(
+        carState.position.x - this.lastPosition.x,
+        carState.position.y - this.lastPosition.y
+      ) > TELEPORT_THRESHOLD;
+    if (!this.memory || this.memoryTrackId !== track.id || teleported) {
+      this.memory = createBotMemory();
+      this.memoryTrackId = track.id;
     }
+    this.lastPosition = { ...carState.position };
 
-    return candidates;
+    // Rebuild a Player-shaped view so the shared rules (getValidMoves) apply
+    // exactly as the host sees them. state-parser reports the gear-limited
+    // flag; map it back onto the fields isGearLimited inspects.
+    const gearLimited = carState.gearLimited ?? carState.isOffTrack;
+    const pseudoPlayer: Player = {
+      ...createLobbyPlayer('bot-self', 'Bot', false, 0, '#000000'),
+      position: { ...carState.position },
+      velocity: { ...carState.velocity },
+      isOffTrack: carState.isOffTrack,
+      gearPenaltyUntilRound:
+        gearLimited && !carState.isOffTrack ? round + 1 : undefined,
+    };
+
+    const velocity = chooseBotMove(pseudoPlayer, track, others, round, this.memory);
+    return {
+      dx: clampDelta(velocity.x - carState.velocity.x),
+      dy: clampDelta(velocity.y - carState.velocity.y),
+    };
   }
+}
 
-  private isInBounds(point: Vector2D, trackState: TrackState): boolean {
-    return (
-      point.x >= 0 &&
-      point.x < trackState.width &&
-      point.y >= 0 &&
-      point.y < trackState.height
-    );
-  }
-
-  /** Placeholder: minimize Manhattan distance to the finish stripe centroid. */
-  private pickGreedy(candidates: CandidateMove[], goal: Vector2D): CandidateMove {
-    let best = candidates[0];
-    let bestScore = Number.POSITIVE_INFINITY;
-
-    for (const move of candidates) {
-      const score =
-        Math.abs(move.landing.x - goal.x) + Math.abs(move.landing.y - goal.y);
-      if (score < bestScore) {
-        bestScore = score;
-        best = move;
-      }
-    }
-
-    return best;
-  }
-
-  private getFinishGoal(track: TrackDefinition): Vector2D {
-    if (this.finishGoal) return this.finishGoal;
-
-    let sumX = 0;
-    let sumY = 0;
-    let count = 0;
-
-    for (let y = 0; y < track.height; y++) {
-      for (let x = 0; x < track.width; x++) {
-        if (track.grid[y][x] === 'finish') {
-          sumX += x;
-          sumY += y;
-          count++;
-        }
-      }
-    }
-
-    this.finishGoal =
-      count > 0
-        ? { x: Math.round(sumX / count), y: Math.round(sumY / count) }
-        : { x: Math.floor(track.width / 2), y: Math.floor(track.height / 2) };
-
-    return this.finishGoal;
-  }
+function clampDelta(d: number): number {
+  return Math.max(-1, Math.min(1, d));
 }

@@ -12,6 +12,8 @@ export interface CarState {
   position: { x: number; y: number };
   velocity: { x: number; y: number };
   isOffTrack: boolean;
+  /** Off-track OR serving a turns-mode grass penalty (max gear 1 either way). */
+  gearLimited?: boolean;
 }
 
 /** Minimal track context the brain needs for move filtering. */
@@ -35,7 +37,8 @@ function toCarState(player: Player, round: number): CarState {
   return {
     position: { ...player.position },
     velocity: { ...player.velocity },
-    isOffTrack: isGearLimited(player, round),
+    isOffTrack: player.isOffTrack,
+    gearLimited: isGearLimited(player, round),
   };
 }
 

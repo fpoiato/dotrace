@@ -165,7 +165,13 @@ class AgentiveClient {
 
     if (!ctx.isMyTurn || this.moveInFlight) return;
 
-    const acceleration = this.brain.computeNextMove(ctx.car, ctx.track, trackDef);
+    const acceleration = this.brain.computeNextMove(
+      ctx.car,
+      ctx.track,
+      trackDef,
+      ctx.gameState.players,
+      ctx.gameState.round
+    );
     const outbound = buildMoveEnvelope(this.roomCode, acceleration, ctx.car.velocity);
     const connectionId = this.ws.getConnectionId();
     if (!connectionId) return;
