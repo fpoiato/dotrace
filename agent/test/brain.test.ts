@@ -49,6 +49,12 @@ describe('HeuristicBrain', () => {
       expect(chosen.grassShortcut).toBe(false);
     }
   });
+
+  it('does not stand still when a moving legal option exists', async () => {
+    const { summary, moves } = fixtures();
+    const chosen = await new HeuristicBrain().pickMove(summary, moves);
+    expect(chosen.velocity.x !== 0 || chosen.velocity.y !== 0).toBe(true);
+  });
 });
 
 describe('BedrockBrain', () => {
@@ -56,22 +62,25 @@ describe('BedrockBrain', () => {
 
   it('uses the model-selected move when the index is valid', async () => {
     const { summary, moves } = fixtures();
+    const movingIdx = moves.findIndex((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
     const brain = new BedrockBrain({
       ...options,
-      client: stubClient('{"moveIndex": 2}'),
+      client: stubClient(JSON.stringify({ moveIndex: movingIdx })),
     });
     const chosen = await brain.pickMove(summary, moves);
-    expect(chosen).toBe(moves[2]);
+    expect(chosen).toBe(moves[movingIdx]);
   });
 
   it('parses JSON wrapped in prose or fences', async () => {
     const { summary, moves } = fixtures();
+    const movingIdx = moves.findIndex((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
+    expect(movingIdx).toBeGreaterThanOrEqual(0);
     const brain = new BedrockBrain({
       ...options,
-      client: stubClient('Best option:\n```json\n{"moveIndex": 1}\n```'),
+      client: stubClient(`Best option:\n\`\`\`json\n{"moveIndex": ${movingIdx}}\n\`\`\``),
     });
     const chosen = await brain.pickMove(summary, moves);
-    expect(chosen).toBe(moves[1]);
+    expect(chosen).toBe(moves[movingIdx]);
   });
 
   it('falls back to heuristic on out-of-range index', async () => {
@@ -102,6 +111,20 @@ describe('BedrockBrain', () => {
     });
     const chosen = await brain.pickMove(summary, moves);
     expect(moves).toContain(chosen);
+  });
+
+  it('falls back to heuristic when the model picks standstill with motion available', async () => {
+    const { summary, moves } = fixtures();
+    const zeroIdx = moves.findIndex((m) => m.velocity.x === 0 && m.velocity.y === 0);
+    expect(zeroIdx).toBeGreaterThanOrEqual(0);
+    expect(moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0)).toBe(true);
+
+    const brain = new BedrockBrain({
+      ...options,
+      client: stubClient(JSON.stringify({ moveIndex: zeroIdx })),
+    });
+    const chosen = await brain.pickMove(summary, moves);
+    expect(chosen.velocity.x !== 0 || chosen.velocity.y !== 0).toBe(true);
   });
 
   it('skips the model entirely when only one legal move exists', async () => {

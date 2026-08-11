@@ -185,6 +185,23 @@ describe('GameSession', () => {
     expect(session.getSnapshot().status).toBe('approved');
   });
 
+  it('waitUntilNotMyTurn resolves after the turn advances', async () => {
+    const { push, session } = setup();
+    await session.join();
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
+
+    const state = relayState();
+    state.currentTurnIndex = 1;
+    push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
+    expect(session.isMyTurn()).toBe(true);
+
+    const done = session.waitUntilNotMyTurn(5_000);
+    state.currentTurnIndex = 0;
+    push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
+    await expect(done).resolves.toBeUndefined();
+    expect(session.isMyTurn()).toBe(false);
+  });
+
   it('submits moves via FORWARD_TO_HOST', async () => {
     const { push, http, session } = setup();
     await session.join();
