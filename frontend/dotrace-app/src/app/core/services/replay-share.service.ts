@@ -99,16 +99,19 @@ export function buildSharedReplayPayload(state: GameState): SharedReplayPayload 
     return row;
   });
 
-  // Include anyone who appears in the log but not in players (shouldn't happen).
+  // Include anyone who appears in the log but left the roster (AI Lambda
+  // disconnects after GAME_OVER). Prefer podium nickname when available.
   for (const rec of log) {
     if (!idMap.has(rec.connectionId)) {
       const i = players.length;
       idMap.set(rec.connectionId, i);
+      const podiumHit = state.podium?.find((e) => e.connectionId === rec.connectionId);
       players.push({
         id: `p${i}`,
-        n: '???',
+        n: podiumHit?.nickname ?? `Pilot ${i + 1}`,
         c: '#888888',
         jo: i,
+        fo: podiumHit?.position,
       });
     }
   }

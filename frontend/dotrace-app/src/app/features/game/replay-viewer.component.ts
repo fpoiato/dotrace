@@ -8,156 +8,10 @@ import {
   inject,
 } from '@angular/core';
 import { TranslateModule } from '@ngx-translate/core';
-import {
-  GameState,
-  MoveRecord,
-  Player,
-  PlayerStatus,
-  Vector2D,
-} from '../../core/models/ws-types';
+import { GameState, Player } from '../../core/models/ws-types';
 import { ReplayShareService } from '../../core/services/replay-share.service';
 import { TrackCanvasComponent } from './track-canvas.component';
-
-interface ReplayPlayerState {
-  connectionId: string;
-  nickname: string;
-  color: string;
-  isHost: boolean;
-  joinOrder: number;
-  status: PlayerStatus;
-  position: Vector2D;
-  velocity: Vector2D;
-  isOffTrack: boolean;
-  trail: Vector2D[];
-  lap: number;
-  finishOrder?: number;
-  finishedAt?: number;
-  finishRound?: number;
-  passedCheckpoint?: boolean;
-  diceRoll?: number;
-}
-
-interface ReplayFrame {
-  seq: number;
-  round: number;
-  movedId?: string;
-  players: ReplayPlayerState[];
-}
-
-function buildReplayFrames(replayLog: MoveRecord[], players: Player[]): ReplayFrame[] {
-  if (replayLog.length === 0) return [];
-
-  const meta = new Map(
-    players
-      .map((p) => ({
-        connectionId: p.connectionId,
-        nickname: p.nickname,
-        color: p.color,
-        isHost: p.isHost,
-        joinOrder: p.joinOrder,
-        status: p.status,
-        finishOrder: p.finishOrder,
-        finishedAt: p.finishedAt,
-        finishRound: p.finishRound,
-        diceRoll: p.diceRoll,
-      }))
-      .map((m) => [m.connectionId, m])
-  );
-
-  const currentState = new Map<string, ReplayPlayerState>();
-
-  // round=0 marks every car's grid slot (seq alone is not reliable — each push
-  // gets a unique seq, so only the first driver would match seq===0).
-  const startByPlayer = new Map(
-    replayLog.filter((r) => r.round === 0).map((r) => [r.connectionId, r])
-  );
-
-  for (const p of players) {
-    const info = meta.get(p.connectionId);
-    if (!info) continue;
-    const rec = startByPlayer.get(p.connectionId);
-    const pos = rec?.position ?? p.trail?.[0] ?? p.position;
-    currentState.set(p.connectionId, {
-      connectionId: p.connectionId,
-      nickname: info.nickname,
-      color: info.color,
-      isHost: info.isHost,
-      joinOrder: info.joinOrder,
-      status: info.status,
-      position: { ...pos },
-      velocity: rec ? { ...rec.velocity } : { ...p.velocity },
-      isOffTrack: rec?.isOffTrack ?? p.isOffTrack,
-      trail: [{ ...pos }],
-      lap: rec?.lap ?? p.lap ?? 1,
-      diceRoll: info.diceRoll,
-    });
-  }
-
-  const frames: ReplayFrame[] = [];
-  frames.push({
-    seq: 0,
-    round: 0,
-    movedId: undefined,
-    players: cloneStates(currentState),
-  });
-
-  const moves = replayLog.filter((r) => r.round > 0).sort((a, b) => a.seq - b.seq);
-  for (const rec of moves) {
-    let ps = currentState.get(rec.connectionId);
-    if (!ps) {
-      const info = meta.get(rec.connectionId);
-      if (!info) continue;
-      ps = {
-        connectionId: rec.connectionId,
-        nickname: info.nickname,
-        color: info.color,
-        isHost: info.isHost,
-        joinOrder: info.joinOrder,
-        status: info.status,
-        position: { ...rec.position },
-        velocity: { ...rec.velocity },
-        isOffTrack: rec.isOffTrack,
-        trail: [{ ...rec.position }],
-        lap: rec.lap,
-        diceRoll: info.diceRoll,
-      };
-      currentState.set(rec.connectionId, ps);
-    }
-
-    const trail = rec.lap > ps.lap ? [{ ...rec.position }] : [...ps.trail, { ...rec.position }];
-
-    const info = meta.get(rec.connectionId);
-    currentState.set(rec.connectionId, {
-      ...ps,
-      position: { ...rec.position },
-      velocity: { ...rec.velocity },
-      isOffTrack: rec.isOffTrack,
-      lap: rec.lap,
-      trail,
-      finishOrder: info?.finishOrder,
-      finishedAt: info?.finishedAt,
-      finishRound: info?.finishRound,
-    });
-
-    frames.push({
-      seq: rec.seq,
-      round: rec.round,
-      movedId: rec.connectionId,
-      players: cloneStates(currentState),
-    });
-  }
-
-  return frames;
-}
-
-function cloneStates(map: Map<string, ReplayPlayerState>): ReplayPlayerState[] {
-  return [...map.values()].map((s) => ({
-    ...s,
-    position: { ...s.position },
-    velocity: { ...s.velocity },
-    trail: [...s.trail],
-  }));
-}
+import { ReplayFrame, buildReplayFrames } from './replay-frames';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Speed = (typeof SPEEDS)[number];
@@ -328,7 +182,11 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.frames = buildReplayFrames(this.state.replayLog ?? [], this.state.players);
+    this.frames = buildReplayFrames(
+      this.state.replayLog ?? [],
+      this.state.players,
+      this.state.podium ?? []
+    );
     this.currentIndex = 0;
     this.updateReplayState();
   }
