@@ -177,7 +177,8 @@ export class DotRaceWsStack extends Stack {
       entry: lambdaEntry('ai-player'),
       handler: 'handler',
       runtime: Runtime.NODEJS_20_X,
-      timeout: Duration.minutes(30),
+      // Hard AWS Lambda cap is 15 minutes (spawn→finish including lobby wait).
+      timeout: Duration.minutes(15),
       memorySize: 512,
       environment: {
         NODE_OPTIONS: '--enable-source-maps',
