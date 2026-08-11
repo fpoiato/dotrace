@@ -81,7 +81,9 @@ export async function raceLoop(
       await session.waitUntilNotMyTurn();
     } catch (err) {
       console.warn('[MOVE FAILED]', err instanceof Error ? err.message : err);
-      await sleep(1000);
+      // If the host never advanced (illegal/stale move), retry quickly with a
+      // fresh board instead of idling on "Aguardando …".
+      await sleep(400);
     }
   }
 }
