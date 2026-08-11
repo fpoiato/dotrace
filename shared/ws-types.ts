@@ -36,6 +36,12 @@ export interface TrackDefinition {
   /** Race-direction arrows drawn next to the start stripe. */
   arrows: TrackArrow[];
   /**
+   * Directed racing line (closed polyline; last point equals first). Used by
+   * the AI pilot for corridor progress — BFS alone would take the short wrong
+   * way around a loop.
+   */
+  centerline: Vector2D[];
+  /**
    * Zone (usually the far side of the circuit) a car must have visited before
    * landing on the finish stripe counts as completing the lap. Prevents
    * "finishing" by reversing over the line on turn one.

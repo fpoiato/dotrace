@@ -204,6 +204,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     grid,
     startLine: spec.startLine,
     arrows: spec.arrows,
+    centerline: spec.centerline.map((p) => ({ ...p })),
     checkpoint: spec.checkpoint,
   };
 }

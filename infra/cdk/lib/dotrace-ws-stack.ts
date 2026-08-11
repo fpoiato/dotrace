@@ -184,6 +184,8 @@ export class DotRaceWsStack extends Stack {
         WS_URL: stage.url,
         API_URL: httpApi.apiEndpoint,
         BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
+        // Track-aware heuristic is the default pilot; set BRAIN=bedrock to try LLM.
+        BRAIN: 'heuristic',
         MOVE_DELAY_MS: '600',
       },
       bundling: { externalModules: ['@aws-sdk/*'] },
