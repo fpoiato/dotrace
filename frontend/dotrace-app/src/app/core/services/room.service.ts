@@ -290,11 +290,12 @@ export class RoomService {
    * Ask the server to spawn an AI pilot into this room. The AI joins through
    * the normal player flow and is auto-approved server-side, so it shows up
    * via the usual PLAYER_APPROVED broadcast.
+   * @param brain 'heuristic' = Bot (local planner), 'bedrock' = IA (Nova Micro)
    */
-  async spawnAiPlayer(nickname: string): Promise<void> {
+  async spawnAiPlayer(nickname: string, brain: 'bedrock' | 'heuristic' = 'heuristic'): Promise<void> {
     const room = this.room;
     if (!room?.isHost) return;
-    await this.api.postAction('SPAWN_AI_PLAYER', { nickname }, room.roomCode);
+    await this.api.postAction('SPAWN_AI_PLAYER', { nickname, brain }, room.roomCode);
   }
 
   approvePlayer(connectionId: string): void {

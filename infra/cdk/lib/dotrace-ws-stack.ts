@@ -177,16 +177,15 @@ export class DotRaceWsStack extends Stack {
       entry: lambdaEntry('ai-player'),
       handler: 'handler',
       runtime: Runtime.NODEJS_20_X,
-      timeout: Duration.minutes(15),
+      timeout: Duration.minutes(30),
       memorySize: 512,
       environment: {
         NODE_OPTIONS: '--enable-source-maps',
         WS_URL: stage.url,
         API_URL: httpApi.apiEndpoint,
         BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
-        // Bedrock (Nova Micro) with track-aware heuristic fallback on any failure.
-        // Set BRAIN=heuristic to skip the LLM entirely.
-        BRAIN: 'bedrock',
+        // Fallback when spawn payload omits brain; host chooses per pilot in lobby.
+        BRAIN: 'heuristic',
         MOVE_DELAY_MS: '600',
       },
       bundling: { externalModules: ['@aws-sdk/*'] },
