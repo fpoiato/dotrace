@@ -33,6 +33,13 @@ export interface TrackDefinition {
   height: number;
   grid: TileType[][];
   startLine: Vector2D[];
+  /**
+   * Closed polyline the circuit was drawn from, in race order. Kept on the
+   * definition because it is the only record of *lap order* — the raster grid
+   * alone cannot say which way round a lap goes, and on a circuit that crosses
+   * itself it cannot say which pass a cell belongs to either.
+   */
+  centerline: Vector2D[];
   /** Race-direction arrows drawn next to the start stripe. */
   arrows: TrackArrow[];
   /**
@@ -43,6 +50,11 @@ export interface TrackDefinition {
   checkpoint?: CheckpointRect;
 }
 
+/** Planner strength of a CPU racer. */
+export type BotSkill = 'EASY' | 'MEDIUM' | 'HARD';
+
+export const BOT_SKILLS = ['EASY', 'MEDIUM', 'HARD'] as const;
+
 export interface Player {
   connectionId: string;
   nickname: string;
@@ -50,6 +62,13 @@ export interface Player {
   isHost: boolean;
   joinOrder: number;
   status: PlayerStatus;
+  /**
+   * CPU racer driven by the host client — there is no WebSocket connection
+   * behind this player, so its `connectionId` is synthetic (`bot:*`).
+   */
+  isBot?: boolean;
+  /** Planner strength (bots only). */
+  botSkill?: BotSkill;
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
@@ -345,6 +364,78 @@ export function createLobbyPlayer(
     trail: [],
     lap: 1,
   };
+}
+
+/**
+ * Prefix for the synthetic ids of CPU racers. Bots never hold a WebSocket
+ * connection: the host drives them locally and publishes them to everyone
+ * else through the usual RELAY snapshots, so their ids must not be able to
+ * collide with a real API Gateway connection id.
+ */
+export const BOT_ID_PREFIX = 'bot:';
+
+/** Room capacity reserved for CPU racers. */
+export const MAX_BOTS = 5;
+
+export const DEFAULT_BOT_SKILL: BotSkill = 'MEDIUM';
+
+/** Driver names handed out to CPU racers, in order. */
+export const BOT_NAMES = [
+  'Ayrton',
+  'Nelson',
+  'Emerson',
+  'Rubens',
+  'Felipe',
+  'Chico',
+  'Bruno',
+  'Tarso',
+  'Ingo',
+  'Lucas',
+  'Pedro',
+  'Vitor',
+];
+
+export function isBotId(connectionId: string): boolean {
+  return connectionId.startsWith(BOT_ID_PREFIX);
+}
+
+export function isBot(player: Pick<Player, 'connectionId' | 'isBot'>): boolean {
+  return player.isBot === true || isBotId(player.connectionId);
+}
+
+export function botsOf(players: Player[]): Player[] {
+  return players.filter((p) => isBot(p));
+}
+
+export function humansOf(players: Player[]): Player[] {
+  return players.filter((p) => !isBot(p));
+}
+
+export function createBotPlayer(
+  nickname: string,
+  joinOrder: number,
+  color: string,
+  skill: BotSkill = DEFAULT_BOT_SKILL,
+  seed = Math.random().toString(36).slice(2, 8)
+): Player {
+  const bot = createLobbyPlayer(`${BOT_ID_PREFIX}${seed}`, nickname, false, joinOrder, color);
+  bot.isBot = true;
+  bot.botSkill = skill;
+  return bot;
+}
+
+/** First driver name and palette colour not already taken in the room. */
+export function pickBotIdentity(
+  taken: Player[]
+): { nickname: string; color: string } {
+  const usedNames = new Set(taken.map((p) => p.nickname));
+  const usedColors = new Set(taken.map((p) => p.color));
+  const nickname =
+    BOT_NAMES.find((n) => !usedNames.has(n)) ?? `CPU ${taken.length + 1}`;
+  const color =
+    PLAYER_COLORS.find((c) => !usedColors.has(c)) ??
+    PLAYER_COLORS[taken.length % PLAYER_COLORS.length];
+  return { nickname, color };
 }
 
 export function createInitialState(players: Player[], hostId: string): GameState {
@@ -868,10 +959,12 @@ export interface Top10Entry {
 
 /**
  * Build host-submitted per-race deltas from the finished GameState.
- * One entry per player who took part; counters are 0/1 for this race only.
+ * One entry per human who took part; counters are 0/1 for this race only.
+ * CPU racers are left out — the global board ranks nicknames, and bot names
+ * are recycled across rooms.
  */
 export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
-  return state.players.map((p) => {
+  return humansOf(state.players).map((p) => {
     const delta: RaceStatDelta = {
       nickname: p.nickname,
       races: 1,

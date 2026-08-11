@@ -58,6 +58,11 @@ function makeTrack(): TrackDefinition {
     height: 4,
     grid,
     startLine: [{ x: 0, y: 0 }],
+    centerline: [
+      { x: 0, y: 1 },
+      { x: 4, y: 1 },
+      { x: 0, y: 1 },
+    ],
     arrows: [],
   };
 }

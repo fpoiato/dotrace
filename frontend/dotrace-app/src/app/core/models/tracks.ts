@@ -203,6 +203,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     height,
     grid,
     startLine: spec.startLine,
+    centerline: spec.centerline,
     arrows: spec.arrows,
     checkpoint: spec.checkpoint,
   };
