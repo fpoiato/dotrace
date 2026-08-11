@@ -808,9 +808,13 @@ export function updateSessionStats(state: GameState): void {
     if (p.finishOrder === 1) entry.wins += 1;
     if (p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE) entry.podiums += 1;
 
-    const lapMs = bestLapMs(p, state.raceStartedAt);
-    if (lapMs !== undefined && (entry.bestLapMs === undefined || lapMs < entry.bestLapMs)) {
-      entry.bestLapMs = lapMs;
+    // Wall-clock splits only count in TIMED mode. In TURNS they include waiting
+    // for other players and look like total race time on the leaderboard.
+    if (isTimedMode(state)) {
+      const lapMs = bestLapMs(p, state.raceStartedAt);
+      if (lapMs !== undefined && (entry.bestLapMs === undefined || lapMs < entry.bestLapMs)) {
+        entry.bestLapMs = lapMs;
+      }
     }
     const lapRounds = bestLapRounds(p);
     if (
@@ -825,18 +829,18 @@ export function updateSessionStats(state: GameState): void {
   state.sessionStats = [...byId.values()];
 }
 
-/** Session ranking sorted for display: wins → podiums → best lap → best rounds → name. */
+/** Session ranking sorted for display: wins → best lap → best rounds → podiums → name. */
 export function buildSessionRanking(state: GameState): SessionPlayerStats[] {
   const rows = [...(state.sessionStats ?? [])];
   rows.sort((a, b) => {
     if (b.wins !== a.wins) return b.wins - a.wins;
-    if (b.podiums !== a.podiums) return b.podiums - a.podiums;
     const aLap = a.bestLapMs ?? Number.POSITIVE_INFINITY;
     const bLap = b.bestLapMs ?? Number.POSITIVE_INFINITY;
     if (aLap !== bLap) return aLap - bLap;
     const aRounds = a.bestLapRounds ?? Number.POSITIVE_INFINITY;
     const bRounds = b.bestLapRounds ?? Number.POSITIVE_INFINITY;
     if (aRounds !== bRounds) return aRounds - bRounds;
+    if (b.podiums !== a.podiums) return b.podiums - a.podiums;
     return a.nickname.localeCompare(b.nickname);
   });
   return rows;
@@ -875,21 +879,36 @@ export interface Top10Entry {
 }
 
 /**
+ * Lobby AI pilots use "Bot …" / "IA …" nicknames (optionally with a difficulty
+ * suffix). They must not pollute the global Top 10.
+ */
+export function isAiPilotNickname(nickname: string): boolean {
+  return /^(Bot|IA)\s/i.test(nickname.trim());
+}
+
+/**
  * Build host-submitted per-race deltas from the finished GameState.
- * One entry per player who took part; counters are 0/1 for this race only.
+ * One entry per human player who took part; counters are 0/1 for this race only.
+ *
+ * bestLapMs is only included for TIMED races — TURNS wall-clock splits include
+ * waiting time and were being saved as bogus "best laps" (often ≈ race total).
  */
 export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
-  return state.players.map((p) => {
-    const delta: RaceStatDelta = {
-      nickname: p.nickname,
-      races: 1,
-      wins: p.finishOrder === 1 ? 1 : 0,
-      podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
-    };
-    const lapMs = bestLapMs(p, state.raceStartedAt);
-    if (lapMs !== undefined) delta.bestLapMs = lapMs;
-    const rounds = bestLapRounds(p);
-    if (rounds !== undefined) delta.bestLapRounds = rounds;
-    return delta;
-  });
+  return state.players
+    .filter((p) => !isAiPilotNickname(p.nickname))
+    .map((p) => {
+      const delta: RaceStatDelta = {
+        nickname: p.nickname,
+        races: 1,
+        wins: p.finishOrder === 1 ? 1 : 0,
+        podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
+      };
+      if (isTimedMode(state)) {
+        const lapMs = bestLapMs(p, state.raceStartedAt);
+        if (lapMs !== undefined) delta.bestLapMs = lapMs;
+      }
+      const rounds = bestLapRounds(p);
+      if (rounds !== undefined) delta.bestLapRounds = rounds;
+      return delta;
+    });
 }

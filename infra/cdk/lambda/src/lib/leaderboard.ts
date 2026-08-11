@@ -56,9 +56,22 @@ const WINS_PAD = 1_000_000;
 const MAX_LAP_MS = 9_999_999_999;
 /** Missing best-lap rounds sorts last (6 digits). */
 const MAX_LAP_ROUNDS = 999_999;
+/**
+ * Upper bound for a plausible TIMED best-lap. Older TURNS wall-clock "laps"
+ * (often several minutes of waiting) are treated as missing so they stop
+ * dominating the Top 10 display/sort.
+ */
+export const MAX_PLAUSIBLE_LAP_MS = 10 * 60 * 1000;
 
 export function nicknameKey(nickname: string): string {
   return nickname.trim().toLowerCase();
+}
+
+/** Drop non-positive / absurd wall-clock "best laps" (legacy TURNS pollution). */
+export function sanitizeBestLapMs(ms: number | undefined): number | undefined {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return undefined;
+  const n = Math.floor(ms);
+  return n > MAX_PLAUSIBLE_LAP_MS ? undefined : n;
 }
 
 /**
@@ -91,8 +104,8 @@ export function compareLeaderboardEntries(
   b: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'>
 ): number {
   if (b.wins !== a.wins) return b.wins - a.wins;
-  const aLap = a.bestLapMs ?? Number.POSITIVE_INFINITY;
-  const bLap = b.bestLapMs ?? Number.POSITIVE_INFINITY;
+  const aLap = sanitizeBestLapMs(a.bestLapMs) ?? Number.POSITIVE_INFINITY;
+  const bLap = sanitizeBestLapMs(b.bestLapMs) ?? Number.POSITIVE_INFINITY;
   if (aLap !== bLap) return aLap - bLap;
   const aRounds = a.bestLapRounds ?? Number.POSITIVE_INFINITY;
   const bRounds = b.bestLapRounds ?? Number.POSITIVE_INFINITY;
@@ -109,7 +122,10 @@ function clampDelta(raw: RaceStatDelta): RaceStatDelta | null {
     wins: Math.max(0, Math.min(1, Math.floor(Number(raw.wins) || 0))),
     podiums: Math.max(0, Math.min(1, Math.floor(Number(raw.podiums) || 0))),
     bestLapMs:
-      typeof raw.bestLapMs === 'number' && raw.bestLapMs > 0 && Number.isFinite(raw.bestLapMs)
+      typeof raw.bestLapMs === 'number' &&
+      raw.bestLapMs > 0 &&
+      Number.isFinite(raw.bestLapMs) &&
+      raw.bestLapMs <= MAX_PLAUSIBLE_LAP_MS
         ? Math.floor(raw.bestLapMs)
         : undefined,
     bestLapRounds:
@@ -246,10 +262,11 @@ export async function getTop10(): Promise<Top10Entry[]> {
     races: row.races ?? 0,
     wins: row.wins ?? 0,
     podiums: row.podiums ?? 0,
-    bestLapMs: row.bestLapMs,
+    bestLapMs: sanitizeBestLapMs(row.bestLapMs),
     bestLapRounds: row.bestLapRounds,
   }));
 
+  // Wins first, then plausible best-lap time, then fewest rounds.
   entries.sort(compareLeaderboardEntries);
   return entries.slice(0, TOP_N);
 }
