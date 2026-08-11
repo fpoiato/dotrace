@@ -134,6 +134,41 @@ describe('GameSession', () => {
     await expect(session.waitForTurn(50)).rejects.toThrow('Timed out');
   });
 
+  it('does not downgrade to pending after an earlier PLAYER_APPROVED (auto-approve race)', async () => {
+    const { push, session } = setup();
+    await session.join();
+    expect(session.getSnapshot().status).toBe('pending_approval');
+
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
+    expect(session.getSnapshot().status).toBe('approved');
+
+    // Late JOIN_PENDING (the pre-fix HTTP reply shape) must not undo approval.
+    push.emit({
+      action: 'JOIN_PENDING',
+      payload: { connectionId: 'conn-ai', roomCode: 'ABCDE', nickname: 'AI Pilot' },
+    });
+    expect(session.getSnapshot().status).toBe('approved');
+  });
+
+  it('accepts PLAYER_APPROVED as the join HTTP reply (auto-approve path)', async () => {
+    const push = new FakePush();
+    const http = new FakeHttp();
+    http.postAction = <T = unknown>() =>
+      Promise.resolve({
+        action: 'PLAYER_APPROVED',
+        payload: {
+          connectionId: 'conn-ai',
+          nickname: 'AI Pilot',
+          status: 'approved',
+          players: [],
+        },
+      } as WsEnvelope<T>);
+
+    const session = new GameSession(push, http, 'ABCDE', 'AI Pilot');
+    await session.join();
+    expect(session.getSnapshot().status).toBe('approved');
+  });
+
   it('ignores approval broadcasts and rejections aimed at other players', async () => {
     const { push, session } = setup();
     await session.join();
