@@ -1,10 +1,10 @@
 import { AsyncPipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode } from '../../core/models/ws-types';
+import { BOT_DIFFICULTIES, BotDifficulty, GAME_MODES, GameMode, MAX_PLAYERS } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -22,10 +22,12 @@ export class LobbyComponent implements OnInit, OnDestroy {
   private readonly game = inject(GameEngineService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly room$ = this.room.room$;
   readonly players$ = this.room.players$;
   readonly pending$ = this.room.pending$;
+  readonly bots$ = this.game.bots$;
   readonly tracks = TRACKS;
 
   selectedTrackId = '';
@@ -33,6 +35,8 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedGameMode: GameMode = 'TURNS';
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
+  readonly botDifficulties = BOT_DIFFICULTIES;
+  readonly maxPlayers = MAX_PLAYERS;
   readonly practiceHintKey = 'lobby.practiceHint';
   copied = false;
   showHowTo = false;
@@ -45,6 +49,16 @@ export class LobbyComponent implements OnInit, OnDestroy {
     }
     this.game.init();
     this.game.ensureLobbyState();
+
+    // Landing-page "play vs AI" shortcut drops the host here with ?vs=ai:
+    // pre-fill a medium bot so the race is one tap away.
+    if (
+      this.route.snapshot.queryParamMap.get('vs') === 'ai' &&
+      this.room.room.isHost &&
+      this.game.bots.length === 0
+    ) {
+      this.game.addBot('MEDIUM');
+    }
 
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
@@ -75,12 +89,20 @@ export class LobbyComponent implements OnInit, OnDestroy {
     return getTrackById(trackId)?.nameKey ?? '';
   }
 
-  isPractice(playerCount: number): boolean {
-    return playerCount <= 1;
+  isPractice(playerCount: number, botCount: number): boolean {
+    return playerCount + botCount <= 1;
   }
 
-  startLabelKey(playerCount: number): string {
-    return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
+  startLabelKey(playerCount: number, botCount: number): string {
+    return this.isPractice(playerCount, botCount) ? 'lobby.startPractice' : 'lobby.startRace';
+  }
+
+  addBot(difficulty: BotDifficulty): void {
+    this.game.addBot(difficulty);
+  }
+
+  removeBot(botId: string): void {
+    this.game.removeBot(botId);
   }
 
   approve(id: string): void {

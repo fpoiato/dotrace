@@ -65,13 +65,22 @@ export class LandingComponent implements OnInit {
   }
 
   async createGame(): Promise<void> {
+    await this.createAndNavigate(false);
+  }
+
+  /** Single-player shortcut: create a room and land in the lobby with a bot. */
+  async createVsAi(): Promise<void> {
+    await this.createAndNavigate(true);
+  }
+
+  private async createAndNavigate(vsAi: boolean): Promise<void> {
     if (!this.nickname.trim()) return;
     this.loading = true;
     this.error = '';
     try {
       this.session.save({ nickname: this.nickname.trim() });
       await this.room.createRoom(this.nickname.trim());
-      await this.router.navigate(['/lobby']);
+      await this.router.navigate(['/lobby'], vsAi ? { queryParams: { vs: 'ai' } } : undefined);
     } catch (e) {
       this.error = e instanceof Error ? e.message : 'Error';
     } finally {

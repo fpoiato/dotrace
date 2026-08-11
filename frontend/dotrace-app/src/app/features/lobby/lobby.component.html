@@ -51,6 +51,20 @@
         }
       </div>
 
+      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.ai.title' | translate }}</h2>
+      <div class="mb-6 grid grid-cols-3 gap-3">
+        @for (d of botDifficulties; track d) {
+          <button
+            type="button"
+            (click)="addBot(d)"
+            [disabled]="((players$ | async)?.length ?? 0) + ((bots$ | async)?.length ?? 0) >= maxPlayers"
+            class="min-h-12 rounded-xl border-2 border-slate-600 px-2 text-sm font-semibold transition hover:border-sky-500 hover:bg-sky-500/10 disabled:opacity-40"
+          >
+            + {{ 'lobby.ai.difficulty.' + d | translate }}
+          </button>
+        }
+      </div>
+
       <div class="mb-4 flex gap-2">
         <button
           type="button"
@@ -91,6 +105,25 @@
           }
         </li>
       }
+      @for (b of bots$ | async; track b.id) {
+        <li class="flex min-h-12 items-center gap-3 rounded-xl border border-dashed border-slate-600 bg-slate-800/60 px-4">
+          <span class="h-4 w-4 rounded-full" [style.background]="b.color"></span>
+          <span class="flex-1 font-medium">{{ b.nickname }}</span>
+          <span class="text-xs text-sky-400">
+            {{ 'lobby.ai.badge' | translate }} · {{ 'lobby.ai.difficulty.' + b.difficulty | translate }}
+          </span>
+          @if (room.isHost) {
+            <button
+              type="button"
+              (click)="removeBot(b.id)"
+              [attr.aria-label]="'lobby.ai.remove' | translate"
+              class="flex min-h-9 min-w-9 items-center justify-center rounded-lg bg-slate-700 text-slate-300 transition hover:bg-red-700 hover:text-white"
+            >
+              ✕
+            </button>
+          }
+        </li>
+      }
     </ul>
 
     @if (pending$ | async; as pending) {
@@ -114,7 +147,7 @@
 
     @if (room.isHost) {
       @if (players$ | async; as players) {
-        @if (isPractice(players.length)) {
+        @if (isPractice(players.length, (bots$ | async)?.length ?? 0)) {
           <p class="mb-2 text-center text-sm text-sky-400">{{ practiceHintKey | translate }}</p>
         }
         <button
@@ -123,7 +156,7 @@
           [disabled]="!selectedTrackId"
           class="min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
         >
-          {{ startLabelKey(players.length) | translate }}
+          {{ startLabelKey(players.length, (bots$ | async)?.length ?? 0) | translate }}
         </button>
       }
     }

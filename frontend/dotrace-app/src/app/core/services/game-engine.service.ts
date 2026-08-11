@@ -1,15 +1,21 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
-import { BehaviorSubject, Subscription } from 'rxjs';
+import { BehaviorSubject, Subscription, map } from 'rxjs';
+import { computeBotMove } from '../models/ai';
 import { getTrackById } from '../models/tracks';
 import {
+  BotDifficulty,
   GameMode,
   GameState,
+  MAX_PLAYERS,
   MIN_PLAYERS,
+  PLAYER_COLORS,
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
   Vector2D,
   applyGrassPenalty,
+  buildRaceStatDeltas,
+  buildRaceTelemetry,
   canPlayerMove,
   createInitialState,
   createLobbyPlayer,
@@ -22,19 +28,33 @@ import {
   nextActiveTurnIndex,
   pushReplayMove,
   pushTrail,
+  remainingStopMs,
   remapSessionStatsConnectionId,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
   updateSessionStats,
-  buildRaceStatDeltas,
   zeroVector,
-  buildRaceTelemetry,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
 import { RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
+
+/** A virtual AI opponent registered by the host in the lobby. */
+export interface BotRosterEntry {
+  id: string;
+  nickname: string;
+  difficulty: BotDifficulty;
+  color: string;
+}
+
+/** Delay before a bot takes its TURNS-mode turn (keeps the race watchable). */
+const BOT_TURN_DELAY_MS = 800;
+const BOT_TURN_JITTER_MS = 600;
+/** Base interval between bot moves in TIMED mode. */
+const BOT_TIMED_INTERVAL_MS = 900;
+const BOT_TIMED_JITTER_MS = 700;
 
 @Injectable({ providedIn: 'root' })
 export class GameEngineService implements OnDestroy {
@@ -51,6 +71,34 @@ export class GameEngineService implements OnDestroy {
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
+
+  /**
+   * AI opponents registered by THIS host. The roster is local-only: bots have
+   * no server connection, they exist as virtual players inside the host-built
+   * GameState and are relayed to peers like any human player. Bot turns are
+   * driven from GameState (not this roster), so a promoted replacement host
+   * keeps bot races going even though its roster starts empty.
+   */
+  private botRoster: BotRosterEntry[] = [];
+  private botSeq = 0;
+  /**
+   * Bots visible in the current game state — derived (not from the local
+   * roster) so non-host peers see them in the lobby too.
+   */
+  readonly bots$ = this.state$.pipe(
+    map((state) =>
+      (state?.players ?? [])
+        .filter((p) => p.isBot)
+        .map((p) => ({
+          id: p.connectionId,
+          nickname: p.nickname,
+          difficulty: p.botDifficulty ?? ('MEDIUM' as BotDifficulty),
+          color: p.color,
+        }))
+    )
+  );
+  /** Pending bot-move timers, keyed by bot connectionId. */
+  private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   get state(): GameState | null {
     return this.stateSubject.value;
@@ -72,6 +120,11 @@ export class GameEngineService implements OnDestroy {
 
   get myId(): string | null {
     return this.roomService.room?.connectionId ?? this.ws.connectionId;
+  }
+
+  /** AI opponents currently registered by this host (lobby roster). */
+  get bots(): BotRosterEntry[] {
+    return this.botRoster;
   }
 
   init(): void {
@@ -106,6 +159,59 @@ export class GameEngineService implements OnDestroy {
     this.setStateAndRelay('STATE_SYNC', state);
   }
 
+  /** Host-only, lobby phase: register an AI opponent in the room. */
+  addBot(difficulty: BotDifficulty): void {
+    if (!this.isHost) return;
+    const humans = this.roomService.players.filter((p) => p.status === 'approved').length;
+    if (humans + this.botRoster.length >= MAX_PLAYERS) return;
+    const state = this.state ?? this.bootstrapLobbyState();
+    if (state.phase !== 'LOBBY') return;
+
+    const usedColors = new Set([
+      ...this.roomService.players.map((p) => p.color),
+      ...this.botRoster.map((b) => b.color),
+    ]);
+    const color =
+      PLAYER_COLORS.find((c) => !usedColors.has(c)) ??
+      PLAYER_COLORS[this.botRoster.length % PLAYER_COLORS.length];
+    this.botSeq += 1;
+    const entry: BotRosterEntry = {
+      id: `bot-${Date.now()}-${this.botSeq}`,
+      nickname: `Bot ${this.botSeq}`,
+      difficulty,
+      color,
+    };
+    this.botRoster = [...this.botRoster, entry];
+
+    state.players.push(this.botPlayerFromEntry(entry, state.players.length));
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
+  /** Host-only, lobby phase: remove an AI opponent from the room. */
+  removeBot(botId: string): void {
+    if (!this.isHost) return;
+    if (!this.botRoster.some((b) => b.id === botId)) return;
+    this.botRoster = this.botRoster.filter((b) => b.id !== botId);
+
+    const state = this.state;
+    if (state && state.phase === 'LOBBY') {
+      state.players = state.players.filter((p) => p.connectionId !== botId);
+      this.setStateAndRelay('STATE_SYNC', state);
+    }
+  }
+
+  private botPlayerFromEntry(entry: BotRosterEntry, joinOrder: number): Player {
+    const player = createLobbyPlayer(entry.id, entry.nickname, false, joinOrder, entry.color);
+    player.isBot = true;
+    player.botDifficulty = entry.difficulty;
+    return player;
+  }
+
+  /** Bot roster as lobby players, appended after the human roster. */
+  private botLobbyPlayers(humanCount: number): Player[] {
+    return this.botRoster.map((b, i) => this.botPlayerFromEntry(b, humanCount + i));
+  }
+
   startRace(): void {
     if (!this.isHost) return;
     const room = this.roomService.room;
@@ -122,11 +228,13 @@ export class GameEngineService implements OnDestroy {
     const sessionStats = prev?.sessionStats;
 
     // Rebuild the roster from players$ (the single source of truth) so anyone
-    // approved after the track was selected is included in the race.
+    // approved after the track was selected is included in the race. Registered
+    // bots join the grid as virtual players.
+    const humanPlayers = lobbyPlayers.map((p) =>
+      createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
+    );
     const state = createInitialState(
-      lobbyPlayers.map((p) =>
-        createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
-      ),
+      [...humanPlayers, ...this.botLobbyPlayers(humanPlayers.length)],
       room.connectionId
     );
     state.trackId = trackId;
@@ -367,7 +475,12 @@ export class GameEngineService implements OnDestroy {
     if (!this.isHost) return;
     const room = this.roomService.room;
     if (!room) return;
-    const stats = buildRaceStatDeltas(state);
+    // Bots are room-local entertainment; their nicknames must not reach the
+    // global leaderboard.
+    const stats = buildRaceStatDeltas({
+      ...state,
+      players: state.players.filter((p) => !p.isBot),
+    });
     if (stats.length === 0) return;
     void this.api
       .postAction('SUBMIT_RACE_STATS', { stats }, room.roomCode)
@@ -389,12 +502,15 @@ export class GameEngineService implements OnDestroy {
       this.gridOrderTimer = null;
     }
 
-    const players = this.roomService.players
+    const humanPlayers = this.roomService.players
       .filter((p) => p.status === 'approved')
       .map((p) =>
         createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
       );
-    const state = createInitialState(players, room.connectionId);
+    const state = createInitialState(
+      [...humanPlayers, ...this.botLobbyPlayers(humanPlayers.length)],
+      room.connectionId
+    );
     state.trackId = current.trackId || '';
     state.totalLaps = [1, 2, 3].includes(current.totalLaps) ? current.totalLaps : 1;
     state.gameMode = current.gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
@@ -409,12 +525,15 @@ export class GameEngineService implements OnDestroy {
 
   private bootstrapLobbyState(): GameState {
     const room = this.roomService.room!;
-    const players = this.roomService.players
+    const humanPlayers = this.roomService.players
       .filter((p) => p.status === 'approved')
       .map((p) =>
         createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
       );
-    const state = createInitialState(players, room.connectionId);
+    const state = createInitialState(
+      [...humanPlayers, ...this.botLobbyPlayers(humanPlayers.length)],
+      room.connectionId
+    );
     const saved = this.session.load();
     if (saved?.trackId) state.trackId = saved.trackId;
     if (saved?.laps) state.totalLaps = saved.laps;
@@ -643,6 +762,7 @@ export class GameEngineService implements OnDestroy {
 
   private setStateAndRelay(type: RelayPayload['type'], state: GameState, meta?: Record<string, unknown>): void {
     this.emit(state);
+    this.scheduleBotMoves(state);
     const room = this.roomService.room;
     if (!room?.isHost) return;
     const telemetry = buildRaceTelemetry(state);
@@ -650,6 +770,84 @@ export class GameEngineService implements OnDestroy {
     void this.api
       .postAction('RELAY', { type, state, meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
+  }
+
+  /**
+   * Drive the virtual bot players. Called after every host-side state change:
+   * in TURNS mode schedules the current player's move when it is a bot; in
+   * TIMED mode keeps one pending move per active bot. Bots are read from
+   * GameState (via isBot), so a promoted host resumes bot races seamlessly.
+   */
+  private scheduleBotMoves(state: GameState): void {
+    if (!this.roomService.room?.isHost) return;
+    if (state.phase !== 'GAME_ROUND') {
+      this.clearBotTimers();
+      return;
+    }
+
+    if (isTimedMode(state)) {
+      const activeIds = new Set<string>();
+      const now = Date.now();
+      for (const p of state.players) {
+        if (!p.isBot || p.finishOrder !== undefined) continue;
+        activeIds.add(p.connectionId);
+        if (this.botTimers.has(p.connectionId)) continue;
+        const wait =
+          Math.max(remainingStopMs(p, now), 0) +
+          BOT_TIMED_INTERVAL_MS +
+          Math.random() * BOT_TIMED_JITTER_MS;
+        this.botTimers.set(
+          p.connectionId,
+          setTimeout(() => this.runBotMove(p.connectionId), wait)
+        );
+      }
+      for (const [id, timer] of this.botTimers) {
+        if (!activeIds.has(id)) {
+          clearTimeout(timer);
+          this.botTimers.delete(id);
+        }
+      }
+      return;
+    }
+
+    const currentId = state.turnOrder[state.currentTurnIndex];
+    const current = state.players.find((p) => p.connectionId === currentId);
+    for (const [id, timer] of this.botTimers) {
+      if (id !== currentId) {
+        clearTimeout(timer);
+        this.botTimers.delete(id);
+      }
+    }
+    if (current?.isBot && current.finishOrder === undefined && !this.botTimers.has(currentId!)) {
+      const wait = BOT_TURN_DELAY_MS + Math.random() * BOT_TURN_JITTER_MS;
+      this.botTimers.set(currentId!, setTimeout(() => this.runBotMove(currentId!), wait));
+    }
+  }
+
+  private runBotMove(botId: string): void {
+    this.botTimers.delete(botId);
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND' || !this.roomService.room?.isHost) return;
+    const player = state.players.find((p) => p.connectionId === botId);
+    const track = state.trackId ? getTrackById(state.trackId) : undefined;
+    if (!player?.isBot || !track) return;
+
+    if (!canPlayerMove(state, botId)) {
+      // TIMED mode: the bot may be serving a grass-stop penalty whose timer
+      // started a hair early — retry once the stop lifts.
+      if (isTimedMode(state) && player.finishOrder === undefined) {
+        const wait = remainingStopMs(player) + 150;
+        this.botTimers.set(botId, setTimeout(() => this.runBotMove(botId), wait));
+      }
+      return;
+    }
+
+    this.applyMove(botId, computeBotMove(player, state, track));
+  }
+
+  private clearBotTimers(): void {
+    for (const timer of this.botTimers.values()) clearTimeout(timer);
+    this.botTimers.clear();
   }
 
   currentPlayer(): Player | null {
@@ -676,10 +874,13 @@ export class GameEngineService implements OnDestroy {
     this.messageSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimers();
   }
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    this.clearBotTimers();
+    this.botRoster = [];
     this.stateSubject.next(null);
   }
 }

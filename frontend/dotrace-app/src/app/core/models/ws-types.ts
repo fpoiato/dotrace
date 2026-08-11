@@ -7,6 +7,11 @@
 
 export type PlayerStatus = 'pending' | 'approved';
 
+/** AI opponent skill level. Bots are virtual players driven by the host client. */
+export type BotDifficulty = 'EASY' | 'MEDIUM' | 'HARD';
+
+export const BOT_DIFFICULTIES = ['EASY', 'MEDIUM', 'HARD'] as const;
+
 export interface Vector2D {
   x: number;
   y: number;
@@ -41,6 +46,11 @@ export interface TrackDefinition {
    * "finishing" by reversing over the line on turn one.
    */
   checkpoint?: CheckpointRect;
+  /**
+   * Densified centerline polyline (~2 samples per tile) in RACE DIRECTION,
+   * forming a closed loop (index wraps). Guides the AI opponents.
+   */
+  racingLine: Vector2D[];
 }
 
 export interface Player {
@@ -50,6 +60,16 @@ export interface Player {
   isHost: boolean;
   joinOrder: number;
   status: PlayerStatus;
+  /** Virtual player driven by the host client (no real connection behind it). */
+  isBot?: boolean;
+  /** Skill level of a bot player; undefined for humans. */
+  botDifficulty?: BotDifficulty;
+  /**
+   * AI scratch cursor: the bot's current index on the track's racingLine.
+   * Advanced monotonically by computeBotMove so the look-ahead target never
+   * jumps backwards where the corridor passes near itself.
+   */
+  botLineIndex?: number;
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
