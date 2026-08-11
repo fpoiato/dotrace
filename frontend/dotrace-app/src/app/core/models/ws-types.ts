@@ -7,6 +7,11 @@
 
 export type PlayerStatus = 'pending' | 'approved';
 
+/** Skill level for computer-controlled (bot) players. */
+export type BotDifficulty = 'easy' | 'normal' | 'hard';
+
+export const BOT_DIFFICULTIES = ['easy', 'normal', 'hard'] as const;
+
 export interface Vector2D {
   x: number;
   y: number;
@@ -36,6 +41,12 @@ export interface TrackDefinition {
   /** Race-direction arrows drawn next to the start stripe. */
   arrows: TrackArrow[];
   /**
+   * Ordered centerline polyline (race direction = increasing index) used to
+   * guide computer-controlled cars along a sensible racing line. Optional so
+   * older serialized tracks stay valid.
+   */
+  centerline?: Vector2D[];
+  /**
    * Zone (usually the far side of the circuit) a car must have visited before
    * landing on the finish stripe counts as completing the lap. Prevents
    * "finishing" by reversing over the line on turn one.
@@ -50,6 +61,10 @@ export interface Player {
   isHost: boolean;
   joinOrder: number;
   status: PlayerStatus;
+  /** True for a local computer-controlled car (driven by the host client). */
+  isBot?: boolean;
+  /** Skill level for a bot player; ignored for humans. */
+  botDifficulty?: BotDifficulty;
   position: Vector2D;
   velocity: Vector2D;
   isOffTrack: boolean;
@@ -330,7 +345,8 @@ export function createLobbyPlayer(
   nickname: string,
   isHost: boolean,
   joinOrder: number,
-  color: string
+  color: string,
+  options?: { isBot?: boolean; botDifficulty?: BotDifficulty }
 ): Player {
   return {
     connectionId,
@@ -339,12 +355,24 @@ export function createLobbyPlayer(
     isHost,
     joinOrder,
     status: 'approved',
+    ...(options?.isBot ? { isBot: true, botDifficulty: options.botDifficulty ?? 'normal' } : {}),
     position: zeroVector(),
     velocity: zeroVector(),
     isOffTrack: false,
     trail: [],
     lap: 1,
   };
+}
+
+/** Prefix used to build synthetic bot connection ids and detect them. */
+export const BOT_ID_PREFIX = 'bot-';
+
+/** Maximum number of computer opponents that can be added to a room. */
+export const MAX_BOTS = 5;
+
+/** Whether a connection id belongs to a local computer-controlled car. */
+export function isBotId(connectionId: string): boolean {
+  return connectionId.startsWith(BOT_ID_PREFIX);
 }
 
 export function createInitialState(players: Player[], hostId: string): GameState {
@@ -871,7 +899,8 @@ export interface Top10Entry {
  * One entry per player who took part; counters are 0/1 for this race only.
  */
 export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
-  return state.players.map((p) => {
+  // Computer-controlled cars never touch the global nickname leaderboard.
+  return state.players.filter((p) => !p.isBot).map((p) => {
     const delta: RaceStatDelta = {
       nickname: p.nickname,
       races: 1,
