@@ -425,6 +425,27 @@ export function createBotPlayer(
 }
 
 /**
+ * Strip a CPU racer back to a lobby entry, keeping only who it is.
+ *
+ * Humans get rebuilt from the server's roster between races, so they arrive
+ * clean. Bots live on in game state instead, and carrying a finished race's
+ * `finishOrder` into the next one would leave a driver on the grid the rules
+ * consider already home.
+ */
+export function resetBotForLobby(bot: Player): Player {
+  const fresh = createLobbyPlayer(
+    bot.connectionId,
+    bot.nickname,
+    false,
+    bot.joinOrder,
+    bot.color
+  );
+  fresh.isBot = true;
+  fresh.botSkill = bot.botSkill;
+  return fresh;
+}
+
+/**
  * The lobby roster: everyone the server has approved, in join order, with the
  * host's CPU racers lined up behind them.
  *
@@ -436,7 +457,10 @@ export function lobbyRosterWithBots(humans: Player[], bots: Player[]): Player[] 
     .filter((p) => p.status === 'approved')
     .sort((a, b) => a.joinOrder - b.joinOrder);
   const behind = field.reduce((max, p) => Math.max(max, p.joinOrder), -1) + 1;
-  return [...field, ...bots.map((b, i) => ({ ...b, joinOrder: behind + i }))];
+  return [
+    ...field,
+    ...bots.map((b, i) => ({ ...resetBotForLobby(b), joinOrder: behind + i })),
+  ];
 }
 
 /** First driver name and palette colour not already taken in the room. */

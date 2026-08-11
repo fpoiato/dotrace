@@ -7,6 +7,7 @@
  * honest way to tell whether a bot can actually get round a circuit.
  */
 import {
+  BOT_SKILLS,
   BotSkill,
   GameState,
   Player,
@@ -26,6 +27,7 @@ import {
 } from '../../../shared/ws-types';
 import { TRACKS, getTrackById } from '../../../shared/tracks';
 import {
+  botPaceMs,
   botProfile,
   botThinkMs,
   botTurnDelayMs,
@@ -475,7 +477,20 @@ describe('when the host should play a bot move', () => {
   it('lets every bot move whenever it likes in a timed race', () => {
     const { state, bot } = twoUp('TIMED');
     expect(state.currentTurnIndex).toBe(0);
-    expect(botTurnDelayMs(state, bot)).toBe(botThinkMs('MEDIUM'));
+    expect(botTurnDelayMs(state, bot)).toBe(botPaceMs('MEDIUM'));
+  });
+
+  it('paces a timed race so a human can keep up with the tapping', () => {
+    // In a timed race the gap between CPU moves is the bot's lap pace, and a
+    // player has to physically tap each move, so it has to be well off the
+    // planner's own thinking speed.
+    for (const skill of BOT_SKILLS) {
+      expect(botPaceMs(skill)).toBeGreaterThan(botThinkMs(skill) * 1.5);
+      expect(botPaceMs(skill)).toBeGreaterThanOrEqual(1000);
+    }
+    // And still ordered by difficulty.
+    expect(botPaceMs('HARD')).toBeLessThan(botPaceMs('MEDIUM'));
+    expect(botPaceMs('MEDIUM')).toBeLessThan(botPaceMs('EASY'));
   });
 
   it('sits out a timed stop penalty instead of giving up on the bot', () => {
@@ -486,8 +501,8 @@ describe('when the host should play a bot move', () => {
     expect(wait).not.toBeNull();
     expect(wait!).toBeGreaterThan(5_000);
 
-    // Once it has run out, the bot goes back to its usual thinking pause.
-    expect(botTurnDelayMs(state, bot, now + 6_000)).toBe(botThinkMs('MEDIUM'));
+    // Once it has run out, the bot goes back to its usual pace.
+    expect(botTurnDelayMs(state, bot, now + 6_000)).toBe(botPaceMs('MEDIUM'));
   });
 
   it('gives weaker bots a longer pause, so they read as slower to decide', () => {

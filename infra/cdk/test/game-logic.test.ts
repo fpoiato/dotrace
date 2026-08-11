@@ -789,6 +789,63 @@ describe('CPU racers', () => {
     expect(joined[2].joinOrder).toBe(2);
   });
 
+  it('sends bots into a rematch with the previous race wiped off them', () => {
+    // Humans are rebuilt from the server roster between races; bots live on in
+    // game state, so a stale finishOrder would put a driver on the grid that the
+    // rules already consider home — it never moves, and it still shows up as the
+    // winner of the race that has not been run yet.
+    const veteran = createBotPlayer('Ayrton', 1, '#3B82F6', 'HARD', 'a');
+    Object.assign(veteran, {
+      position: { x: 40, y: 12 },
+      velocity: { x: 5, y: -1 },
+      isOffTrack: true,
+      trail: [{ x: 39, y: 13 }],
+      lap: 3,
+      passedCheckpoint: true,
+      diceRoll: 11,
+      finishOrder: 1,
+      finishRound: 22,
+      finishedAt: 1_700_000_000_000,
+      lapTimes: [1_000],
+      lapRounds: [8],
+      grassCuts: 2,
+      gearPenaltyUntilRound: 25,
+      stopUntil: 1_700_000_005_000,
+    });
+
+    const [bot] = botsOf(
+      lobbyRosterWithBots([createLobbyPlayer('a', 'Ana', true, 0, '#EF4444')], [veteran])
+    );
+    expect(bot).toMatchObject({
+      connectionId: veteran.connectionId,
+      nickname: 'Ayrton',
+      color: '#3B82F6',
+      isBot: true,
+      botSkill: 'HARD',
+      status: 'approved',
+      lap: 1,
+      isOffTrack: false,
+    });
+    expect(bot.finishOrder).toBeUndefined();
+    expect(bot.finishRound).toBeUndefined();
+    expect(bot.finishedAt).toBeUndefined();
+    expect(bot.lapTimes).toBeUndefined();
+    expect(bot.lapRounds).toBeUndefined();
+    expect(bot.grassCuts).toBeUndefined();
+    expect(bot.gearPenaltyUntilRound).toBeUndefined();
+    expect(bot.stopUntil).toBeUndefined();
+    expect(bot.diceRoll).toBeUndefined();
+    expect(bot.trail).toEqual([]);
+    expect(bot.velocity).toEqual({ x: 0, y: 0 });
+  });
+
+  it('never lets a bot claim to be the host', () => {
+    const usurper = createBotPlayer('Ayrton', 1, '#3B82F6');
+    usurper.isHost = true;
+    const [bot] = botsOf(lobbyRosterWithBots([], [usurper]));
+    expect(bot.isHost).toBe(false);
+  });
+
   it('leaves players still waiting for approval off the grid', () => {
     const pending = createLobbyPlayer('b', 'Bob', false, 1, '#3B82F6');
     pending.status = 'pending';

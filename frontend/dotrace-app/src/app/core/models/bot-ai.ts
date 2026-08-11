@@ -115,23 +115,41 @@ export interface BotProfile {
   mistakeChance: number;
   /** Continuations kept per turn of lookahead. */
   beam: number;
-  /** Pause before the move lands, so a CPU turn reads as a deliberate move. */
+  /** Pause before a turn-based move, so a CPU turn reads as a deliberate move. */
   thinkMs: number;
+  /**
+   * Pause between moves in a timed race. Far longer than thinkMs, because in a
+   * timed race this pause *is* the bot's lap pace: a planner that moved as fast
+   * as it can think would get round quicker than anyone can tap a phone.
+   */
+  paceMs: number;
 }
 
 export const BOT_PROFILES: Record<BotSkill, BotProfile> = {
-  EASY: { depth: 2, maxGear: 3, mistakeChance: 0.25, beam: 9, thinkMs: 900 },
-  MEDIUM: { depth: 3, maxGear: 5, mistakeChance: 0.08, beam: 7, thinkMs: 650 },
-  HARD: { depth: 4, maxGear: MAX_GEAR, mistakeChance: 0, beam: 6, thinkMs: 450 },
+  EASY: { depth: 2, maxGear: 3, mistakeChance: 0.25, beam: 9, thinkMs: 900, paceMs: 2200 },
+  MEDIUM: { depth: 3, maxGear: 5, mistakeChance: 0.08, beam: 7, thinkMs: 650, paceMs: 1600 },
+  HARD: {
+    depth: 4,
+    maxGear: MAX_GEAR,
+    mistakeChance: 0,
+    beam: 6,
+    thinkMs: 450,
+    paceMs: 1100,
+  },
 };
 
 export function botProfile(skill: BotSkill | undefined): BotProfile {
   return BOT_PROFILES[skill ?? 'MEDIUM'] ?? BOT_PROFILES.MEDIUM;
 }
 
-/** How long the host should wait before playing this bot's move. */
+/** Pause before a turn-based CPU move. */
 export function botThinkMs(skill: BotSkill | undefined): number {
   return botProfile(skill).thinkMs;
+}
+
+/** Pause between CPU moves in a timed race — effectively the bot's lap pace. */
+export function botPaceMs(skill: BotSkill | undefined): number {
+  return botProfile(skill).paceMs;
 }
 
 /** Grace period after a stop penalty expires before a bot moves again. */
@@ -150,14 +168,18 @@ export function botTurnDelayMs(
   if (state.phase !== 'GAME_ROUND') return null;
   if (bot.finishOrder !== undefined) return null;
 
-  const think = botThinkMs(bot.botSkill);
   if (isTimedMode(state)) {
-    // Everyone races at once, so the only thing holding a bot back is a
-    // grass-cut stop penalty. Wait it out rather than giving up on the bot:
-    // nothing else will emit game state while the penalty ticks down.
-    return Math.max(think, remainingStopMs(bot, now) + STOP_PENALTY_GRACE_MS);
+    // Everyone races at once, so nothing holds a bot back but a grass-cut stop
+    // penalty. Wait that out rather than giving up on the bot: nothing else
+    // will emit game state while it ticks down.
+    return Math.max(
+      botPaceMs(bot.botSkill),
+      remainingStopMs(bot, now) + STOP_PENALTY_GRACE_MS
+    );
   }
-  return state.turnOrder[state.currentTurnIndex] === bot.connectionId ? think : null;
+  return state.turnOrder[state.currentTurnIndex] === bot.connectionId
+    ? botThinkMs(bot.botSkill)
+    : null;
 }
 
 // Keyed on the track object rather than its id: tracks are module-level
