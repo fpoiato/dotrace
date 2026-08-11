@@ -20,34 +20,89 @@ export interface MoveBrain {
 // ------------------------------------------------------------- heuristic
 
 /**
- * Deterministic racer: never cut grass, chase the checkpoint before the
- * finish, otherwise minimize distance to the goal at the highest safe gear.
- * Prefer moving over standing still when any non-zero legal move exists.
+ * Track-aware racer:
+ * - Follow the asphalt corridor via BFS pathDistance / pathProgress
+ * - Accelerate when clearAhead is long and under a soft target speed
+ * - Brake when overspeed or the runway ahead is short
+ * - Never prefer grass shortcuts when a clean move exists
  */
 export class HeuristicBrain implements MoveBrain {
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
     const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
+    const currentGear = summary.gear;
+    const bestClear = moves.reduce((max, m) => Math.max(max, m.clearAhead), 0);
+    // Soft target: leave buffer vs runway; sqrt keeps gear modest into mid corners.
+    const targetGear = Math.max(
+      1,
+      Math.min(6, Math.floor(Math.sqrt(Math.max(1, bestClear * 1.6))))
+    );
+
     let best = moves[0];
     let bestScore = Number.NEGATIVE_INFINITY;
 
     for (const move of moves) {
       let score = 0;
 
-      // Standing still is legal but wastes the turn — only keep it as last resort.
       if (hasMotion && move.velocity.x === 0 && move.velocity.y === 0) {
         score -= 50_000;
       }
 
-      // Legal-but-costly moves: grass shortcuts stop the car and cap the gear.
       if (move.grassShortcut) score -= 10_000;
       if (move.landingTile === 'grass' || move.landingTile === 'rumble') score -= 5_000;
 
-      // Lap progress beats raw speed.
       if (summary.goal === 'checkpoint' && move.entersCheckpoint) score += 2_000;
       if (summary.goal === 'finish' && move.crossesFinish) score += 2_000;
 
-      score -= move.distanceToGoal * 10;
-      score += move.gear; // tiebreak: carry speed
+      // Primary: progress along the track graph (not Euclidean to a centroid).
+      score += move.pathProgress * 120;
+      if (!Number.isFinite(move.pathDistance)) {
+        score -= 10_000;
+      } else {
+        score -= move.pathDistance * 3;
+      }
+
+      // Legacy Chebyshev distance as a weak tie-break only.
+      score -= move.distanceToGoal;
+
+      if (move.overspeed) score -= 600;
+      if (move.clearAhead === 0 && move.gear > 0) score -= 250;
+      if (move.clearAhead <= 1 && move.gear >= 3) score -= 150;
+      if (move.clearAhead <= 2 && move.gear >= 4) score -= 100;
+
+      const delta = move.gear - currentGear;
+
+      // Accelerate on open asphalt when under target.
+      if (
+        move.clearAhead >= 4 &&
+        move.gear < targetGear &&
+        delta > 0 &&
+        !move.overspeed &&
+        !move.grassShortcut
+      ) {
+        score += 55 + delta * 25;
+      }
+      // Nudge off the line at the start.
+      if (currentGear === 0 && move.gear === 1 && move.pathProgress > 0) {
+        score += 60;
+      }
+
+      // Brake into corners / when runway is short.
+      if ((move.overspeed || move.clearAhead <= 2) && delta < 0) {
+        score += 70 + Math.abs(delta) * 25;
+      }
+      if (move.clearAhead <= 3 && delta > 0) {
+        score -= 80 * delta;
+      }
+      if (move.gear >= 3 && move.clearAhead < move.gear) {
+        score -= 45 * (move.gear - move.clearAhead);
+      }
+
+      if (move.pathProgress < 0) score -= 100;
+
+      // Prefer carrying useful speed when the road is clear (secondary).
+      if (move.clearAhead >= 5 && !move.overspeed) {
+        score += move.gear * 4;
+      }
 
       if (score > bestScore) {
         bestScore = score;
@@ -67,7 +122,9 @@ Each turn you pick ONE move from a numbered list of legal moves. Rules of thumb:
 - Moves flagged "grassShortcut" incur heavy penalties: avoid them unless every move has one.
 - Before "passedCheckpoint" is true you must route through the checkpoint zone; prefer moves with "entersCheckpoint".
 - After the checkpoint, head for the finish; moves with "crossesFinish" complete the lap.
-- Lower "distanceToGoal" is better; higher "gear" is faster but harder to brake later.
+- Prefer higher "pathProgress" and lower "pathDistance" (asphalt corridor toward the goal) — this is the racing line.
+- "clearAhead" is how many asphalt cells you can keep flying at the new velocity; accelerate when it is large, brake when it is small or "overspeed" is true.
+- Lower "distanceToGoal" is a weak hint only; trust pathDistance over it.
 Respond with ONLY a JSON object: {"moveIndex": <number>} — no prose.`;
 
 /** Narrow client surface so tests can stub Bedrock without the real SDK. */
@@ -153,6 +210,10 @@ export class BedrockBrain implements MoveBrain {
         entersCheckpoint: m.entersCheckpoint,
         crossesFinish: m.crossesFinish,
         distanceToGoal: m.distanceToGoal,
+        pathDistance: Number.isFinite(m.pathDistance) ? m.pathDistance : null,
+        pathProgress: m.pathProgress,
+        clearAhead: m.clearAhead,
+        overspeed: m.overspeed,
       })),
     });
   }

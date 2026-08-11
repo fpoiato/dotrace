@@ -19,6 +19,7 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
 } from '../../shared/ws-types';
+import { annotatePath, segmentGoals, sharedPathCache } from './track-path';
 
 export interface AnnotatedMove {
   /** Stable index the brain answers with. */
@@ -37,6 +38,14 @@ export interface AnnotatedMove {
   crossesFinish: boolean;
   /** Chebyshev distance from landing to the current goal, lower is better. */
   distanceToGoal: number;
+  /** Asphalt BFS distance to the segment goal (follows the corridor). */
+  pathDistance: number;
+  /** Improvement in pathDistance vs current cell (higher is better). */
+  pathProgress: number;
+  /** Clear asphalt steps ahead at this velocity. */
+  clearAhead: number;
+  /** True if pure braking from the landing would leave asphalt. */
+  overspeed: boolean;
 }
 
 export interface BoardSummary {
@@ -109,20 +118,29 @@ export function listAnnotatedMoves(
 ): AnnotatedMove[] {
   const { point } = goalPoint(player, track);
   const moves = getValidMoves(player, track, state.players, state.round);
+  const goals = segmentGoals(track, player.passedCheckpoint ?? false);
+  const field = sharedPathCache.get(track, goals);
 
-  return moves.map((move, index) => ({
-    index,
-    velocity: move.velocity,
-    landing: move.landing,
-    gear: gearOf(move.velocity),
-    landingTile: getTileAt(track, move.landing.x, move.landing.y) ?? 'void',
-    grassShortcut: isGrassShortcut(track, player.position, move.landing),
-    entersCheckpoint: track.checkpoint
-      ? segmentEntersRect(player.position, move.landing, track.checkpoint)
-      : false,
-    crossesFinish: segmentCrossesFinish(track, player.position, move.landing),
-    distanceToGoal: chebyshev(move.landing, point),
-  }));
+  return moves.map((move, index) => {
+    const path = annotatePath(track, player.position, move.velocity, move.landing, field);
+    return {
+      index,
+      velocity: move.velocity,
+      landing: move.landing,
+      gear: gearOf(move.velocity),
+      landingTile: getTileAt(track, move.landing.x, move.landing.y) ?? 'void',
+      grassShortcut: isGrassShortcut(track, player.position, move.landing),
+      entersCheckpoint: track.checkpoint
+        ? segmentEntersRect(player.position, move.landing, track.checkpoint)
+        : false,
+      crossesFinish: segmentCrossesFinish(track, player.position, move.landing),
+      distanceToGoal: chebyshev(move.landing, point),
+      pathDistance: path.pathDistance,
+      pathProgress: path.pathProgress,
+      clearAhead: path.clearAhead,
+      overspeed: path.overspeed,
+    };
+  });
 }
 
 /** Compact single-player view of the race, cheap to serialize for an LLM. */

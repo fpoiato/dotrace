@@ -1,0 +1,113 @@
+import { getTrackById } from '../../shared/tracks';
+import { createInitialState, createLobbyPlayer } from '../../shared/ws-types';
+import { HeuristicBrain } from '../src/brain';
+import {
+  asphaltLookahead,
+  buildDistanceField,
+  isAsphalt,
+  pathDistance,
+  segmentGoals,
+} from '../src/track-path';
+import { buildBoardSummary, listAnnotatedMoves } from '../src/tools';
+
+const track = getTrackById('monza')!;
+
+describe('track path field', () => {
+  it('builds a directed distance field that prefers race direction', () => {
+    const goals = segmentGoals(track, false);
+    expect(goals.length).toBeGreaterThan(0);
+
+    const field = buildDistanceField(track, goals);
+    const onStraight = pathDistance(field, { x: 50, y: 48 });
+    const furtherRight = pathDistance(field, { x: 60, y: 48 });
+    // Going the correct way (right along the bottom) reduces remaining distance.
+    expect(furtherRight).toBeLessThan(onStraight);
+    // Grass next to the track is unreachable in the asphalt field.
+    expect(pathDistance(field, { x: 50, y: 40 })).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('lookahead is long on the bottom straight and short into Parabolica', () => {
+    expect(isAsphalt(track, { x: 50, y: 48 })).toBe(true);
+    const straight = asphaltLookahead(track, { x: 50, y: 48 }, { x: 3, y: 0 });
+    const intoCorner = asphaltLookahead(track, { x: 70, y: 48 }, { x: 3, y: 0 });
+    expect(straight).toBeGreaterThanOrEqual(4);
+    expect(intoCorner).toBeLessThan(straight);
+  });
+});
+
+describe('HeuristicBrain track awareness', () => {
+  it('accelerates on a clear straight when gear is low', async () => {
+    const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
+    me.position = { x: 50, y: 48 };
+    me.velocity = { x: 1, y: 0 };
+    me.passedCheckpoint = false;
+
+    const state = createInitialState([me], 'ai-1');
+    state.phase = 'GAME_ROUND';
+    state.trackId = track.id;
+    state.turnOrder = ['ai-1'];
+    state.round = 1;
+    state.totalLaps = 1;
+
+    const summary = buildBoardSummary(me, state, track);
+    const moves = listAnnotatedMoves(me, state, track);
+    const chosen = await new HeuristicBrain().pickMove(summary, moves);
+
+    expect(chosen.grassShortcut).toBe(false);
+    expect(chosen.gear).toBeGreaterThan(1);
+    expect(chosen.pathProgress).toBeGreaterThan(0);
+  });
+
+  it('prefers braking (or not accelerating) when high gear meets a short runway', async () => {
+    const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
+    // Near the end of the bottom straight, heading into the right-hand sweep.
+    me.position = { x: 68, y: 48 };
+    me.velocity = { x: 4, y: 0 };
+    me.passedCheckpoint = false;
+
+    const state = createInitialState([me], 'ai-1');
+    state.phase = 'GAME_ROUND';
+    state.trackId = track.id;
+    state.turnOrder = ['ai-1'];
+    state.round = 1;
+    state.totalLaps = 1;
+
+    const summary = buildBoardSummary(me, state, track);
+    const moves = listAnnotatedMoves(me, state, track);
+    const chosen = await new HeuristicBrain().pickMove(summary, moves);
+
+    expect(chosen.grassShortcut).toBe(false);
+    // Should not keep climbing into the wall.
+    expect(chosen.gear).toBeLessThanOrEqual(4);
+    const faster = moves.filter((m) => m.gear > chosen.gear && !m.grassShortcut);
+    // If a faster clean move exists, it must have worse path/clear metrics.
+    for (const m of faster) {
+      expect(m.clearAhead + m.pathProgress).toBeLessThanOrEqual(
+        chosen.clearAhead + chosen.pathProgress + 2
+      );
+    }
+  });
+
+  it('makes path progress along the corridor, not Euclidean grass cuts', async () => {
+    const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
+    me.position = { x: 18, y: 48 };
+    me.velocity = { x: 2, y: 0 };
+    me.passedCheckpoint = false;
+
+    const state = createInitialState([me], 'ai-1');
+    state.phase = 'GAME_ROUND';
+    state.trackId = track.id;
+    state.turnOrder = ['ai-1'];
+    state.round = 1;
+    state.totalLaps = 1;
+
+    const summary = buildBoardSummary(me, state, track);
+    const moves = listAnnotatedMoves(me, state, track);
+    const chosen = await new HeuristicBrain().pickMove(summary, moves);
+
+    expect(chosen.grassShortcut).toBe(false);
+    expect(Number.isFinite(chosen.pathDistance)).toBe(true);
+    expect(chosen.pathProgress).toBeGreaterThan(0);
+    expect(chosen.velocity.x).toBeGreaterThan(0);
+  });
+});

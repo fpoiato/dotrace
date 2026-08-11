@@ -52,7 +52,20 @@ describe('listAnnotatedMoves', () => {
       expect(['track', 'grass', 'finish', 'rumble', 'void']).toContain(move.landingTile);
       expect(move.distanceToGoal).toBeGreaterThanOrEqual(0);
       expect(move.gear).toBeGreaterThanOrEqual(0);
+      expect(typeof move.pathProgress).toBe('number');
+      expect(typeof move.clearAhead).toBe('number');
+      expect(typeof move.overspeed).toBe('boolean');
     }
+  });
+
+  it('reports finite pathDistance for asphalt landings toward the checkpoint', () => {
+    const { state, me } = raceState();
+    me.position = { x: 50, y: 48 };
+    me.velocity = { x: 1, y: 0 };
+    const moves = listAnnotatedMoves(me, state, track);
+    const onAsphalt = moves.filter((m) => m.landingTile === 'track' || m.landingTile === 'finish');
+    expect(onAsphalt.length).toBeGreaterThan(0);
+    expect(onAsphalt.every((m) => Number.isFinite(m.pathDistance))).toBe(true);
   });
 
   it('excludes squares occupied by opponents', () => {
