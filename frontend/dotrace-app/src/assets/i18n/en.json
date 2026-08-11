@@ -11,7 +11,7 @@
   "landing.creating": "Creating room…",
   "landing.joining": "Joining…",
   "landing.top10": "Top 10",
-  "landing.top10Hint": "Global ranking by nickname",
+  "landing.top10Hint": "Global ranking by nickname — wins first, then best lap",
   "landing.top10Empty": "No races recorded yet — be the first!",
   "lobby.title": "Lobby",
   "lobby.roomCode": "Room code",

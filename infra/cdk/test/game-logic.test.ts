@@ -634,6 +634,7 @@ describe('lap splits and session ranking', () => {
     });
     const state = createInitialState([ana, bob], 'a');
     state.phase = 'GAME_OVER';
+    state.gameMode = 'TIMED';
     state.raceStartedAt = startedAt;
     state.players = [ana, bob];
 
@@ -650,14 +651,53 @@ describe('lap splits and session ranking', () => {
     updateSessionStats(state);
 
     const ranking = buildSessionRanking(state);
-    // Ana: races 2, wins 1, podiums 1
-    // Bob: races 2, wins 1, podiums 2 → Bob leads on podiums
+    // Equal wins → sort by best lap (Bob 18s beats Ana 25s).
     expect(ranking[0].nickname).toBe('Bob');
     expect(ranking[0].wins).toBe(1);
     expect(ranking[0].podiums).toBe(2);
     expect(ranking[0].races).toBe(2);
     expect(ranking[0].bestLapMs).toBe(18_000);
     expect(ranking[0].bestLapRounds).toBe(3);
+  });
+
+  it('does not store wall-clock bestLapMs for TURNS races', () => {
+    const ana = racePlayer({ connectionId: 'a', nickname: 'Ana', finishOrder: 1 });
+    const state = createInitialState([ana], 'a');
+    state.phase = 'GAME_OVER';
+    state.gameMode = 'TURNS';
+    state.raceStartedAt = startedAt;
+    state.players = [ana];
+    updateSessionStats(state);
+    const row = state.sessionStats![0];
+    expect(row.bestLapMs).toBeUndefined();
+    expect(row.bestLapRounds).toBe(5);
+  });
+
+  it('ranks higher wins above a faster lap', () => {
+    const state = createInitialState([racePlayer()], 'c1');
+    state.sessionStats = [
+      {
+        connectionId: 'a',
+        nickname: 'Champ',
+        color: '#f00',
+        races: 3,
+        wins: 3,
+        podiums: 3,
+        bestLapMs: 90_000,
+        bestLapRounds: 20,
+      },
+      {
+        connectionId: 'b',
+        nickname: 'Speedy',
+        color: '#0f0',
+        races: 3,
+        wins: 1,
+        podiums: 1,
+        bestLapMs: 15_000,
+        bestLapRounds: 4,
+      },
+    ];
+    expect(buildSessionRanking(state).map((r) => r.nickname)).toEqual(['Champ', 'Speedy']);
   });
 
   it('remaps session stats when a player reconnects', () => {
@@ -688,6 +728,7 @@ describe('lap splits and session ranking', () => {
       lapRounds: [9],
     });
     const state = createInitialState([ana, bob], 'a');
+    state.gameMode = 'TIMED';
     state.raceStartedAt = startedAt;
     state.players = [ana, bob];
 
@@ -707,6 +748,39 @@ describe('lap splits and session ranking', () => {
       bestLapMs: 40_000,
       bestLapRounds: 9,
     });
+  });
+
+  it('omits wall-clock bestLapMs from TURNS race deltas', () => {
+    const ana = racePlayer({ connectionId: 'a', nickname: 'Ana', finishOrder: 1 });
+    const state = createInitialState([ana], 'a');
+    state.gameMode = 'TURNS';
+    state.raceStartedAt = startedAt;
+    state.players = [ana];
+    const delta = buildRaceStatDeltas(state)[0];
+    expect(delta.bestLapMs).toBeUndefined();
+    expect(delta.bestLapRounds).toBe(5);
+  });
+
+  it('excludes Bot / IA pilots from global race deltas', () => {
+    const human = racePlayer({ connectionId: 'a', nickname: 'Ana', finishOrder: 1 });
+    const bot = racePlayer({
+      connectionId: 'b',
+      nickname: 'Bot Alfa · Médio',
+      color: '#0f0',
+      finishOrder: 2,
+    });
+    const ia = racePlayer({
+      connectionId: 'c',
+      nickname: 'IA Nova · Pro',
+      color: '#00f',
+      finishOrder: 3,
+    });
+    const state = createInitialState([human, bot, ia], 'a');
+    state.gameMode = 'TIMED';
+    state.raceStartedAt = startedAt;
+    state.players = [human, bot, ia];
+    const deltas = buildRaceStatDeltas(state);
+    expect(deltas.map((d) => d.nickname)).toEqual(['Ana']);
   });
 });
 
@@ -757,5 +831,14 @@ describe('compareLeaderboardEntries', () => {
       'slow-champ', // 5 wins, 90s
       'fast-rookie', // 1 win
     ]);
+  });
+
+  it('ignores absurd legacy wall-clock "laps" when comparing', () => {
+    const rows = [
+      { nickname: 'turns-junk', wins: 2, bestLapMs: 12 * 60 * 1000, bestLapRounds: 8 },
+      { nickname: 'timed-real', wins: 2, bestLapMs: 45_000, bestLapRounds: 10 },
+    ];
+    rows.sort(compareLeaderboardEntries);
+    expect(rows.map((r) => r.nickname)).toEqual(['timed-real', 'turns-junk']);
   });
 });
