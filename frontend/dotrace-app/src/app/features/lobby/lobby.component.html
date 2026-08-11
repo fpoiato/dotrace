@@ -115,6 +115,24 @@
     @if (room.isHost) {
       @if (players$ | async; as players) {
         @if (canAddAi(players)) {
+          <div class="mb-2">
+            <p class="mb-1 text-xs font-medium text-slate-400">{{ 'lobby.difficultyLabel' | translate }}</p>
+            <div class="mb-2 grid grid-cols-4 gap-1">
+              @for (level of difficulties; track level) {
+                <button
+                  type="button"
+                  (click)="selectDifficulty(level)"
+                  class="min-h-10 rounded-lg px-1 text-xs font-semibold transition"
+                  [class.bg-orange-500]="selectedDifficulty === level"
+                  [class.text-white]="selectedDifficulty === level"
+                  [class.bg-slate-800]="selectedDifficulty !== level"
+                  [class.text-slate-300]="selectedDifficulty !== level"
+                >
+                  {{ difficultyLabelKey(level) | translate }}
+                </button>
+              }
+            </div>
+          </div>
           <div class="mb-2 grid grid-cols-2 gap-2">
             <button
               type="button"

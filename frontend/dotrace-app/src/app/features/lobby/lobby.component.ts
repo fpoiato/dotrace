@@ -1,7 +1,7 @@
 import { AsyncPipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { TranslateModule } from '@ngx-translate/core';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
 import { GAME_MODES, GameMode, MAX_PLAYERS, Player } from '../../core/models/ws-types';
@@ -10,6 +10,8 @@ import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
 import { HowToPlayComponent } from '../../shared/how-to-play.component';
 import { TrackPickerComponent } from '../../shared/track-picker.component';
+
+export type AiDifficulty = 'easy' | 'medium' | 'hard' | 'pro';
 
 @Component({
   selector: 'app-lobby',
@@ -22,6 +24,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   private readonly game = inject(GameEngineService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
+  private readonly translate = inject(TranslateService);
 
   readonly room$ = this.room.room$;
   readonly players$ = this.room.players$;
@@ -31,8 +34,10 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedTrackId = '';
   selectedLaps = 1;
   selectedGameMode: GameMode = 'TURNS';
+  selectedDifficulty: AiDifficulty = 'medium';
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
+  readonly difficulties: AiDifficulty[] = ['easy', 'medium', 'hard', 'pro'];
   readonly practiceHintKey = 'lobby.practiceHint';
   readonly maxPlayers = MAX_PLAYERS;
   copied = false;
@@ -91,12 +96,20 @@ export class LobbyComponent implements OnInit, OnDestroy {
     return this.isPractice(playerCount) ? 'lobby.startPractice' : 'lobby.startRace';
   }
 
+  difficultyLabelKey(level: AiDifficulty): string {
+    return `lobby.difficulty.${level}`;
+  }
+
   approve(id: string): void {
     this.room.approvePlayer(id);
   }
 
   canAddAi(players: Player[]): boolean {
     return players.length < this.maxPlayers;
+  }
+
+  selectDifficulty(level: AiDifficulty): void {
+    this.selectedDifficulty = level;
   }
 
   async addBotPilot(players: Player[]): Promise<void> {
@@ -113,14 +126,18 @@ export class LobbyComponent implements OnInit, OnDestroy {
     names: string[]
   ): Promise<void> {
     if (this.aiSpawning) return;
+    const suffix = this.translate.instant(this.difficultyLabelKey(this.selectedDifficulty));
     const taken = new Set(players.map((p) => p.nickname.toLowerCase()));
-    const nickname = names.find((n) => !taken.has(n.toLowerCase()));
-    if (!nickname) return;
+    const base = names.find(
+      (n) => !taken.has(`${n} · ${suffix}`.toLowerCase()) && !taken.has(n.toLowerCase())
+    );
+    if (!base) return;
+    const nickname = `${base} · ${suffix}`;
 
     this.aiSpawning = true;
     this.aiError = false;
     try {
-      await this.room.spawnAiPlayer(nickname, brain);
+      await this.room.spawnAiPlayer(nickname, brain, this.selectedDifficulty);
       // The AI joins and is auto-approved server-side; roster updates arrive
       // via the PLAYER_APPROVED broadcast. Keep the button locked briefly so
       // a double tap does not spawn two pilots with the same name.

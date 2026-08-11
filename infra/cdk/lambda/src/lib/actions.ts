@@ -639,9 +639,10 @@ export async function handleClientAction(
       const hostConn = await getConnection(connectionId);
       if (!hostConn) break;
 
-      const { nickname, brain: brainRaw } = (payload ?? {}) as {
+      const { nickname, brain: brainRaw, difficulty: difficultyRaw } = (payload ?? {}) as {
         nickname?: string;
         brain?: string;
+        difficulty?: string;
       };
       const name = nickname?.trim();
       if (!name) {
@@ -655,6 +656,13 @@ export async function handleClientAction(
       }
 
       const brain = brainRaw === 'bedrock' ? 'bedrock' : 'heuristic';
+      const difficulty =
+        difficultyRaw === 'easy' ||
+        difficultyRaw === 'medium' ||
+        difficultyRaw === 'hard' ||
+        difficultyRaw === 'pro'
+          ? difficultyRaw
+          : 'medium';
 
       const functionName = process.env.AI_PLAYER_FUNCTION_NAME;
       if (!functionName) {
@@ -695,7 +703,7 @@ export async function handleClientAction(
         new InvokeCommand({
           FunctionName: functionName,
           InvocationType: 'Event',
-          Payload: Buffer.from(JSON.stringify({ roomCode: code, nickname: name, brain })),
+          Payload: Buffer.from(JSON.stringify({ roomCode: code, nickname: name, brain, difficulty })),
         })
       );
 

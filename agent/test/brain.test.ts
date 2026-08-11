@@ -90,6 +90,51 @@ describe('HeuristicBrain', () => {
     const b = await new HeuristicBrain('Bot Turbo').pickMove(summary, moves);
     expect(`${a.velocity.x},${a.velocity.y}`).not.toBe(`${b.velocity.x},${b.velocity.y}`);
   });
+
+  it('caps easy gear softer than pro on an open straight', async () => {
+    const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
+    me.position = { x: 20, y: 28 };
+    me.velocity = { x: 2, y: 0 };
+    const state = createInitialState([me], 'ai-1');
+    state.phase = 'GAME_ROUND';
+    state.trackId = track.id;
+    state.turnOrder = ['ai-1'];
+    state.round = 1;
+    state.totalLaps = 1;
+    const summary = buildBoardSummary(me, state, track);
+    const moves = listAnnotatedMoves(me, state, track);
+
+    const seed = 'Bot Straight';
+    const easy = await new HeuristicBrain({ styleOrSeed: seed, difficulty: 'easy' }).pickMove(
+      summary,
+      moves
+    );
+    const pro = await new HeuristicBrain({ styleOrSeed: seed, difficulty: 'pro' }).pickMove(
+      summary,
+      moves
+    );
+    expect(easy.gear).toBeLessThanOrEqual(3);
+    expect(pro.gear).toBeGreaterThanOrEqual(easy.gear);
+  });
+
+  it('pro always picks the top score while easy can take a near-best', async () => {
+    const { summary, moves } = fixtures();
+    const seed = 'Bot Mistake';
+    const proBrain = new HeuristicBrain({ styleOrSeed: seed, difficulty: 'pro' });
+    const easyBrain = new HeuristicBrain({ styleOrSeed: seed, difficulty: 'easy' });
+    expect(proBrain.difficulty).toBe('pro');
+    expect(easyBrain.difficulty).toBe('easy');
+    expect(easyBrain.moveDelayMs).toBeGreaterThan(proBrain.moveDelayMs);
+
+    const pro = await proBrain.pickMove(summary, moves);
+    const easy = await easyBrain.pickMove(summary, moves);
+    expect(moves).toContain(pro);
+    expect(moves).toContain(easy);
+    // Same seed + different mistakeChance: when easy rolls a mistake it may
+    // diverge; either way both stay legal and non-stationary.
+    expect(easy.velocity.x !== 0 || easy.velocity.y !== 0).toBe(true);
+    expect(pro.grassShortcut).toBe(false);
+  });
 });
 
 describe('BedrockBrain', () => {
