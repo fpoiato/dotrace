@@ -29,6 +29,10 @@ const GHOST_PREFIX = 'ghost#';
 /** Keep disconnected players rejoinable longer (mobile background / lock screen). */
 const GHOST_TTL_SECONDS = 3600;
 
+const AI_MARKER_PREFIX = 'aimark#';
+/** AI spawn markers only need to survive the Lambda cold start + join. */
+const AI_MARKER_TTL_SECONDS = 300;
+
 const PLAYER_COLORS = [
   '#EF4444',
   '#3B82F6',
@@ -46,6 +50,39 @@ const PLAYER_COLORS = [
 
 export function isGhost(connectionId: string): boolean {
   return connectionId.startsWith(GHOST_PREFIX);
+}
+
+export function isAiMarker(connectionId: string): boolean {
+  return connectionId.startsWith(AI_MARKER_PREFIX);
+}
+
+function aiMarkerId(roomCode: string, nickname: string): string {
+  return `${AI_MARKER_PREFIX}${roomCode}#${nickname.trim().toLowerCase()}`;
+}
+
+/**
+ * Record that the host requested an AI player with this nickname, so its
+ * upcoming JOIN_ROOM can be auto-approved without host interaction.
+ */
+export async function putAiMarker(roomCode: string, nickname: string): Promise<void> {
+  await putConnection({
+    connectionId: aiMarkerId(roomCode, nickname),
+    roomCode,
+    nickname: nickname.trim(),
+    color: '',
+    isHost: false,
+    joinOrder: -1,
+    status: 'pending',
+    ttl: Math.floor(Date.now() / 1000) + AI_MARKER_TTL_SECONDS,
+  });
+}
+
+/** Check-and-delete the AI marker; true when the join should be auto-approved. */
+export async function consumeAiMarker(roomCode: string, nickname: string): Promise<boolean> {
+  const marker = await getConnection(aiMarkerId(roomCode, nickname));
+  if (!marker) return false;
+  await deleteConnection(aiMarkerId(roomCode, nickname));
+  return true;
 }
 
 export function ghostId(roomCode: string, nickname: string): string {
@@ -87,7 +124,9 @@ export async function getRoomConnections(roomCode: string): Promise<ConnectionRe
       ExpressionAttributeValues: { ':roomCode': roomCode },
     })
   );
-  return ((result.Items ?? []) as ConnectionRecord[]).filter((c) => !isGhost(c.connectionId));
+  return ((result.Items ?? []) as ConnectionRecord[]).filter(
+    (c) => !isGhost(c.connectionId) && !isAiMarker(c.connectionId)
+  );
 }
 
 export async function getApprovedConnections(roomCode: string): Promise<ConnectionRecord[]> {

@@ -114,6 +114,19 @@
 
     @if (room.isHost) {
       @if (players$ | async; as players) {
+        @if (canAddAi(players)) {
+          <button
+            type="button"
+            (click)="addAiPilot(players)"
+            [disabled]="aiSpawning"
+            class="mb-4 min-h-12 w-full rounded-xl border-2 border-dashed border-sky-500 text-sm font-semibold text-sky-300 disabled:opacity-40"
+          >
+            {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addAi') | translate }}
+          </button>
+          @if (aiError) {
+            <p class="mb-2 text-center text-sm text-red-400">{{ 'lobby.aiError' | translate }}</p>
+          }
+        }
         @if (isPractice(players.length)) {
           <p class="mb-2 text-center text-sm text-sky-400">{{ practiceHintKey | translate }}</p>
         }

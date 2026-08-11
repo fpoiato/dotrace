@@ -229,23 +229,50 @@ export class GameSession {
   // ------------------------------------------------------------ internals
 
   private handleMessage(envelope: WsEnvelope): void {
-    const newId = extractConnectionId(envelope);
-    if (newId) {
-      this.connectionId = newId;
-    }
+    const payloadId = extractConnectionId(envelope);
 
     switch (envelope.action) {
-      case 'JOIN_PENDING':
-        this.status = 'pending_approval';
+      case 'CONNECTED':
+        // Socket-level identity — always ours.
+        if (payloadId) this.connectionId = payloadId;
         break;
+
+      case 'JOIN_PENDING': {
+        // The broadcast variant (pending: true) notifies the host about some
+        // OTHER joiner — only the inline reply to our own join is ours.
+        const isHostNotification =
+          (envelope.payload as { pending?: boolean })?.pending === true;
+        if (!isHostNotification) {
+          if (payloadId) this.connectionId = payloadId;
+          this.status = 'pending_approval';
+        }
+        break;
+      }
+
       case 'PLAYER_APPROVED':
+        // Broadcast to the whole room — only flip status when it names us.
+        if (payloadId && payloadId === this.connectionId) {
+          this.status = 'approved';
+        }
+        break;
+
       case 'ROOM_REJOINED':
+        if (payloadId) this.connectionId = payloadId;
         this.status = 'approved';
         break;
-      case 'PLAYER_REJECTED':
+
+      case 'PLAYER_REJECTED': {
+        const rejectedId = (envelope.payload as { connectionId?: string })?.connectionId;
+        if (!rejectedId || rejectedId === this.connectionId) {
+          this.status = 'rejected';
+        }
+        break;
+      }
+
       case 'JOIN_REJECTED':
         this.status = 'rejected';
         break;
+
       case 'RELAY': {
         const payload = envelope.payload as RelayPayload;
         if (payload?.state) {

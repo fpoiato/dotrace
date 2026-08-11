@@ -171,6 +171,39 @@ export class DotRaceWsStack extends Stack {
       integration: httpIntegration,
     });
 
+    // AI player runner — one async invocation per AI pilot per race. Holds the
+    // WebSocket session for the whole race, so the timeout caps race duration.
+    const aiPlayerFn = new NodejsFunction(this, 'AiPlayerHandler', {
+      entry: lambdaEntry('ai-player'),
+      handler: 'handler',
+      runtime: Runtime.NODEJS_20_X,
+      timeout: Duration.minutes(15),
+      memorySize: 512,
+      environment: {
+        NODE_OPTIONS: '--enable-source-maps',
+        WS_URL: stage.url,
+        API_URL: httpApi.apiEndpoint,
+        BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
+        MOVE_DELAY_MS: '600',
+      },
+      bundling: { externalModules: ['@aws-sdk/*'] },
+    });
+
+    aiPlayerFn.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['bedrock:InvokeModel'],
+        resources: [
+          'arn:aws:bedrock:*::foundation-model/amazon.nova-*',
+          `arn:aws:bedrock:*:${this.account}:inference-profile/*.amazon.nova-*`,
+        ],
+      })
+    );
+
+    httpFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFn.functionName);
+    messageFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFn.functionName);
+    aiPlayerFn.grantInvoke(httpFn);
+    aiPlayerFn.grantInvoke(messageFn);
+
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
     new CfnOutput(this, 'HttpApiUrl', { value: httpApi.apiEndpoint });

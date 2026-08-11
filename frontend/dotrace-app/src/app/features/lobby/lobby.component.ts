@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode } from '../../core/models/ws-types';
+import { GAME_MODES, GameMode, MAX_PLAYERS, Player } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -34,9 +34,15 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
   readonly practiceHintKey = 'lobby.practiceHint';
+  readonly maxPlayers = MAX_PLAYERS;
   copied = false;
   showHowTo = false;
+  aiSpawning = false;
+  aiError = false;
   private readonly subs: Subscription[] = [];
+
+  /** Racing-flavored names for AI pilots, picked in order of availability. */
+  private readonly aiNames = ['AI Nova', 'AI Turbo', 'AI Bolt', 'AI Vega', 'AI Comet', 'AI Dash'];
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -85,6 +91,31 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   approve(id: string): void {
     this.room.approvePlayer(id);
+  }
+
+  canAddAi(players: Player[]): boolean {
+    return players.length < this.maxPlayers;
+  }
+
+  async addAiPilot(players: Player[]): Promise<void> {
+    if (this.aiSpawning) return;
+    const taken = new Set(players.map((p) => p.nickname.toLowerCase()));
+    const nickname = this.aiNames.find((n) => !taken.has(n.toLowerCase()));
+    if (!nickname) return;
+
+    this.aiSpawning = true;
+    this.aiError = false;
+    try {
+      await this.room.spawnAiPlayer(nickname);
+      // The AI joins and is auto-approved server-side; roster updates arrive
+      // via the PLAYER_APPROVED broadcast. Keep the button locked briefly so
+      // a double tap does not spawn two pilots with the same name.
+      setTimeout(() => (this.aiSpawning = false), 3000);
+    } catch (err) {
+      console.warn('AI spawn failed', err);
+      this.aiError = true;
+      this.aiSpawning = false;
+    }
   }
 
   reject(id: string): void {

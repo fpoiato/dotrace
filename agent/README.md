@@ -68,6 +68,22 @@ Reuses the transport clients from `bot/` (`ws-client`, `http-client`) and the
 canonical rules from `shared/ws-types.ts`. No backend changes required — the
 host stays authoritative.
 
+## In-game "Add AI pilot" (deployed flow)
+
+The lobby has a host-only **Add AI pilot** button:
+
+1. Frontend posts `SPAWN_AI_PLAYER` (host only) to the HTTP API.
+2. The HTTP Lambda writes a short-lived auto-approve marker to DynamoDB and
+   async-invokes the `AiPlayerHandler` Lambda (`infra/cdk/lambda/src/ai-player.ts`).
+3. That Lambda runs this package's `GameSession` + `raceLoop` for the whole
+   race (15 min function timeout caps race duration).
+4. The AI's `JOIN_ROOM` consumes the marker and is auto-approved server-side —
+   it never sits in the host's pending queue.
+
+The runner has `bedrock:InvokeModel` scoped to Amazon Nova models; if model
+access is not enabled in the region, the brain silently falls back to the
+heuristic and the race still works.
+
 ## AWS deployment notes
 
 - The session needs a **long-lived WebSocket**, so run the agent on compute

@@ -134,6 +134,22 @@ describe('GameSession', () => {
     await expect(session.waitForTurn(50)).rejects.toThrow('Timed out');
   });
 
+  it('ignores approval broadcasts and rejections aimed at other players', async () => {
+    const { push, session } = setup();
+    await session.join();
+
+    // Another player's approval must not flip our status or steal our id.
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-other' } });
+    expect(session.getSnapshot().status).toBe('pending_approval');
+    expect(session.getSnapshot().connectionId).toBe('conn-ai');
+
+    push.emit({ action: 'PLAYER_REJECTED', payload: { connectionId: 'conn-other' } });
+    expect(session.getSnapshot().status).toBe('pending_approval');
+
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
+    expect(session.getSnapshot().status).toBe('approved');
+  });
+
   it('submits moves via FORWARD_TO_HOST', async () => {
     const { push, http, session } = setup();
     await session.join();

@@ -1,6 +1,8 @@
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import {
   broadcastToApproved,
   broadcastToRoom,
+  consumeAiMarker,
   deleteConnection,
   deleteGhost,
   generateRoomCode,
@@ -12,6 +14,7 @@ import {
   MAX_PLAYERS,
   nextPlayerColor,
   nicknameTaken,
+  putAiMarker,
   putConnection,
   roomCodeExists,
   sendToConnection,
@@ -22,6 +25,8 @@ import { applyRaceStatDeltas, getTop10, RaceStatDelta } from './leaderboard';
 import { WsEnvelope } from './response';
 
 const PLAYER_COLOR_HOST = '#EF4444';
+
+const lambdaClient = new LambdaClient({});
 
 export interface ActionResult {
   /** Envelope the caller would receive on their socket (returned inline for HTTP). */
@@ -190,6 +195,50 @@ export async function handleClientAction(
       }
 
       const color = await nextPlayerColor(code);
+
+      // Host-requested AI players skip the approval queue: the SPAWN_AI_PLAYER
+      // action left a marker, so approve on join and broadcast the roster.
+      if (await consumeAiMarker(code, nickname.trim())) {
+        const order = await nextJoinOrder(code);
+        await putConnection({
+          connectionId,
+          roomCode: code,
+          nickname: nickname.trim(),
+          color,
+          isHost: false,
+          joinOrder: order,
+          status: 'approved',
+          ttl: ttl24h(),
+        });
+
+        await replyToCaller(
+          connectionId,
+          {
+            action: 'JOIN_PENDING',
+            payload: { roomCode: code, connectionId, nickname: nickname.trim(), color },
+            roomCode: code,
+          },
+          result,
+          pushToCaller
+        );
+
+        const roster = (await getApprovedConnections(code)).map(toPlayer);
+        await broadcastToApproved(code, {
+          action: 'PLAYER_APPROVED',
+          payload: {
+            connectionId,
+            nickname: nickname.trim(),
+            color,
+            joinOrder: order,
+            isHost: false,
+            status: 'approved' as const,
+            players: roster,
+          },
+          roomCode: code,
+        });
+        break;
+      }
+
       await putConnection({
         connectionId,
         roomCode: code,
@@ -576,6 +625,88 @@ export async function handleClientAction(
       await replyToCaller(
         connectionId,
         { action: 'TOP10', payload: { entries } },
+        result,
+        pushToCaller
+      );
+      break;
+    }
+
+    case 'SPAWN_AI_PLAYER': {
+      if (!(await isHost(connectionId))) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'Only host can add AI players' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const hostConn = await getConnection(connectionId);
+      if (!hostConn) break;
+
+      const { nickname } = (payload ?? {}) as { nickname?: string };
+      const name = nickname?.trim();
+      if (!name) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'Nickname required' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const functionName = process.env.AI_PLAYER_FUNCTION_NAME;
+      if (!functionName) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'AI players not available' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const code = hostConn.roomCode;
+      const approved = await getApprovedConnections(code);
+      const pending = (await getRoomConnections(code)).filter((c) => c.status === 'pending');
+      if (approved.length + pending.length >= MAX_PLAYERS) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'Room is full' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      if (await nicknameTaken(code, name)) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'Nickname already taken' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      await putAiMarker(code, name);
+      await lambdaClient.send(
+        new InvokeCommand({
+          FunctionName: functionName,
+          InvocationType: 'Event',
+          Payload: Buffer.from(JSON.stringify({ roomCode: code, nickname: name })),
+        })
+      );
+
+      await replyToCaller(
+        connectionId,
+        {
+          action: 'AI_PLAYER_SPAWNING',
+          payload: { roomCode: code, nickname: name },
+          roomCode: code,
+        },
         result,
         pushToCaller
       );

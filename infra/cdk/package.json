@@ -11,14 +11,18 @@
   },
   "dependencies": {
     "@aws-sdk/client-apigatewaymanagementapi": "^3.1076.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1076.0",
     "@aws-sdk/client-dynamodb": "^3.1076.0",
+    "@aws-sdk/client-lambda": "^3.1076.0",
     "@aws-sdk/lib-dynamodb": "^3.1076.0",
     "aws-cdk-lib": "^2.200.0",
-    "constructs": "^10.4.2"
+    "constructs": "^10.4.2",
+    "ws": "^8.18.2"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.162",
     "@types/jest": "^29.5.14",
+    "@types/ws": "^8.18.1",
     "@types/node": "^22.15.0",
     "aws-cdk": "^2.1018.0",
     "esbuild": "^0.25.5",
