@@ -11,7 +11,7 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 | `frontend/dotrace-app` | Angular 19 + Tailwind 3.4 + ngx-translate (pt-BR / en) |
 | `infra/cdk` | DynamoDB, WebSocket API, HTTP API (commands), Lambdas |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
-| `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
+| `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) + bot AI (`ai.ts`) |
 | `pipeline/` | CodeBuild buildspec |
 | `.github/workflows/` | CI/CD on push to `main` (`ci-cd.yml`) |
 
@@ -87,6 +87,19 @@ aws codepipeline start-pipeline-execution --name dotrace-game-pipeline --region 
 - **Game state** lives in host memory; synchronized via `RELAY`.
 - Non-host moves use `FORWARD_TO_HOST` → host validates turn + vector math → `RELAY`.
 - Host disconnect promotes next join-order player; `HOST_CHANGED` + state recovery flow.
+
+### Single player vs AI
+
+The host can add virtual opponents ("bots") from the lobby — difficulty
+Easy/Medium/Hard — or use the landing-page **Play vs AI** shortcut, which
+pre-fills a Medium bot. Bots are regular `Player` entries (`isBot`) inside the
+host-authoritative state: they roll grid dice, appear in relay/telemetry/
+replay and keep racing across a host migration. The host client drives their
+turns locally (`GameEngineService` timers + `shared/ai.ts`), so no backend
+changes are needed. The brain follows the track's `racingLine` (centerline in
+race direction) with a BFS distance field toward a speed-scaled look-ahead
+point plus a one-turn lookahead to brake for corners; bot nicknames are
+excluded from the global leaderboard.
 
 ## Scripts
 
