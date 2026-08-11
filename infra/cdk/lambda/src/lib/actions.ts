@@ -211,19 +211,8 @@ export async function handleClientAction(
           ttl: ttl24h(),
         });
 
-        await replyToCaller(
-          connectionId,
-          {
-            action: 'JOIN_PENDING',
-            payload: { roomCode: code, connectionId, nickname: nickname.trim(), color },
-            roomCode: code,
-          },
-          result,
-          pushToCaller
-        );
-
         const roster = (await getApprovedConnections(code)).map(toPlayer);
-        await broadcastToApproved(code, {
+        const approvedEnvelope: WsEnvelope = {
           action: 'PLAYER_APPROVED',
           payload: {
             connectionId,
@@ -235,7 +224,12 @@ export async function handleClientAction(
             players: roster,
           },
           roomCode: code,
-        });
+        };
+        // Reply with PLAYER_APPROVED (not JOIN_PENDING) so the AI client's HTTP
+        // response alone marks it approved — avoids a WS/HTTP race that left
+        // the pilot stuck waiting for approval and never taking its turn.
+        await replyToCaller(connectionId, approvedEnvelope, result, pushToCaller);
+        await broadcastToApproved(code, approvedEnvelope, connectionId);
         break;
       }
 

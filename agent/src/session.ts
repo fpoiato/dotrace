@@ -244,17 +244,28 @@ export class GameSession {
           (envelope.payload as { pending?: boolean })?.pending === true;
         if (!isHostNotification) {
           if (payloadId) this.connectionId = payloadId;
-          this.status = 'pending_approval';
+          // Never downgrade: auto-approve can deliver PLAYER_APPROVED over the
+          // WebSocket before the HTTP JOIN_PENDING reply is processed. Flipping
+          // back to pending would leave waitForApproval hanging forever.
+          if (this.status !== 'approved') {
+            this.status = 'pending_approval';
+          }
         }
         break;
       }
 
-      case 'PLAYER_APPROVED':
+      case 'PLAYER_APPROVED': {
         // Broadcast to the whole room — only flip status when it names us.
-        if (payloadId && payloadId === this.connectionId) {
+        // Match against the session id OR the live socket id (the HTTP
+        // auto-approve reply can arrive before CONNECTED has been mirrored
+        // into this.connectionId in some test / race setups).
+        const mine = this.connectionId ?? this.ws.getConnectionId();
+        if (payloadId && payloadId === mine) {
+          this.connectionId = payloadId;
           this.status = 'approved';
         }
         break;
+      }
 
       case 'ROOM_REJOINED':
         if (payloadId) this.connectionId = payloadId;
