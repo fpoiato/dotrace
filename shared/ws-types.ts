@@ -858,6 +858,22 @@ export function remapSessionStatsConnectionId(
   );
 }
 
+/**
+ * Remap move-log ids on reconnect / AI Lambda handoff.
+ * Without this, one pilot splits into two ids in the post-race replay
+ * (frozen at the handoff cell, then a second car jumps in near the finish).
+ */
+export function remapReplayLogConnectionId(
+  state: GameState,
+  oldConnectionId: string,
+  newConnectionId: string
+): void {
+  if (!state.replayLog?.length) return;
+  state.replayLog = state.replayLog.map((r) =>
+    r.connectionId === oldConnectionId ? { ...r, connectionId: newConnectionId } : r
+  );
+}
+
 /** Per-race delta sent to the server to persist global nickname stats. */
 export interface RaceStatDelta {
   nickname: string;
