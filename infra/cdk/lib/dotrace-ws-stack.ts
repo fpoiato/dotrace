@@ -171,11 +171,16 @@ export class DotRaceWsStack extends Stack {
       integration: httpIntegration,
     });
 
+    // Stable name so Http/Message Lambdas can invoke it without a CFN cycle
+    // (AiPlayer → WS/HTTP APIs → those Lambdas → AiPlayer.functionName).
+    const aiPlayerFunctionName = 'DotRaceAiPlayer';
+
     // AI player runner — one async invocation per AI pilot. Rotates every
     // ~10 min (self-invoke + REJOIN) so races outlive the 15 min Lambda cap.
     const aiPlayerFn = new NodejsFunction(this, 'AiPlayerHandler', {
       entry: lambdaEntry('ai-player'),
       handler: 'handler',
+      functionName: aiPlayerFunctionName,
       runtime: Runtime.NODEJS_20_X,
       timeout: Duration.minutes(15),
       memorySize: 512,
@@ -206,11 +211,16 @@ export class DotRaceWsStack extends Stack {
     );
 
     connectionsTable.grantReadWriteData(aiPlayerFn);
-    httpFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFn.functionName);
-    messageFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFn.functionName);
-    aiPlayerFn.grantInvoke(httpFn);
-    aiPlayerFn.grantInvoke(messageFn);
-    aiPlayerFn.grantInvoke(aiPlayerFn);
+    httpFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFunctionName);
+    messageFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFunctionName);
+    // Literal ARN — grantInvoke(aiPlayerFn) would reintroduce the CFN cycle.
+    const invokeAiPlayer = new PolicyStatement({
+      actions: ['lambda:InvokeFunction'],
+      resources: [`arn:aws:lambda:${this.region}:${this.account}:function:${aiPlayerFunctionName}`],
+    });
+    httpFn.addToRolePolicy(invokeAiPlayer);
+    messageFn.addToRolePolicy(invokeAiPlayer);
+    aiPlayerFn.addToRolePolicy(invokeAiPlayer);
 
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
