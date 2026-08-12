@@ -18,31 +18,72 @@ import { buildBoardSummary, listAnnotatedMoves } from './tools';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export type RaceLoopResult = 'finished' | 'handoff';
+
+export interface RaceLoopOptions {
+  /** When true, stop cleanly so another runner can resume the same seat. */
+  shouldHandoff?: () => boolean;
+  /** Slice long waits so handoff can fire during lobby / opponent turns. */
+  waitSliceMs?: number;
+}
+
+async function waitSliced(
+  wait: (timeoutMs: number) => Promise<boolean>,
+  sliceMs: number,
+  shouldHandoff: () => boolean
+): Promise<boolean | 'handoff'> {
+  for (;;) {
+    if (shouldHandoff()) return 'handoff';
+    try {
+      return await wait(sliceMs);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/Timed out/i.test(msg)) throw err;
+    }
+  }
+}
+
 export async function raceLoop(
   session: GameSession,
   brain: MoveBrain,
-  moveDelayMs: number
-): Promise<void> {
+  moveDelayMs: number,
+  options?: RaceLoopOptions
+): Promise<RaceLoopResult> {
+  const shouldHandoff = options?.shouldHandoff ?? (() => false);
+  const waitSliceMs = options?.waitSliceMs ?? 20_000;
+
   // Spawn happens in the lobby — wait through host setup / grid order without
   // burning the per-turn timeout (that used to drop AI pilots before the race).
-  const started = await session.waitUntilRacing();
+  const started = await waitSliced((ms) => session.waitUntilRacing(ms), waitSliceMs, shouldHandoff);
+  if (started === 'handoff') {
+    console.log('[RACE] Handoff before green flag');
+    return 'handoff';
+  }
   if (!started) {
     console.log('[RACE] Game over before start');
-    return;
+    return 'finished';
   }
   console.log('[RACE] Green flag — entering turn loop');
 
   for (;;) {
-    let racing: boolean;
+    if (shouldHandoff()) {
+      console.log('[RACE] Handoff between turns');
+      return 'handoff';
+    }
+    let racing: boolean | 'handoff';
     try {
-      racing = await session.waitForTurn();
+      racing = await waitSliced((ms) => session.waitForTurn(ms), waitSliceMs, shouldHandoff);
     } catch (err) {
       console.warn('[RACE] waitForTurn failed:', err instanceof Error ? err.message : err);
-      return;
+      return 'finished';
+    }
+    if (racing === 'handoff') {
+      console.log('[RACE] Handoff while waiting for turn');
+      return 'handoff';
     }
     if (!racing) {
       console.log('[RACE] Game over');
-      return;
+      return 'finished';
     }
 
     // Let the GRID_ORDER_DONE / TURN_ADVANCED relay settle so we plan from the
@@ -86,6 +127,10 @@ export async function raceLoop(
       // If the host never advanced (illegal/stale move), retry quickly with a
       // fresh board instead of idling on "Aguardando …".
       await sleep(400);
+    }
+    if (shouldHandoff()) {
+      console.log('[RACE] Handoff after move');
+      return 'handoff';
     }
   }
 }

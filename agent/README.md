@@ -76,8 +76,11 @@ The lobby has a host-only **Add AI pilot** button:
 1. Frontend posts `SPAWN_AI_PLAYER` (host only) to the HTTP API.
 2. The HTTP Lambda writes a short-lived auto-approve marker to DynamoDB and
    async-invokes the `AiPlayerHandler` Lambda (`infra/cdk/lambda/src/ai-player.ts`).
-3. That Lambda runs this package's `GameSession` + `raceLoop` for the whole
-   race (15 min function timeout caps race duration).
+3. That Lambda runs this package's `GameSession` + `raceLoop`, then **rotates
+   every ~10 minutes**: it writes a handoff marker, closes the socket without
+   `PLAYER_LEFT`, and async-invokes itself. The successor `REJOIN_ROOM`s as the
+   same seat (ghost + `PLAYER_REJOINED`) so 2–3 lap races outlive the 15 min
+   Lambda cap. The current turn may see a short extra delay.
 4. The AI's `JOIN_ROOM` consumes the marker and is auto-approved server-side —
    it never sits in the host's pending queue.
 
@@ -87,9 +90,9 @@ heuristic and the race still works.
 
 ## AWS deployment notes
 
-- The session needs a **long-lived WebSocket**, so run the agent on compute
-  that holds a process (AgentCore Runtime, ECS/Fargate, or a long-running
-  Lambda invocation for a single race) — not one Lambda per tool call.
+- In AWS the lobby spawn uses a long-running Lambda that **self-handoffs every
+  10 minutes** (still one seat, new invoke). Locally, run the agent as a
+  process (CLI / MCP) that holds the WebSocket for the whole race.
 - Bedrock access is IAM (`bedrock:InvokeModel` on the chosen model); enable
   the model in the Bedrock console for the target region.
 

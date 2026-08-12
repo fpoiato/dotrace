@@ -275,8 +275,9 @@ export interface BedrockBrainOptions {
 }
 
 /**
- * True when the model pick is clearly worse than the track-aware heuristic.
- * Nova Micro often crawls at gear 1, cuts grass, or turns against race direction.
+ * True when the model pick is a catastrophic miss vs the heuristic floor.
+ * Only veto grass-when-clean and driving the wrong way — overspeed / slightly
+ * lower gear are legal racing choices and must not dump every IA turn.
  */
 export function isDominatedByHeuristic(
   model: AnnotatedMove,
@@ -285,18 +286,9 @@ export function isDominatedByHeuristic(
   if (model.index === heuristic.index) return false;
 
   if (model.grassShortcut && !heuristic.grassShortcut) return true;
-  if (model.overspeed && !heuristic.overspeed) return true;
   if (model.pathProgress < 0 && heuristic.pathProgress > 0) return true;
-  if (model.pathProgress < heuristic.pathProgress - 0.25) return true;
-
-  // Crawl on an open straight while the heuristic wants more speed.
-  if (
-    heuristic.clearAhead >= 4 &&
-    model.gear < heuristic.gear &&
-    model.pathProgress <= heuristic.pathProgress + 0.1
-  ) {
-    return true;
-  }
+  // Huge regression on the racing line (wrong corridor / u-turn).
+  if (model.pathProgress < heuristic.pathProgress - 1) return true;
 
   return false;
 }
@@ -321,7 +313,7 @@ export class BedrockBrain implements MoveBrain {
         difficulty: this.difficulty,
       });
     this.maxTokens = options.maxTokens ?? 200;
-    this.timeoutMs = options.timeoutMs ?? 6_000;
+    this.timeoutMs = options.timeoutMs ?? 12_000;
   }
 
   get moveDelayMs(): number {

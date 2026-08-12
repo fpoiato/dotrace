@@ -87,7 +87,7 @@
   "game.sessionRankingHint": "Acumulado das corridas nesta sala",
   "game.replay": "Ver Replay",
   "game.replayTitle": "Replay da Corrida",
-  "game.replayPlay": "Jogar",
+  "game.replayPlay": "Play",
   "game.replayPause": "Pausar",
   "game.replaySpeed": "Velocidade",
   "game.replayMove": "Lance {{n}} / {{total}}",
