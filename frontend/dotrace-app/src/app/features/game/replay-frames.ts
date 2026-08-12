@@ -93,16 +93,33 @@ export function stitchReplayHandoffSplits(
   return log;
 }
 
+/** Prefer the earliest identity snapshot recorded for this connection. */
+function identityFromLog(
+  log: MoveRecord[],
+  connectionId: string
+): { color?: string; nickname?: string } {
+  let color: string | undefined;
+  let nickname: string | undefined;
+  for (const r of log) {
+    if (r.connectionId !== connectionId) continue;
+    if (!color && r.color) color = r.color;
+    if (!nickname && r.nickname) nickname = r.nickname;
+    if (color && nickname) break;
+  }
+  return { color, nickname };
+}
+
 /**
  * Rebuild frame-by-frame state from the host's move log.
  * Includes pilots who left after GAME_OVER (AI Lambdas disconnect in finally)
- * by synthesizing meta from podium / fallback colors — otherwise their moves
+ * by synthesizing meta from the move log / podium — otherwise their moves
  * are orphaned and the replay looks like a solo race.
  */
 export function buildReplayFrames(
   replayLog: MoveRecord[],
   players: Player[],
-  podium: PodiumEntry[] = []
+  podium: PodiumEntry[] = [],
+  sessionStats: { nickname: string; color: string }[] = []
 ): ReplayFrame[] {
   if (replayLog.length === 0) return [];
 
@@ -124,14 +141,34 @@ export function buildReplayFrames(
     });
   }
 
+  // Race-time identity from the log wins over the live roster when present
+  // (bots may be recolored/orphan-rebuilt after disconnect or handoff).
+  for (const [id, info] of meta) {
+    const fromLog = identityFromLog(log, id);
+    if (fromLog.color) info.color = fromLog.color;
+    if (fromLog.nickname) info.nickname = fromLog.nickname;
+  }
+
   let orphanIdx = 0;
   for (const rec of log) {
     if (meta.has(rec.connectionId)) continue;
+    const fromLog = identityFromLog(log, rec.connectionId);
     const podiumHit = podium.find((e) => e.connectionId === rec.connectionId);
+    const nick = fromLog.nickname ?? podiumHit?.nickname;
+    const statsHit = nick
+      ? sessionStats.find((s) => s.nickname === nick)
+      : undefined;
+    // Same nickname still on the roster (rare) — reuse that color.
+    const rosterByNick = nick ? players.find((p) => p.nickname === nick) : undefined;
     meta.set(rec.connectionId, {
       connectionId: rec.connectionId,
-      nickname: podiumHit?.nickname ?? `Pilot ${orphanIdx + 1}`,
-      color: PLAYER_COLORS[orphanIdx % PLAYER_COLORS.length] ?? '#888888',
+      nickname: nick ?? `Pilot ${orphanIdx + 1}`,
+      color:
+        fromLog.color ??
+        rosterByNick?.color ??
+        statsHit?.color ??
+        PLAYER_COLORS[orphanIdx % PLAYER_COLORS.length] ??
+        '#888888',
       isHost: false,
       joinOrder: 1000 + orphanIdx,
       status: 'approved',

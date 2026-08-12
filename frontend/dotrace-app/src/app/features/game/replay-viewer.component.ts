@@ -190,7 +190,8 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
     this.frames = buildReplayFrames(
       this.state.replayLog ?? [],
       this.state.players,
-      this.state.podium ?? []
+      this.state.podium ?? [],
+      this.state.sessionStats ?? []
     );
     this.currentIndex = 0;
     this.updateReplayState();

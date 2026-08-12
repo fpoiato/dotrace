@@ -24,11 +24,11 @@ const human: Player = {
 };
 
 const log: MoveRecord[] = [
-  { seq: 0, round: 0, connectionId: 'human-1', position: { x: 10, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1 },
-  { seq: 1, round: 0, connectionId: 'ai-1', position: { x: 12, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1 },
-  { seq: 2, round: 1, connectionId: 'human-1', position: { x: 11, y: 10 }, velocity: { x: 1, y: 0 }, isOffTrack: false, lap: 1 },
-  { seq: 3, round: 1, connectionId: 'ai-1', position: { x: 14, y: 10 }, velocity: { x: 2, y: 0 }, isOffTrack: false, lap: 1 },
-  { seq: 4, round: 2, connectionId: 'ai-1', position: { x: 17, y: 10 }, velocity: { x: 3, y: 0 }, isOffTrack: false, lap: 1 },
+  { seq: 0, round: 0, connectionId: 'human-1', position: { x: 10, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1, color: '#EF4444', nickname: 'You' },
+  { seq: 1, round: 0, connectionId: 'ai-1', position: { x: 12, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1, color: '#22C55E', nickname: 'Bot Alfa' },
+  { seq: 2, round: 1, connectionId: 'human-1', position: { x: 11, y: 10 }, velocity: { x: 1, y: 0 }, isOffTrack: false, lap: 1, color: '#EF4444', nickname: 'You' },
+  { seq: 3, round: 1, connectionId: 'ai-1', position: { x: 14, y: 10 }, velocity: { x: 2, y: 0 }, isOffTrack: false, lap: 1, color: '#22C55E', nickname: 'Bot Alfa' },
+  { seq: 4, round: 2, connectionId: 'ai-1', position: { x: 17, y: 10 }, velocity: { x: 3, y: 0 }, isOffTrack: false, lap: 1, color: '#22C55E', nickname: 'Bot Alfa' },
 ];
 
 const podium: PodiumEntry[] = [
@@ -45,10 +45,33 @@ assert(ids.has('human-1'), 'human missing from replay');
 assert(ids.has('ai-1'), 'AI orphan missing from replay');
 const ai = last.players.find((p) => p.connectionId === 'ai-1')!;
 assert(ai.nickname === 'Bot Alfa', `expected Bot Alfa, got ${ai.nickname}`);
+assert(ai.color === '#22C55E', `orphan must keep race color, got ${ai.color}`);
 assert(ai.position.x === 17 && ai.position.y === 10, 'AI final position wrong');
 assert(ai.trail.length >= 2, 'AI trail should have multiple points');
 
 console.log('replay orphan recovery: ok');
+
+// Without log colors, orphans used to get PLAYER_COLORS[0], PLAYER_COLORS[1] by
+// discovery order — which looked like bots swapping colors vs the live race.
+const colorlessOrphans: MoveRecord[] = [
+  { seq: 0, round: 0, connectionId: 'bot-a', position: { x: 1, y: 1 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1 },
+  { seq: 1, round: 0, connectionId: 'bot-b', position: { x: 2, y: 1 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1 },
+  { seq: 2, round: 1, connectionId: 'bot-a', position: { x: 2, y: 1 }, velocity: { x: 1, y: 0 }, isOffTrack: false, lap: 1 },
+  { seq: 3, round: 1, connectionId: 'bot-b', position: { x: 3, y: 1 }, velocity: { x: 1, y: 0 }, isOffTrack: false, lap: 1 },
+];
+const statsFrames = buildReplayFrames(colorlessOrphans, [human], [
+  { connectionId: 'bot-b', nickname: 'Bot Turbo', position: 1 },
+  { connectionId: 'bot-a', nickname: 'Bot Alfa', position: 2 },
+], [
+  { nickname: 'Bot Alfa', color: '#A855F7' },
+  { nickname: 'Bot Turbo', color: '#14B8A6' },
+]);
+const statsA = statsFrames[0]!.players.find((p) => p.connectionId === 'bot-a')!;
+const statsB = statsFrames[0]!.players.find((p) => p.connectionId === 'bot-b')!;
+assert(statsA.color === '#A855F7', `Bot Alfa color from sessionStats, got ${statsA.color}`);
+assert(statsB.color === '#14B8A6', `Bot Turbo color from sessionStats, got ${statsB.color}`);
+
+console.log('replay orphan colors from sessionStats: ok');
 
 // Handoff without remapping would leave early moves on ai-old and late moves on
 // ai-new. After remapping (host-side), the log is continuous under ai-new —

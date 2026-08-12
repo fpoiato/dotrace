@@ -130,6 +130,13 @@ export interface MoveRecord {
   velocity: Vector2D;
   isOffTrack: boolean;
   lap: number;
+  /**
+   * Identity snapshot (grid + moves). Keeps replay colors stable when a pilot
+   * later leaves the roster (AI Lambda disconnect / handoff) so orphans are not
+   * recolored from PLAYER_COLORS by discovery order.
+   */
+  color?: string;
+  nickname?: string;
 }
 
 /** Maximum number of move records stored in the replay log. */

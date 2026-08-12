@@ -100,16 +100,23 @@ export function buildSharedReplayPayload(state: GameState): SharedReplayPayload 
   });
 
   // Include anyone who appears in the log but left the roster (AI Lambda
-  // disconnects after GAME_OVER). Prefer podium nickname when available.
+  // disconnects after GAME_OVER). Prefer identity from the move log, then podium.
   for (const rec of log) {
     if (!idMap.has(rec.connectionId)) {
       const i = players.length;
       idMap.set(rec.connectionId, i);
       const podiumHit = state.podium?.find((e) => e.connectionId === rec.connectionId);
+      const nickFromLog = log.find((r) => r.connectionId === rec.connectionId && r.nickname)?.nickname;
+      const colorFromLog = log.find((r) => r.connectionId === rec.connectionId && r.color)?.color;
+      const statsHit = (nickFromLog ?? podiumHit?.nickname)
+        ? state.sessionStats?.find(
+            (s) => s.nickname === (nickFromLog ?? podiumHit?.nickname)
+          )
+        : undefined;
       players.push({
         id: `p${i}`,
-        n: podiumHit?.nickname ?? `Pilot ${i + 1}`,
-        c: '#888888',
+        n: nickFromLog ?? podiumHit?.nickname ?? `Pilot ${i + 1}`,
+        c: colorFromLog ?? statsHit?.color ?? '#888888',
         jo: i,
         fo: podiumHit?.position,
       });

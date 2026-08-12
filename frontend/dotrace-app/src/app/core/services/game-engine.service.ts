@@ -234,6 +234,8 @@ export class GameEngineService implements OnDestroy {
         velocity: { ...player.velocity },
         isOffTrack: player.isOffTrack,
         lap: player.lap,
+        color: player.color,
+        nickname: player.nickname,
       });
     }
   }
@@ -324,6 +326,8 @@ export class GameEngineService implements OnDestroy {
       velocity: { ...player.velocity },
       isOffTrack: player.isOffTrack,
       lap: player.lap,
+      color: player.color,
+      nickname: player.nickname,
     });
 
     if (this.tryEndRace(state)) return;
