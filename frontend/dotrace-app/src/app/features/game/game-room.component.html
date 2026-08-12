@@ -118,25 +118,48 @@
           <app-mini-map [state]="state" />
         </div>
 
-        @if (telemetry.snapshot$ | async; as snap) {
-          <details class="mt-3 rounded-xl bg-slate-800/80 text-sm">
-            <summary class="cursor-pointer px-4 py-3 font-medium text-slate-300">
-              {{ 'game.telemetry' | translate }}
-            </summary>
-            <ul class="space-y-1 border-t border-slate-700 px-4 py-2 font-mono text-xs text-slate-400">
-              @for (p of snap.players; track p.connectionId) {
-                <li class="flex items-center justify-between gap-2">
-                  <span class="truncate">{{ p.nickname }}</span>
-                  <span class="shrink-0 text-slate-500">
-                    ({{ p.position.x }}, {{ p.position.y }}) · L{{ p.lap }}
-                    @if (p.finishOrder !== undefined) {
-                      · #{{ p.finishOrder }}
+        @if (liveStandings(state); as standings) {
+          <section class="mt-3 overflow-hidden rounded-xl bg-slate-800/80 text-sm">
+            <h3 class="border-b border-slate-700 px-4 py-3 font-semibold text-slate-200">
+              {{ 'game.standings' | translate }}
+            </h3>
+            <ul class="divide-y divide-slate-700/80">
+              @for (row of standings; track row.connectionId) {
+                <li
+                  class="flex items-center gap-3 px-4 py-2.5"
+                  [class.bg-slate-900/40]="row.rank % 2 === 0"
+                >
+                  <span
+                    class="w-7 shrink-0 text-center font-mono text-base font-bold tabular-nums"
+                    [class.text-orange-400]="row.rank === 1"
+                    [class.text-slate-300]="row.rank !== 1"
+                  >
+                    {{ row.rank }}
+                  </span>
+                  <span
+                    class="h-3 w-3 shrink-0 rounded-full ring-1 ring-white/20"
+                    [style.background]="row.color"
+                    [attr.title]="row.nickname"
+                  ></span>
+                  <span class="min-w-0 flex-1 truncate font-medium text-white">
+                    {{ row.nickname }}
+                    @if (row.isOffTrack) {
+                      <span class="ml-1 text-xs font-normal text-amber-400">{{
+                        'game.offTrackShort' | translate
+                      }}</span>
+                    }
+                  </span>
+                  <span class="shrink-0 font-mono text-xs text-slate-400">
+                    @if (row.finishOrder !== undefined) {
+                      🏁 #{{ row.finishOrder }}
+                    } @else {
+                      {{ 'game.lap' | translate }} {{ row.lap }}/{{ state.totalLaps }}
                     }
                   </span>
                 </li>
               }
             </ul>
-          </details>
+          </section>
         }
       }
     }

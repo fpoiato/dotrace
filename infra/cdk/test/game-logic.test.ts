@@ -19,6 +19,7 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
   buildRaceTelemetry,
+  buildLiveStandings,
   formatRaceTime,
   applyGrassPenalty,
   GRASS_PENALTY_TURNS_FIRST,
@@ -568,6 +569,87 @@ describe('primitives', () => {
     for (let i = 0; i < 50; i++) {
       expect(generateRoomCode()).toMatch(/^[A-HJ-NP-Z]{5}$/);
     }
+  });
+});
+
+describe('live standings', () => {
+  function standingTrack(): TrackDefinition {
+    const track = makeTrack();
+    // Finish stripe on the left; checkpoint on the right.
+    track.grid[1][0] = 'finish';
+    track.grid[2][0] = 'finish';
+    track.checkpoint = { x0: 3, y0: 1, x1: 4, y1: 2 };
+    return track;
+  }
+
+  it('ranks by lap, then checkpoint, then distance to goal, and keeps colors', () => {
+    const track = standingTrack();
+    const leader = makePlayer({
+      connectionId: 'a',
+      nickname: 'Leader',
+      color: '#111111',
+      lap: 2,
+      passedCheckpoint: true,
+      position: { x: 1, y: 1 },
+      finishOrder: undefined,
+    });
+    const mid = makePlayer({
+      connectionId: 'b',
+      nickname: 'Mid',
+      color: '#222222',
+      lap: 1,
+      passedCheckpoint: true,
+      position: { x: 2, y: 1 },
+      finishOrder: undefined,
+    });
+    const back = makePlayer({
+      connectionId: 'c',
+      nickname: 'Back',
+      color: '#333333',
+      lap: 1,
+      passedCheckpoint: false,
+      position: { x: 1, y: 1 },
+      finishOrder: undefined,
+    });
+    const state = createInitialState([back, mid, leader], 'a');
+    state.phase = 'GAME_ROUND';
+    state.totalLaps = 3;
+    state.players = [back, mid, leader];
+
+    const rows = buildLiveStandings(state, track);
+    expect(rows.map((r) => r.connectionId)).toEqual(['a', 'b', 'c']);
+    expect(rows.map((r) => r.rank)).toEqual([1, 2, 3]);
+    expect(rows.map((r) => r.color)).toEqual(['#111111', '#222222', '#333333']);
+  });
+
+  it('keeps finishers ahead in finishOrder and racing cars behind', () => {
+    const track = standingTrack();
+    const done = makePlayer({
+      connectionId: 'w',
+      nickname: 'Winner',
+      color: '#aaa',
+      lap: 3,
+      finishOrder: 1,
+      position: { x: 0, y: 1 },
+    });
+    const still = makePlayer({
+      connectionId: 'r',
+      nickname: 'Racing',
+      color: '#bbb',
+      lap: 3,
+      passedCheckpoint: true,
+      finishOrder: undefined,
+      position: { x: 1, y: 1 },
+    });
+    const state = createInitialState([still, done], 'w');
+    state.phase = 'GAME_ROUND';
+    state.players = [still, done];
+
+    const rows = buildLiveStandings(state, track);
+    expect(rows[0].connectionId).toBe('w');
+    expect(rows[0].rank).toBe(1);
+    expect(rows[1].connectionId).toBe('r');
+    expect(rows[1].rank).toBe(2);
   });
 });
 
