@@ -22,6 +22,7 @@ import {
   nextActiveTurnIndex,
   pushReplayMove,
   pushTrail,
+  remapReplayLogConnectionId,
   remapSessionStatsConnectionId,
   rollDice,
   segmentCrossesFinish,
@@ -578,6 +579,7 @@ export class GameEngineService implements OnDestroy {
       e.connectionId === oldConnectionId ? { ...e, connectionId: newConnectionId } : e
     );
     remapSessionStatsConnectionId(state, oldConnectionId, newConnectionId);
+    remapReplayLogConnectionId(state, oldConnectionId, newConnectionId);
 
     const idx = state.players.findIndex((p) => p.connectionId === oldConnectionId);
     const merged: Player = {

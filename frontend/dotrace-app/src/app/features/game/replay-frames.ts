@@ -60,6 +60,40 @@ function cloneStates(map: Map<string, ReplayPlayerState>): ReplayPlayerState[] {
 }
 
 /**
+ * Heal logs split by a reconnect / AI Lambda handoff that did not remap
+ * connection ids: early moves stay on the old id, later moves use the new one.
+ * When an orphan's last move precedes the first move of exactly one roster
+ * player that has no grid slot, treat them as the same pilot.
+ */
+export function stitchReplayHandoffSplits(
+  replayLog: MoveRecord[],
+  players: Player[]
+): MoveRecord[] {
+  const rosterIds = new Set(players.map((p) => p.connectionId));
+  const idsInLog = [...new Set(replayLog.map((r) => r.connectionId))];
+  const orphans = idsInLog.filter((id) => !rosterIds.has(id));
+  if (orphans.length === 0) return replayLog;
+
+  let log = replayLog;
+  for (const orphan of orphans) {
+    const orphanRecs = log.filter((r) => r.connectionId === orphan);
+    if (orphanRecs.length === 0) continue;
+    const orphanLastSeq = Math.max(...orphanRecs.map((r) => r.seq));
+    const candidates = [...rosterIds].filter((id) => {
+      if (log.some((r) => r.connectionId === id && r.round === 0)) return false;
+      const first = log.find((r) => r.connectionId === id && r.round > 0);
+      return first !== undefined && first.seq > orphanLastSeq;
+    });
+    if (candidates.length !== 1) continue;
+    const neo = candidates[0]!;
+    log = log.map((r) =>
+      r.connectionId === orphan ? { ...r, connectionId: neo } : r
+    );
+  }
+  return log;
+}
+
+/**
  * Rebuild frame-by-frame state from the host's move log.
  * Includes pilots who left after GAME_OVER (AI Lambdas disconnect in finally)
  * by synthesizing meta from podium / fallback colors — otherwise their moves
@@ -71,6 +105,8 @@ export function buildReplayFrames(
   podium: PodiumEntry[] = []
 ): ReplayFrame[] {
   if (replayLog.length === 0) return [];
+
+  const log = stitchReplayHandoffSplits(replayLog, players);
 
   const meta = new Map<string, ReplayPlayerMeta>();
   for (const p of players) {
@@ -89,7 +125,7 @@ export function buildReplayFrames(
   }
 
   let orphanIdx = 0;
-  for (const rec of replayLog) {
+  for (const rec of log) {
     if (meta.has(rec.connectionId)) continue;
     const podiumHit = podium.find((e) => e.connectionId === rec.connectionId);
     meta.set(rec.connectionId, {
@@ -109,12 +145,20 @@ export function buildReplayFrames(
   // round=0 marks every car's grid slot (seq alone is not reliable — each push
   // gets a unique seq, so only the first driver would match seq===0).
   const startByPlayer = new Map(
-    replayLog.filter((r) => r.round === 0).map((r) => [r.connectionId, r])
+    log.filter((r) => r.round === 0).map((r) => [r.connectionId, r])
   );
+  // Earliest non-start move per id — used when grid slots are missing (e.g. a
+  // reconnect id that somehow skipped remapping). Never fall back to the live
+  // final position: that parks a ghost on the last corner from frame 0.
+  const firstMoveByPlayer = new Map<string, MoveRecord>();
+  for (const r of log) {
+    if (r.round <= 0) continue;
+    if (!firstMoveByPlayer.has(r.connectionId)) firstMoveByPlayer.set(r.connectionId, r);
+  }
 
   for (const [id, info] of meta) {
     const live = players.find((p) => p.connectionId === id);
-    const rec = startByPlayer.get(id);
+    const rec = startByPlayer.get(id) ?? firstMoveByPlayer.get(id);
     const pos = rec?.position ?? live?.trail?.[0] ?? live?.position ?? { x: 0, y: 0 };
     currentState.set(id, {
       connectionId: id,
@@ -124,10 +168,10 @@ export function buildReplayFrames(
       joinOrder: info.joinOrder,
       status: info.status,
       position: { ...pos },
-      velocity: rec ? { ...rec.velocity } : live ? { ...live.velocity } : { x: 0, y: 0 },
-      isOffTrack: rec?.isOffTrack ?? live?.isOffTrack ?? false,
+      velocity: rec ? { ...rec.velocity } : { x: 0, y: 0 },
+      isOffTrack: rec?.isOffTrack ?? false,
       trail: [{ ...pos }],
-      lap: rec?.lap ?? live?.lap ?? 1,
+      lap: rec?.lap ?? 1,
       diceRoll: info.diceRoll,
       finishOrder: info.finishOrder,
       finishedAt: info.finishedAt,
@@ -143,7 +187,7 @@ export function buildReplayFrames(
     players: cloneStates(currentState),
   });
 
-  const moves = replayLog.filter((r) => r.round > 0).sort((a, b) => a.seq - b.seq);
+  const moves = log.filter((r) => r.round > 0).sort((a, b) => a.seq - b.seq);
   for (const rec of moves) {
     let ps = currentState.get(rec.connectionId);
     if (!ps) {

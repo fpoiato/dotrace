@@ -39,6 +39,7 @@ import {
   fastestLapHolderIds,
   fewestRoundLapHolderIds,
   remapSessionStatsConnectionId,
+  remapReplayLogConnectionId,
   createInitialState,
   buildRaceStatDeltas,
 } from '../../../shared/ws-types';
@@ -715,6 +716,42 @@ describe('lap splits and session ranking', () => {
     ];
     remapSessionStatsConnectionId(state, 'old', 'new');
     expect(state.sessionStats![0].connectionId).toBe('new');
+  });
+
+  it('remaps replay log when a player reconnects (AI handoff)', () => {
+    const state = createInitialState([racePlayer()], 'c1');
+    state.replayLog = [
+      {
+        seq: 0,
+        round: 0,
+        connectionId: 'old',
+        position: { x: 1, y: 1 },
+        velocity: { x: 0, y: 0 },
+        isOffTrack: false,
+        lap: 1,
+      },
+      {
+        seq: 1,
+        round: 1,
+        connectionId: 'old',
+        position: { x: 3, y: 1 },
+        velocity: { x: 2, y: 0 },
+        isOffTrack: false,
+        lap: 1,
+      },
+      {
+        seq: 2,
+        round: 1,
+        connectionId: 'other',
+        position: { x: 2, y: 2 },
+        velocity: { x: 1, y: 0 },
+        isOffTrack: false,
+        lap: 1,
+      },
+    ];
+    remapReplayLogConnectionId(state, 'old', 'new');
+    expect(state.replayLog!.map((r) => r.connectionId)).toEqual(['new', 'new', 'other']);
+    expect(state.replayLog![1].position).toEqual({ x: 3, y: 1 });
   });
 
   it('builds per-race deltas for global leaderboard persistence', () => {
