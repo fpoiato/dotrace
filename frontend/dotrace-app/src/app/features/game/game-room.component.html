@@ -51,16 +51,6 @@
         }
       </div>
 
-      @if (myPlayer(state); as me) {
-        @if (me.isOffTrack) {
-          <p class="mb-2 text-center text-sm text-amber-400">{{ 'game.offTrack' | translate }}</p>
-        } @else {
-          @if (hasGearPenalty(state, me)) {
-            <p class="mb-2 text-center text-sm text-amber-400">{{ 'game.grassPenaltyTurns' | translate }}</p>
-          }
-        }
-      }
-
       @if (state.gameMode === 'TIMED' && state.phase === 'GAME_ROUND' && penaltyCountdownSec > 0) {
         <div
           class="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4"
@@ -85,6 +75,24 @@
       <app-track-canvas [state]="state" />
 
       @if (state.phase === 'GAME_ROUND') {
+        @if (myPlayer(state); as me) {
+          @if (me.isOffTrack) {
+            <p
+              class="mt-3 rounded-xl border border-amber-500/40 bg-amber-950/80 px-3 py-2 text-center text-sm font-semibold text-amber-300"
+              role="status"
+            >
+              {{ 'game.offTrack' | translate }}
+            </p>
+          } @else if (hasGearPenalty(state, me)) {
+            <p
+              class="mt-3 rounded-xl border border-amber-500/40 bg-amber-950/80 px-3 py-2 text-center text-sm font-semibold text-amber-300"
+              role="status"
+            >
+              {{ 'game.grassPenaltyTurns' | translate }}
+            </p>
+          }
+        }
+
         <div class="mx-auto mt-3 grid max-w-[17rem] grid-cols-3 gap-2">
           @for (opt of padOptions; track opt.key) {
             <button
