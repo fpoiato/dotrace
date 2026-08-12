@@ -98,7 +98,12 @@ type Speed = (typeof SPEEDS)[number];
             (click)="togglePlay()"
             class="min-h-10 min-w-[5rem] rounded-xl bg-orange-500 px-4 py-1 text-sm font-bold text-white active:bg-orange-600"
           >
-            {{ isPlaying ? '⏸ ' + ('game.replayPause' | translate) : '▶ ' + ('game.replayPlay' | translate) }}
+            @if (isPlaying) {
+              ⏸ {{ 'game.replayPause' | translate }}
+            } @else {
+              <!-- Hardcoded EN + notranslate: Chrome page-translate was turning i18n "Play" into "Jogar". -->
+              <span class="notranslate" lang="en">▶ Play</span>
+            }
           </button>
           <button
             type="button"
