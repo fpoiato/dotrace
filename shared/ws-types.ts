@@ -679,6 +679,89 @@ export function buildRaceTelemetry(
   };
 }
 
+/** One row in the in-race classification table. */
+export interface LiveStandingRow {
+  connectionId: string;
+  nickname: string;
+  color: string;
+  /** 1-based race position. */
+  rank: number;
+  lap: number;
+  finishOrder?: number;
+  isOffTrack: boolean;
+  passedCheckpoint: boolean;
+}
+
+function chebyshev(a: Vector2D, b: Vector2D): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+}
+
+function checkpointCenter(rect: CheckpointRect): Vector2D {
+  return {
+    x: (rect.x0 + rect.x1) / 2,
+    y: (rect.y0 + rect.y1) / 2,
+  };
+}
+
+function nearestFinishDistance(track: TrackDefinition, pos: Vector2D): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let y = 0; y < track.height; y++) {
+    for (let x = 0; x < track.width; x++) {
+      if (getTileAt(track, x, y) !== 'finish') continue;
+      const d = chebyshev(pos, { x, y });
+      if (d < best) best = d;
+    }
+  }
+  return Number.isFinite(best) ? best : 0;
+}
+
+/** Distance to the current lap goal (checkpoint, then finish stripe). */
+export function distanceToRaceGoal(player: Player, track: TrackDefinition): number {
+  if (track.checkpoint && !player.passedCheckpoint) {
+    return chebyshev(player.position, checkpointCenter(track.checkpoint));
+  }
+  return nearestFinishDistance(track, player.position);
+}
+
+/**
+ * Live race order for the classification panel.
+ * Finishers keep their finishOrder; everyone else is ranked by lap, checkpoint
+ * progress, then distance to the current goal (closer = ahead).
+ */
+export function buildLiveStandings(
+  state: GameState,
+  track: TrackDefinition | undefined
+): LiveStandingRow[] {
+  const finishers = state.players
+    .filter((p) => p.finishOrder !== undefined)
+    .sort((a, b) => (a.finishOrder ?? 0) - (b.finishOrder ?? 0));
+
+  const racing = state.players
+    .filter((p) => p.finishOrder === undefined)
+    .sort((a, b) => {
+      if (b.lap !== a.lap) return b.lap - a.lap;
+      const aCp = a.passedCheckpoint ? 1 : 0;
+      const bCp = b.passedCheckpoint ? 1 : 0;
+      if (bCp !== aCp) return bCp - aCp;
+      if (track) {
+        const d = distanceToRaceGoal(a, track) - distanceToRaceGoal(b, track);
+        if (d !== 0) return d;
+      }
+      return a.nickname.localeCompare(b.nickname);
+    });
+
+  return [...finishers, ...racing].map((p, i) => ({
+    connectionId: p.connectionId,
+    nickname: p.nickname,
+    color: p.color,
+    rank: i + 1,
+    lap: p.lap,
+    finishOrder: p.finishOrder,
+    isOffTrack: p.isOffTrack,
+    passedCheckpoint: !!p.passedCheckpoint,
+  }));
+}
+
 /** Format elapsed race time as m:ss. */
 export function formatRaceTime(elapsedMs: number): string {
   const totalSec = Math.floor(Math.max(0, elapsedMs) / 1000);

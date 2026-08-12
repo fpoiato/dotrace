@@ -69,6 +69,8 @@
   "game.waitPlayAgain": "Aguardando o host iniciar a próxima…",
   "game.raceOver": "Corrida encerrada!",
   "game.telemetry": "Classificação ao vivo",
+  "game.standings": "Classificação",
+  "game.offTrackShort": "fora",
   "game.turnOrder": "Ordem de turnos",
   "game.leaderboard": "Resultado Final",
   "game.lb.pos": "Pos",

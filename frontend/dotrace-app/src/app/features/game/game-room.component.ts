@@ -6,8 +6,10 @@ import { Subscription } from 'rxjs';
 import { getTrackById } from '../../core/models/tracks';
 import {
   GameState,
+  LiveStandingRow,
   Player,
   Vector2D,
+  buildLiveStandings,
   canPlayerMove,
   formatRaceTime,
   getTileAt,
@@ -238,6 +240,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
+  }
+
+  /** Race order for the in-race classification panel (color + position). */
+  liveStandings(state: GameState): LiveStandingRow[] {
+    const track = state.trackId ? getTrackById(state.trackId) : undefined;
+    return buildLiveStandings(state, track);
   }
 
   /** TURNS mode: gear-1 cap from a grass penalty (not just standing on grass). */

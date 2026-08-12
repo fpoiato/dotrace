@@ -69,6 +69,8 @@
   "game.waitPlayAgain": "Waiting for the host to start the next race…",
   "game.raceOver": "Race Over!",
   "game.telemetry": "Live standings",
+  "game.standings": "Standings",
+  "game.offTrackShort": "off",
   "game.turnOrder": "Turn order",
   "game.leaderboard": "Final Results",
   "game.lb.pos": "Pos",
