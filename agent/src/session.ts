@@ -97,20 +97,37 @@ export class GameSession {
       return;
     }
     try {
-      const response = await this.http.postAction(
-        'REJOIN_ROOM',
-        {
-          nickname: this.nickname,
-          roomCode: this.roomCode,
-          previousConnectionId: this.connectionId,
-        },
-        connectionId,
-        this.roomCode
-      );
-      this.handleMessage(response);
+      await this.rejoinWithPrevious(this.connectionId);
     } catch {
       await this.join();
     }
+  }
+
+  /**
+   * Take over a seat from another process (Lambda rotation). Opens the WS if
+   * needed, then REJOIN_ROOM with the predecessor's connection id. Caller must
+   * retry until the ghost exists — does not fall back to JOIN_ROOM.
+   */
+  async rejoinWithPrevious(previousConnectionId: string): Promise<void> {
+    this.status = 'connecting';
+    if (!this.ws.getConnectionId()) {
+      await this.ws.connect();
+    }
+    const connectionId = this.ws.getConnectionId();
+    if (!connectionId) {
+      throw new Error('No connectionId after WebSocket HELLO');
+    }
+    const response = await this.http.postAction(
+      'REJOIN_ROOM',
+      {
+        nickname: this.nickname,
+        roomCode: this.roomCode,
+        previousConnectionId,
+      },
+      connectionId,
+      this.roomCode
+    );
+    this.handleMessage(response);
   }
 
   leave(): void {

@@ -15,7 +15,7 @@ import {
   HttpLambdaIntegration,
   WebSocketLambdaIntegration,
 } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { RecursiveLoop, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
@@ -171,23 +171,26 @@ export class DotRaceWsStack extends Stack {
       integration: httpIntegration,
     });
 
-    // AI player runner — one async invocation per AI pilot per race. Holds the
-    // WebSocket session for the whole race, so the timeout caps race duration.
+    // AI player runner — one async invocation per AI pilot. Rotates every
+    // ~10 min (self-invoke + REJOIN) so races outlive the 15 min Lambda cap.
     const aiPlayerFn = new NodejsFunction(this, 'AiPlayerHandler', {
       entry: lambdaEntry('ai-player'),
       handler: 'handler',
       runtime: Runtime.NODEJS_20_X,
-      // Hard AWS Lambda cap is 15 minutes (spawn→finish including lobby wait).
       timeout: Duration.minutes(15),
       memorySize: 512,
+      // Self-invoke on planned handoff; default Terminate would kill gen 16+.
+      recursiveLoop: RecursiveLoop.ALLOW,
       environment: {
         NODE_OPTIONS: '--enable-source-maps',
         WS_URL: stage.url,
         API_URL: httpApi.apiEndpoint,
+        CONNECTIONS_TABLE: connectionsTable.tableName,
         BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
         // Fallback when spawn payload omits brain; host chooses per pilot in lobby.
         BRAIN: 'heuristic',
-        MOVE_DELAY_MS: '600',
+        AI_HANDOFF_AFTER_MS: String(10 * 60 * 1000),
+        BEDROCK_TIMEOUT_MS: '12000',
       },
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
@@ -202,10 +205,12 @@ export class DotRaceWsStack extends Stack {
       })
     );
 
+    connectionsTable.grantReadWriteData(aiPlayerFn);
     httpFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFn.functionName);
     messageFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFn.functionName);
     aiPlayerFn.grantInvoke(httpFn);
     aiPlayerFn.grantInvoke(messageFn);
+    aiPlayerFn.grantInvoke(aiPlayerFn);
 
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });

@@ -33,6 +33,10 @@ const AI_MARKER_PREFIX = 'aimark#';
 /** AI spawn markers only need to survive the Lambda cold start + join. */
 const AI_MARKER_TTL_SECONDS = 300;
 
+const HANDOFF_PREFIX = 'aihand#';
+/** Planned Lambda rotation: skip PLAYER_LEFT until the successor rejoins. */
+const HANDOFF_TTL_SECONDS = 90;
+
 const PLAYER_COLORS = [
   '#EF4444',
   '#3B82F6',
@@ -54,6 +58,14 @@ export function isGhost(connectionId: string): boolean {
 
 export function isAiMarker(connectionId: string): boolean {
   return connectionId.startsWith(AI_MARKER_PREFIX);
+}
+
+export function isHandoffMarker(connectionId: string): boolean {
+  return connectionId.startsWith(HANDOFF_PREFIX);
+}
+
+export function handoffMarkerId(roomCode: string, nickname: string): string {
+  return `${HANDOFF_PREFIX}${roomCode}#${nickname.trim().toLowerCase()}`;
 }
 
 function aiMarkerId(roomCode: string, nickname: string): string {
@@ -83,6 +95,35 @@ export async function consumeAiMarker(roomCode: string, nickname: string): Promi
   if (!marker) return false;
   await deleteConnection(aiMarkerId(roomCode, nickname));
   return true;
+}
+
+/**
+ * Mark an in-progress AI Lambda rotation so disconnect does not drop the car.
+ * `previousConnectionId` must match the closing socket.
+ */
+export async function putAiHandoffMarker(
+  roomCode: string,
+  nickname: string,
+  previousConnectionId: string
+): Promise<void> {
+  await putConnection({
+    connectionId: handoffMarkerId(roomCode, nickname),
+    roomCode,
+    nickname: nickname.trim(),
+    color: '',
+    isHost: false,
+    joinOrder: -1,
+    status: 'pending',
+    previousConnectionId,
+    ttl: Math.floor(Date.now() / 1000) + HANDOFF_TTL_SECONDS,
+  });
+}
+
+export async function getAiHandoffMarker(
+  roomCode: string,
+  nickname: string
+): Promise<ConnectionRecord | undefined> {
+  return getConnection(handoffMarkerId(roomCode, nickname));
 }
 
 export function ghostId(roomCode: string, nickname: string): string {
@@ -125,7 +166,10 @@ export async function getRoomConnections(roomCode: string): Promise<ConnectionRe
     })
   );
   return ((result.Items ?? []) as ConnectionRecord[]).filter(
-    (c) => !isGhost(c.connectionId) && !isAiMarker(c.connectionId)
+    (c) =>
+      !isGhost(c.connectionId) &&
+      !isAiMarker(c.connectionId) &&
+      !isHandoffMarker(c.connectionId)
   );
 }
 

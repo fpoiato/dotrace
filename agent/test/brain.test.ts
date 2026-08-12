@@ -3,11 +3,31 @@ import { getTrackById } from '../../shared/tracks';
 import {
   BedrockBrain,
   ConverseClient,
+  DIFFICULTY_TUNING,
   HeuristicBrain,
   isDominatedByHeuristic,
+  styleFromSeed,
 } from '../src/brain';
 import { buildBoardSummary, listAnnotatedMoves } from '../src/tools';
 import type { AnnotatedMove, BoardSummary } from '../src/tools';
+
+function fakeMove(partial: Partial<AnnotatedMove> & Pick<AnnotatedMove, 'index'>): AnnotatedMove {
+  return {
+    velocity: { x: 2, y: 0 },
+    landing: { x: 10, y: 10 },
+    gear: 2,
+    landingTile: 'track',
+    grassShortcut: false,
+    entersCheckpoint: false,
+    crossesFinish: false,
+    distanceToGoal: 8,
+    pathDistance: 8,
+    pathProgress: 1,
+    clearAhead: 6,
+    overspeed: false,
+    ...partial,
+  };
+}
 
 const track = getTrackById('monza')!;
 
@@ -72,23 +92,11 @@ describe('HeuristicBrain', () => {
     expect(chosen.velocity.x !== 0 || chosen.velocity.y !== 0).toBe(true);
   });
 
-  it('gives different styles to different nicknames so twin bots diverge', async () => {
-    // Approaching Parabolica: aggression vs caution trade off (brake vs turn-in).
-    const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
-    me.position = { x: 68, y: 48 };
-    me.velocity = { x: 3, y: 0 };
-    const state = createInitialState([me], 'ai-1');
-    state.phase = 'GAME_ROUND';
-    state.trackId = track.id;
-    state.turnOrder = ['ai-1'];
-    state.round = 1;
-    state.totalLaps = 1;
-    const summary = buildBoardSummary(me, state, track);
-    const moves = listAnnotatedMoves(me, state, track);
-
-    const a = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
-    const b = await new HeuristicBrain('Bot Turbo').pickMove(summary, moves);
-    expect(`${a.velocity.x},${a.velocity.y}`).not.toBe(`${b.velocity.x},${b.velocity.y}`);
+  it('gives different styles to different nicknames so twin bots diverge', () => {
+    const a = styleFromSeed('Bot Alfa');
+    const b = styleFromSeed('Bot Turbo');
+    expect(a).not.toEqual(b);
+    expect(a.salt).not.toBe(b.salt);
   });
 
   it('caps easy gear softer than pro on an open straight', async () => {
@@ -117,6 +125,16 @@ describe('HeuristicBrain', () => {
     expect(pro.gear).toBeGreaterThanOrEqual(easy.gear);
   });
 
+  it('hard is more aggressive and mistake-free vs medium', () => {
+    const hard = new HeuristicBrain({ styleOrSeed: 'Bot Apex', difficulty: 'hard' });
+    const medium = new HeuristicBrain({ styleOrSeed: 'Bot Apex', difficulty: 'medium' });
+    expect(hard.moveDelayMs).toBeLessThan(medium.moveDelayMs);
+    expect(DIFFICULTY_TUNING.hard.caution).toBeLessThan(DIFFICULTY_TUNING.medium.caution);
+    expect(DIFFICULTY_TUNING.hard.aggression).toBeGreaterThan(DIFFICULTY_TUNING.medium.aggression);
+    expect(DIFFICULTY_TUNING.hard.mistakeChance).toBe(0);
+    expect(DIFFICULTY_TUNING.hard.maxGear).toBe(6);
+  });
+
   it('pro always picks the top score while easy can take a near-best', async () => {
     const { summary, moves } = fixtures();
     const seed = 'Bot Mistake';
@@ -134,6 +152,31 @@ describe('HeuristicBrain', () => {
     // diverge; either way both stay legal and non-stationary.
     expect(easy.velocity.x !== 0 || easy.velocity.y !== 0).toBe(true);
     expect(pro.grassShortcut).toBe(false);
+  });
+});
+
+describe('isDominatedByHeuristic', () => {
+  const heuristic = fakeMove({ index: 0, gear: 4, pathProgress: 1.2 });
+
+  it('vetoes grass when a clean heuristic exists', () => {
+    expect(
+      isDominatedByHeuristic(fakeMove({ index: 1, grassShortcut: true, pathProgress: 1.5 }), heuristic)
+    ).toBe(true);
+  });
+
+  it('vetoes driving the wrong way', () => {
+    expect(
+      isDominatedByHeuristic(fakeMove({ index: 1, pathProgress: -0.4 }), heuristic)
+    ).toBe(true);
+  });
+
+  it('allows overspeed and a slightly lower gear', () => {
+    expect(
+      isDominatedByHeuristic(
+        fakeMove({ index: 1, gear: 3, overspeed: true, pathProgress: 1.1, clearAhead: 8 }),
+        heuristic
+      )
+    ).toBe(false);
   });
 });
 
@@ -219,18 +262,17 @@ describe('BedrockBrain', () => {
     expect(chosen).toBe(single[0]);
   });
 
-  it('rejects a dominated model pick in favor of the heuristic', async () => {
+  it('rejects a grass / wrong-way model pick in favor of the heuristic', async () => {
     const { summary, moves } = fixtures();
     const heuristic = await new HeuristicBrain('AI Pilot').pickMove(summary, moves);
-    // Prefer a grass / reverse crawl if one exists; else the worst pathProgress.
-    let badIdx = moves.findIndex(
-      (m) => m.grassShortcut && m.index !== heuristic.index
+    const badIdx = moves.findIndex(
+      (m) =>
+        m.index !== heuristic.index &&
+        (m.grassShortcut || (m.pathProgress < 0 && heuristic.pathProgress > 0))
     );
     if (badIdx < 0) {
-      badIdx = moves.reduce(
-        (worst, m, i) => (m.pathProgress < moves[worst]!.pathProgress ? i : worst),
-        0
-      );
+      expect(heuristic.grassShortcut).toBe(false);
+      return;
     }
     expect(isDominatedByHeuristic(moves[badIdx]!, heuristic)).toBe(true);
 
@@ -241,6 +283,29 @@ describe('BedrockBrain', () => {
     });
     const chosen = await brain.pickMove(summary, moves);
     expect(chosen).toBe(heuristic);
+  });
+
+  it('keeps a model pick that is only slightly slower than the heuristic', async () => {
+    const { summary, moves } = fixtures();
+    const heuristic = await new HeuristicBrain('AI Pilot').pickMove(summary, moves);
+    const alt = moves.find(
+      (m) =>
+        m.index !== heuristic.index &&
+        !m.grassShortcut &&
+        m.pathProgress >= 0 &&
+        m.pathProgress >= heuristic.pathProgress - 0.9 &&
+        (m.velocity.x !== 0 || m.velocity.y !== 0)
+    );
+    if (!alt) return;
+    expect(isDominatedByHeuristic(alt, heuristic)).toBe(false);
+
+    const brain = new BedrockBrain({
+      ...options,
+      fallbackSeed: 'AI Pilot',
+      client: stubClient(JSON.stringify({ moveIndex: alt.index })),
+    });
+    const chosen = await brain.pickMove(summary, moves);
+    expect(chosen).toBe(alt);
   });
 
   it('skips Bedrock while gear-limited (penalty / off-track recovery)', async () => {

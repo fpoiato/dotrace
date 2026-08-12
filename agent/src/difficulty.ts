@@ -2,9 +2,9 @@
  * Difficulty presets for Bot / IA pilots.
  *
  * easy    — slow, mistakes, low gear cap (practice opponent)
- * medium  — current track-aware baseline
- * hard    — sharper line, fewer mistakes, higher speed
- * pro     — near-optimal heuristic (and Bedrock only when it matches)
+ * medium  — competent baseline, occasional slip
+ * hard    — pushes gear, few/no intentional mistakes
+ * pro     — near-optimal heuristic (and Bedrock when it matches)
  */
 
 export const AI_DIFFICULTIES = ['easy', 'medium', 'hard', 'pro'] as const;
@@ -55,41 +55,41 @@ export const DIFFICULTY_TUNING: Record<AiDifficulty, DifficultyTuning> = {
   medium: {
     id: 'medium',
     maxGear: 5,
-    aggression: 1.0,
-    caution: 1.0,
+    aggression: 1.1,
+    caution: 0.9,
     gearBias: 0,
-    pathWeight: 120,
-    clearToAccel: 4,
-    clearSqrtScale: 1.6,
-    mistakeChance: 0.12,
+    pathWeight: 140,
+    clearToAccel: 3,
+    clearSqrtScale: 1.8,
+    mistakeChance: 0.08,
     topK: 2,
-    moveDelayMs: 600,
+    moveDelayMs: 500,
   },
   hard: {
     id: 'hard',
     maxGear: 6,
-    aggression: 1.25,
-    caution: 1.15,
-    gearBias: 0,
-    pathWeight: 140,
-    clearToAccel: 3,
-    clearSqrtScale: 1.85,
-    mistakeChance: 0.04,
-    topK: 2,
-    moveDelayMs: 450,
+    aggression: 1.6,
+    caution: 0.7,
+    gearBias: 1,
+    pathWeight: 190,
+    clearToAccel: 2,
+    clearSqrtScale: 2.3,
+    mistakeChance: 0,
+    topK: 1,
+    moveDelayMs: 250,
   },
   pro: {
     id: 'pro',
     maxGear: 6,
-    aggression: 1.45,
-    caution: 1.25,
+    aggression: 1.9,
+    caution: 0.55,
     gearBias: 1,
-    pathWeight: 170,
-    clearToAccel: 3,
-    clearSqrtScale: 2.1,
+    pathWeight: 220,
+    clearToAccel: 2,
+    clearSqrtScale: 2.6,
     mistakeChance: 0,
     topK: 1,
-    moveDelayMs: 350,
+    moveDelayMs: 150,
   },
 };
 

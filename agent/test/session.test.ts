@@ -218,6 +218,36 @@ describe('GameSession', () => {
     expect(session.isMyTurn()).toBe(false);
   });
 
+  it('rejoins with a previous connection id without falling back to JOIN_ROOM', async () => {
+    const push = new FakePush();
+    const http = new FakeHttp();
+    http.postAction = <T = unknown>(action: string, payload: unknown) => {
+      http.calls.push({ action, payload });
+      if (action === 'REJOIN_ROOM') {
+        return Promise.resolve({
+          action: 'ROOM_REJOINED',
+          payload: { connectionId: 'conn-ai-2', nickname: 'AI Pilot' },
+        } as WsEnvelope<T>);
+      }
+      return Promise.resolve({
+        action: 'JOIN_PENDING',
+        payload: { connectionId: 'conn-ai' },
+      } as WsEnvelope<T>);
+    };
+
+    const session = new GameSession(push, http, 'ABCDE', 'AI Pilot');
+    await session.rejoinWithPrevious('conn-old');
+
+    expect(http.calls.map((c) => c.action)).toEqual(['REJOIN_ROOM']);
+    expect(http.calls[0]?.payload).toMatchObject({
+      nickname: 'AI Pilot',
+      roomCode: 'ABCDE',
+      previousConnectionId: 'conn-old',
+    });
+    expect(session.getSnapshot().status).toBe('approved');
+    expect(session.getSnapshot().connectionId).toBe('conn-ai-2');
+  });
+
   it('submits moves via FORWARD_TO_HOST', async () => {
     const { push, http, session } = setup();
     await session.join();
