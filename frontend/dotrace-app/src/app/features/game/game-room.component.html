@@ -135,15 +135,13 @@
               @for (row of standings; track row.connectionId) {
                 <li
                   class="flex items-center gap-3 px-4 py-2.5"
-                  [class.bg-slate-900/40]="row.rank % 2 === 0"
+                  [class.bg-slate-900]="row.rank % 2 === 0"
                 >
                   <span
                     class="w-7 shrink-0 text-center font-mono text-base font-bold tabular-nums"
                     [class.text-orange-400]="row.rank === 1"
                     [class.text-slate-300]="row.rank !== 1"
-                  >
-                    {{ row.rank }}
-                  </span>
+                  >{{ row.rank }}</span>
                   <span
                     class="h-3 w-3 shrink-0 rounded-full ring-1 ring-white/20"
                     [style.background]="row.color"
@@ -152,16 +150,14 @@
                   <span class="min-w-0 flex-1 truncate font-medium text-white">
                     {{ row.nickname }}
                     @if (row.isOffTrack) {
-                      <span class="ml-1 text-xs font-normal text-amber-400">{{
-                        'game.offTrackShort' | translate
-                      }}</span>
+                      <span class="ml-1 text-xs font-normal text-amber-400">{{ 'game.offTrackShort' | translate }}</span>
                     }
                   </span>
                   <span class="shrink-0 font-mono text-xs text-slate-400">
                     @if (row.finishOrder !== undefined) {
-                      🏁 #{{ row.finishOrder }}
+                      <span>&#127945; &#35;{{ row.finishOrder }}</span>
                     } @else {
-                      {{ 'game.lap' | translate }} {{ row.lap }}/{{ state.totalLaps }}
+                      <span>{{ 'game.lap' | translate }} {{ row.lap }}/{{ state.totalLaps }}</span>
                     }
                   </span>
                 </li>
