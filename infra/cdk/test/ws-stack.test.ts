@@ -80,17 +80,14 @@ describe('DotRaceWsStack AI caps', () => {
 });
 
 describe('DotRaceCostGuardStack', () => {
-  it('creates SERVICE + Lambda CAD monitors and DAILY email + IMMEDIATE SNS', () => {
+  it('creates a SERVICE CAD monitor and DAILY email + IMMEDIATE SNS', () => {
     const { cost } = synth();
     cost.hasResourceProperties('AWS::CE::AnomalyMonitor', {
       MonitorName: 'account-service-anomalies',
       MonitorType: 'DIMENSIONAL',
       MonitorDimension: 'SERVICE',
     });
-    cost.hasResourceProperties('AWS::CE::AnomalyMonitor', {
-      MonitorName: 'lambda-anomalies',
-      MonitorType: 'CUSTOM',
-    });
+    expect(Object.keys(cost.findResources('AWS::CE::AnomalyMonitor'))).toHaveLength(1);
     cost.hasResourceProperties('AWS::CE::AnomalySubscription', {
       SubscriptionName: 'account-anomaly-daily-email',
       Frequency: 'DAILY',
@@ -113,7 +110,7 @@ describe('DotRaceCostGuardStack', () => {
     expect(daily.Properties.Subscribers[0]).toEqual({ Type: 'EMAIL', Address: ALERT_EMAIL });
   });
 
-  it('creates a daily $8 monitoring budget with 80/100 actual and 100 forecasted email', () => {
+  it('creates a daily $8 monitoring budget with ACTUAL 80% and 100% email', () => {
     const { cost } = synth();
     cost.hasResourceProperties('AWS::Budgets::Budget', {
       Budget: {
@@ -123,5 +120,10 @@ describe('DotRaceCostGuardStack', () => {
         BudgetLimit: { Amount: 8, Unit: 'USD' },
       },
     });
+    const budget = Object.values(cost.findResources('AWS::Budgets::Budget'))[0] as {
+      Properties: { NotificationsWithSubscribers: { Notification: { NotificationType: string } }[] };
+    };
+    const types = budget.Properties.NotificationsWithSubscribers.map((n) => n.Notification.NotificationType);
+    expect(types.every((t) => t === 'ACTUAL')).toBe(true);
   });
 });

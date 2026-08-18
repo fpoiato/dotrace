@@ -30,6 +30,12 @@ const PERCENT_40: string = JSON.stringify({
  *
  * SNS lives on DotRaceWsStack so the AI lifecycle fix can deploy even if
  * billing resources fail.
+ *
+ * CAD CUSTOM monitors cannot filter by SERVICE (API: must be LINKED_ACCOUNT,
+ * TAG, or COST_CATEGORY). The DIMENSIONAL SERVICE monitor evaluates each
+ * service — including Lambda — as its own series, which is what would have
+ * caught $0 → $10–16/day. DAILY budgets reject FORECASTED notifications;
+ * ACTUAL 80% + 100% are attached here, FORECASTED 100% is on `ceilling`.
  */
 export interface DotRaceCostGuardStackProps extends StackProps {
   alertTopic: ITopic;
@@ -47,19 +53,7 @@ export class DotRaceCostGuardStack extends Stack {
       monitorDimension: 'SERVICE',
     });
 
-    const lambdaMonitor = new ce.CfnAnomalyMonitor(this, 'LambdaAnomalies', {
-      monitorName: 'lambda-anomalies',
-      monitorType: 'CUSTOM',
-      monitorSpecification: JSON.stringify({
-        Dimensions: {
-          Key: 'SERVICE',
-          Values: ['AWS Lambda'],
-          MatchOptions: ['EQUALS'],
-        },
-      }),
-    });
-
-    const monitorArns = [serviceMonitor.attrMonitorArn, lambdaMonitor.attrMonitorArn];
+    const monitorArns = [serviceMonitor.attrMonitorArn];
 
     const dailyEmail = new ce.CfnAnomalySubscription(this, 'DailyEmailAbs5', {
       subscriptionName: 'account-anomaly-daily-email',
@@ -69,7 +63,6 @@ export class DotRaceCostGuardStack extends Stack {
       thresholdExpression: ABSOLUTE_5,
     });
     dailyEmail.addDependency(serviceMonitor);
-    dailyEmail.addDependency(lambdaMonitor);
 
     const immediateSns = new ce.CfnAnomalySubscription(this, 'ImmediateSnsAbs5', {
       subscriptionName: 'account-anomaly-immediate-sns',
@@ -79,7 +72,6 @@ export class DotRaceCostGuardStack extends Stack {
       thresholdExpression: ABSOLUTE_5,
     });
     immediateSns.addDependency(serviceMonitor);
-    immediateSns.addDependency(lambdaMonitor);
 
     const dailyPct = new ce.CfnAnomalySubscription(this, 'DailyEmailPct40', {
       subscriptionName: 'account-anomaly-daily-pct40',
@@ -89,7 +81,6 @@ export class DotRaceCostGuardStack extends Stack {
       thresholdExpression: PERCENT_40,
     });
     dailyPct.addDependency(serviceMonitor);
-    dailyPct.addDependency(lambdaMonitor);
 
     const emailSub = [{ subscriptionType: 'EMAIL', address: ALERT_EMAIL }];
     new budgets.CfnBudget(this, 'DailyCost', {
@@ -112,15 +103,6 @@ export class DotRaceCostGuardStack extends Stack {
         {
           notification: {
             notificationType: 'ACTUAL',
-            comparisonOperator: 'GREATER_THAN',
-            threshold: 100,
-            thresholdType: 'PERCENTAGE',
-          },
-          subscribers: emailSub,
-        },
-        {
-          notification: {
-            notificationType: 'FORECASTED',
             comparisonOperator: 'GREATER_THAN',
             threshold: 100,
             thresholdType: 'PERCENTAGE',
