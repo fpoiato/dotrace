@@ -1,7 +1,17 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import type { GameState, RelayPayload } from '../../../../../shared/ws-types';
 import {
+  aiTurnKey,
+  playerCanMove,
+  roomHasHuman,
+  shouldInvokeLambdaOnSpawn,
+  slimGameStateForAi,
+} from './ai-lifecycle';
+import {
+  aiSeatId,
   broadcastToApproved,
   broadcastToRoom,
+  claimAiTurn,
   consumeAiMarker,
   deleteConnection,
   deleteGhost,
@@ -11,10 +21,10 @@ import {
   getGhost,
   getHostConnection,
   getRoomConnections,
+  isAiSeat,
   MAX_PLAYERS,
   nextPlayerColor,
   nicknameTaken,
-  putAiMarker,
   putConnection,
   roomCodeExists,
   sendToConnection,
@@ -27,6 +37,50 @@ import { WsEnvelope } from './response';
 const PLAYER_COLOR_HOST = '#EF4444';
 
 const lambdaClient = new LambdaClient({});
+
+/** One async invoke per AI seat whose turn it is. Never called from SPAWN. */
+export async function dispatchAiTurns(roomCode: string, state: GameState): Promise<number> {
+  if (state.phase !== 'GAME_ROUND') return 0;
+
+  const functionName = process.env.AI_PLAYER_FUNCTION_NAME;
+  if (!functionName) return 0;
+
+  const connections = await getApprovedConnections(roomCode);
+  if (!roomHasHuman(connections)) {
+    console.log(`[AI] Skip dispatch — no human in room ${roomCode}`);
+    return 0;
+  }
+
+  let invoked = 0;
+  const slim = slimGameStateForAi(state);
+  for (const seat of connections.filter((c) => isAiSeat(c.connectionId) && !c.aiStopped)) {
+    if (!playerCanMove(state, seat.connectionId)) continue;
+    const key = aiTurnKey(state, seat.connectionId);
+    if (!key) continue;
+    const claimed = await claimAiTurn(seat.connectionId, key);
+    if (!claimed) continue;
+
+    await lambdaClient.send(
+      new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: 'Event',
+        Payload: Buffer.from(
+          JSON.stringify({
+            roomCode,
+            nickname: seat.nickname,
+            connectionId: seat.connectionId,
+            brain: seat.brain ?? 'heuristic',
+            difficulty: seat.difficulty ?? 'medium',
+            state: slim,
+          })
+        ),
+      })
+    );
+    invoked += 1;
+    console.log(`[AI] Dispatched turn key=${key} nick=${seat.nickname} room=${roomCode}`);
+  }
+  return invoked;
+}
 
 export interface ActionResult {
   /** Envelope the caller would receive on their socket (returned inline for HTTP). */
@@ -527,6 +581,15 @@ export async function handleClientAction(
       };
       result.response = { action: 'RELAY_ACK', payload: { ok: true }, roomCode: hostConn.roomCode };
       await broadcastToApproved(hostConn.roomCode, envelope, connectionId);
+
+      const relayState = (payload as RelayPayload | undefined)?.state;
+      if (relayState) {
+        try {
+          await dispatchAiTurns(hostConn.roomCode, relayState);
+        } catch (err) {
+          console.error('[AI] dispatchAiTurns failed', err);
+        }
+      }
       break;
     }
 
@@ -664,17 +727,6 @@ export async function handleClientAction(
           ? difficultyRaw
           : 'medium';
 
-      const functionName = process.env.AI_PLAYER_FUNCTION_NAME;
-      if (!functionName) {
-        await replyToCaller(
-          connectionId,
-          { action: 'ERROR', payload: { message: 'AI players not available' } },
-          result,
-          pushToCaller
-        );
-        break;
-      }
-
       const code = hostConn.roomCode;
       const approved = await getApprovedConnections(code);
       const pending = (await getRoomConnections(code)).filter((c) => c.status === 'pending');
@@ -698,20 +750,50 @@ export async function handleClientAction(
         break;
       }
 
-      await putAiMarker(code, name);
-      await lambdaClient.send(
-        new InvokeCommand({
-          FunctionName: functionName,
-          InvocationType: 'Event',
-          Payload: Buffer.from(JSON.stringify({ roomCode: code, nickname: name, brain, difficulty })),
-        })
-      );
+      // Seat only — never start a worker here. The worker is invoked from
+      // RELAY when the match is in GAME_ROUND and this seat can move.
+      if (shouldInvokeLambdaOnSpawn()) {
+        throw new Error('AI spawn must not invoke Lambda');
+      }
+
+      const color = await nextPlayerColor(code);
+      const order = await nextJoinOrder(code);
+      const seatId = aiSeatId(code, name);
+      await putConnection({
+        connectionId: seatId,
+        roomCode: code,
+        nickname: name,
+        color,
+        isHost: false,
+        joinOrder: order,
+        status: 'approved',
+        ttl: ttl24h(),
+        kind: 'ai-seat',
+        brain,
+        difficulty,
+      });
+
+      const roster = (await getApprovedConnections(code)).map(toPlayer);
+      const approvedEnvelope: WsEnvelope = {
+        action: 'PLAYER_APPROVED',
+        payload: {
+          connectionId: seatId,
+          nickname: name,
+          color,
+          joinOrder: order,
+          isHost: false,
+          status: 'approved' as const,
+          players: roster,
+        },
+        roomCode: code,
+      };
+      await broadcastToApproved(code, approvedEnvelope);
 
       await replyToCaller(
         connectionId,
         {
           action: 'AI_PLAYER_SPAWNING',
-          payload: { roomCode: code, nickname: name, brain },
+          payload: { roomCode: code, nickname: name, brain, connectionId: seatId },
           roomCode: code,
         },
         result,

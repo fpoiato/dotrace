@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc",
     "cdk": "cdk",
-    "deploy": "cdk deploy --require-approval never",
+    "deploy": "cdk deploy --all --require-approval never",
     "synth": "cdk synth",
     "test": "jest"
   },

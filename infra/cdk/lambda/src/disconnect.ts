@@ -3,10 +3,13 @@ import {
   broadcastToRoom,
   deleteConnection,
   getAiHandoffMarker,
+  getApprovedConnections,
   getConnection,
   promoteNextHost,
   saveGhost,
+  stopAndDeleteAiSeats,
 } from './lib/ddb';
+import { isHumanConnection, roomHasHuman } from './lib/ai-lifecycle';
 import { ok } from './lib/response';
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -27,8 +30,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   await deleteConnection(connectionId);
 
-  // Planned AI Lambda rotation: keep the car in the race; successor rejoins
-  // via ghost + PLAYER_REJOINED. Do not emit PLAYER_LEFT.
+  // Planned AI Lambda rotation (legacy workers during deploy): keep the car
+  // in the race. New workers never set this marker.
   if (plannedHandoff) {
     return ok();
   }
@@ -56,6 +59,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       },
       connectionId
     );
+  }
+
+  // Last human left → stop every AI seat so in-flight workers exit and no
+  // RELAY can spawn replacements. AI seats are never promoted to host.
+  const remaining = await getApprovedConnections(roomCode);
+  if (isHumanConnection(record) && !roomHasHuman(remaining)) {
+    const stopped = await stopAndDeleteAiSeats(roomCode);
+    console.log(`[AI] Last human left room ${roomCode}; stopped ${stopped} AI seat(s)`);
   }
 
   return ok();

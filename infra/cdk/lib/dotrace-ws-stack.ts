@@ -15,16 +15,61 @@ import {
   HttpLambdaIntegration,
   WebSocketLambdaIntegration,
 } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { RecursiveLoop, Runtime } from 'aws-cdk-lib/aws-lambda';
-import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Alarm, ComparisonOperator, Metric, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
+import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
+import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { NodejsFunction, NodejsFunctionProps } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Topic } from 'aws-cdk-lib/aws-sns';
+import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import * as path from 'path';
+import { ALERT_EMAIL, OPS_ALERT_TOPIC_NAME } from './alert-email';
+
+/** Healthy 1v1 TIMED ≈ 100 invokes / 5 min; alarm at 1.5×. See scripts/alarm-thresholds.py. */
+export const AI_INVOCATIONS_ALARM_PER_5MIN = 150;
+/** 80% of the 30s timeout — Bedrock can take ~12s. */
+export const AI_DURATION_P99_MS = 24_000;
+
+export interface DotRaceWsStackProps extends StackProps {}
 
 export class DotRaceWsStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  readonly alertTopic: Topic;
+
+  constructor(scope: Construct, id: string, props?: DotRaceWsStackProps) {
     super(scope, id, props);
+
+    this.alertTopic = new Topic(this, 'OpsAlerts', {
+      topicName: OPS_ALERT_TOPIC_NAME,
+      displayName: 'DotRace ops and cost alerts',
+    });
+    this.alertTopic.addSubscription(new EmailSubscription(ALERT_EMAIL));
+    this.alertTopic.addToResourcePolicy(
+      new PolicyStatement({
+        sid: 'CloudWatchAlarmsPublish',
+        principals: [new ServicePrincipal('cloudwatch.amazonaws.com')],
+        actions: ['sns:Publish'],
+        resources: [this.alertTopic.topicArn],
+        conditions: {
+          ArnLike: {
+            'aws:SourceArn': `arn:aws:cloudwatch:${this.region}:${this.account}:alarm:*`,
+          },
+        },
+      })
+    );
+    this.alertTopic.addToResourcePolicy(
+      new PolicyStatement({
+        sid: 'AWSAnomalyDetectionSNSPublishingPermissions',
+        principals: [new ServicePrincipal('costalerts.amazonaws.com')],
+        actions: ['sns:Publish'],
+        resources: [this.alertTopic.topicArn],
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+        },
+      })
+    );
 
     const connectionsTable = new Table(this, 'DotRaceConnections', {
       tableName: 'DotRaceConnections',
@@ -64,41 +109,43 @@ export class DotRaceWsStack extends Stack {
     const lambdaEntry = (name: string) =>
       path.join(__dirname, '..', 'lambda', 'src', `${name}.ts`);
 
+    const nodejsDefaults: Partial<NodejsFunctionProps> = {
+      runtime: Runtime.NODEJS_20_X,
+      logRetention: RetentionDays.TWO_WEEKS,
+      bundling: { externalModules: ['@aws-sdk/*'] },
+    };
+
     const connectFn = new NodejsFunction(this, 'ConnectHandler', {
+      ...nodejsDefaults,
       entry: lambdaEntry('connect'),
       handler: 'handler',
-      runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(10),
       environment: lambdaEnv,
-      bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
     const disconnectFn = new NodejsFunction(this, 'DisconnectHandler', {
+      ...nodejsDefaults,
       entry: lambdaEntry('disconnect'),
       handler: 'handler',
-      runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(10),
       environment: lambdaEnv,
-      bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
     const messageFn = new NodejsFunction(this, 'MessageHandler', {
+      ...nodejsDefaults,
       entry: lambdaEntry('message'),
       handler: 'handler',
-      runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(30),
       environment: lambdaEnv,
-      bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
     const httpFn = new NodejsFunction(this, 'HttpHandler', {
+      ...nodejsDefaults,
       entry: lambdaEntry('http'),
       handler: 'handler',
-      runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(30),
       memorySize: 256,
       environment: lambdaEnv,
-      bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
     connectionsTable.grantReadWriteData(connectFn);
@@ -175,29 +222,25 @@ export class DotRaceWsStack extends Stack {
     // (AiPlayer → WS/HTTP APIs → those Lambdas → AiPlayer.functionName).
     const aiPlayerFunctionName = 'DotRaceAiPlayer';
 
-    // AI player runner — one async invocation per AI pilot. Rotates every
-    // ~10 min (self-invoke + REJOIN) so races outlive the 15 min Lambda cap.
+    // One short invoke per AI turn. Hard caps in IaC: 30s, reserved 2, 256 MB.
+    // RecursiveLoop defaults to Terminate — self-invoke is a backdoor we removed.
     const aiPlayerFn = new NodejsFunction(this, 'AiPlayerHandler', {
+      ...nodejsDefaults,
       entry: lambdaEntry('ai-player'),
       handler: 'handler',
       functionName: aiPlayerFunctionName,
-      runtime: Runtime.NODEJS_20_X,
-      timeout: Duration.minutes(15),
-      memorySize: 512,
-      // Self-invoke on planned handoff; default Terminate would kill gen 16+.
-      recursiveLoop: RecursiveLoop.ALLOW,
+      architecture: Architecture.ARM_64,
+      timeout: Duration.seconds(30),
+      memorySize: 256,
+      reservedConcurrentExecutions: 2,
       environment: {
         NODE_OPTIONS: '--enable-source-maps',
-        WS_URL: stage.url,
         API_URL: httpApi.apiEndpoint,
         CONNECTIONS_TABLE: connectionsTable.tableName,
         BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
-        // Fallback when spawn payload omits brain; host chooses per pilot in lobby.
         BRAIN: 'heuristic',
-        AI_HANDOFF_AFTER_MS: String(10 * 60 * 1000),
         BEDROCK_TIMEOUT_MS: '12000',
       },
-      bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
     aiPlayerFn.addToRolePolicy(
@@ -220,7 +263,8 @@ export class DotRaceWsStack extends Stack {
     });
     httpFn.addToRolePolicy(invokeAiPlayer);
     messageFn.addToRolePolicy(invokeAiPlayer);
-    aiPlayerFn.addToRolePolicy(invokeAiPlayer);
+
+    this.addAiPlayerAlarms(aiPlayerFunctionName, aiPlayerFn, this.alertTopic);
 
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
@@ -228,5 +272,62 @@ export class DotRaceWsStack extends Stack {
     new CfnOutput(this, 'HttpApiId', { value: httpApi.httpApiId });
     new CfnOutput(this, 'ConnectionsTableName', { value: connectionsTable.tableName });
     new CfnOutput(this, 'LeaderboardTableName', { value: leaderboardTable.tableName });
+    new CfnOutput(this, 'AiPlayerFunctionName', { value: aiPlayerFunctionName });
+    new CfnOutput(this, 'AlertTopicArn', { value: this.alertTopic.topicArn });
+  }
+
+  private addAiPlayerAlarms(functionName: string, fn: NodejsFunction, topic: Topic): void {
+    const sns = new SnsAction(topic);
+    const fiveMin = Duration.minutes(5);
+
+    const concurrent = new Alarm(this, 'AiPlayerConcurrentAlarm', {
+      alarmName: 'DotRaceAiPlayer-ConcurrentExecutions',
+      alarmDescription: 'AI worker concurrent > 2 (reserved cap missing or raised)',
+      metric: new Metric({
+        namespace: 'AWS/Lambda',
+        metricName: 'ConcurrentExecutions',
+        dimensionsMap: { FunctionName: functionName },
+        statistic: 'Maximum',
+        period: fiveMin,
+      }),
+      threshold: 2,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    concurrent.addAlarmAction(sns);
+
+    const duration = new Alarm(this, 'AiPlayerDurationAlarm', {
+      alarmName: 'DotRaceAiPlayer-DurationP99',
+      alarmDescription: 'AI worker p99 duration > 80% of 30s timeout',
+      metric: fn.metricDuration({ statistic: 'p99', period: fiveMin }),
+      threshold: AI_DURATION_P99_MS,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    duration.addAlarmAction(sns);
+
+    const errors = new Alarm(this, 'AiPlayerErrorsAlarm', {
+      alarmName: 'DotRaceAiPlayer-Errors',
+      alarmDescription: 'AI worker errors > 0 over 5 minutes',
+      metric: fn.metricErrors({ statistic: 'Sum', period: fiveMin }),
+      threshold: 0,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    errors.addAlarmAction(sns);
+
+    const invocations = new Alarm(this, 'AiPlayerInvocationsAlarm', {
+      alarmName: 'DotRaceAiPlayer-Invocations',
+      alarmDescription: `AI worker invocations > ${AI_INVOCATIONS_ALARM_PER_5MIN} per 5 minutes`,
+      metric: fn.metricInvocations({ statistic: 'Sum', period: fiveMin }),
+      threshold: AI_INVOCATIONS_ALARM_PER_5MIN,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    invocations.addAlarmAction(sns);
   }
 }

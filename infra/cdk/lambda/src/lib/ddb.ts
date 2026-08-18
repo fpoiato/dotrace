@@ -23,6 +23,12 @@ export interface ConnectionRecord {
   ttl: number;
   previousConnectionId?: string;
   wasHost?: boolean;
+  /** Synthetic lobby/race seat — no API Gateway WebSocket. */
+  kind?: 'ai-seat';
+  brain?: 'bedrock' | 'heuristic';
+  difficulty?: string;
+  aiStopped?: boolean;
+  aiLastTurnKey?: string;
 }
 
 const GHOST_PREFIX = 'ghost#';
@@ -36,6 +42,8 @@ const AI_MARKER_TTL_SECONDS = 300;
 const HANDOFF_PREFIX = 'aihand#';
 /** Planned Lambda rotation: skip PLAYER_LEFT until the successor rejoins. */
 const HANDOFF_TTL_SECONDS = 90;
+
+const AI_SEAT_PREFIX = 'aiseat#';
 
 const PLAYER_COLORS = [
   '#EF4444',
@@ -62,6 +70,14 @@ export function isAiMarker(connectionId: string): boolean {
 
 export function isHandoffMarker(connectionId: string): boolean {
   return connectionId.startsWith(HANDOFF_PREFIX);
+}
+
+export function isAiSeat(connectionId: string): boolean {
+  return connectionId.startsWith(AI_SEAT_PREFIX);
+}
+
+export function aiSeatId(roomCode: string, nickname: string): string {
+  return `${AI_SEAT_PREFIX}${roomCode}#${nickname.trim().toLowerCase()}`;
 }
 
 export function handoffMarkerId(roomCode: string, nickname: string): string {
@@ -194,6 +210,11 @@ export async function sendToConnection(
   connectionId: string,
   message: unknown
 ): Promise<boolean> {
+  // Synthetic AI seats have no WebSocket. Never PostToConnection — a 410
+  // would delete the seat and drop the car from the roster.
+  if (isAiSeat(connectionId) || isGhost(connectionId) || isAiMarker(connectionId) || isHandoffMarker(connectionId)) {
+    return true;
+  }
   const client = getApiClient();
   try {
     await client.send(
@@ -243,7 +264,7 @@ export async function promoteNextHost(
   excludeConnectionId: string
 ): Promise<ConnectionRecord | undefined> {
   const approved = (await getApprovedConnections(roomCode))
-    .filter((c) => c.connectionId !== excludeConnectionId)
+    .filter((c) => c.connectionId !== excludeConnectionId && !isAiSeat(c.connectionId))
     .sort((a, b) => a.joinOrder - b.joinOrder);
 
   if (approved.length === 0) {
@@ -349,6 +370,44 @@ export function toPlayer(record: ConnectionRecord): {
     joinOrder: record.joinOrder,
     status: record.status,
   };
+}
+
+export async function claimAiTurn(connectionId: string, turnKey: string): Promise<boolean> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { connectionId },
+        UpdateExpression: 'SET aiLastTurnKey = :key',
+        ConditionExpression:
+          '(attribute_not_exists(aiStopped) OR aiStopped = :false) AND (attribute_not_exists(aiLastTurnKey) OR aiLastTurnKey <> :key)',
+        ExpressionAttributeValues: { ':key': turnKey, ':false': false },
+      })
+    );
+    return true;
+  } catch (err: unknown) {
+    const name = (err as { name?: string }).name;
+    if (name === 'ConditionalCheckFailedException') return false;
+    throw err;
+  }
+}
+
+export async function stopAndDeleteAiSeats(roomCode: string): Promise<number> {
+  const seats = (await getApprovedConnections(roomCode)).filter((c) => isAiSeat(c.connectionId));
+  await Promise.all(
+    seats.map(async (seat) => {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: { connectionId: seat.connectionId },
+          UpdateExpression: 'SET aiStopped = :true',
+          ExpressionAttributeValues: { ':true': true },
+        })
+      );
+      await deleteConnection(seat.connectionId);
+    })
+  );
+  return seats.length;
 }
 
 export const MAX_PLAYERS = 12;
