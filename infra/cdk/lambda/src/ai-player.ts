@@ -10,9 +10,12 @@
  * Env: WS_URL, API_URL, CONNECTIONS_TABLE, BEDROCK_MODEL_ID, BRAIN,
  * AI_HANDOFF_AFTER_MS, BEDROCK_TIMEOUT_MS, MOVE_DELAY_MS (optional override).
  */
+import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { raceLoop, RaceLoopResult } from '../../../../agent/src/agent';
 import { BedrockBrain, HeuristicBrain, MoveBrain } from '../../../../agent/src/brain';
+import { LayaBrain } from '../../../../agent/src/laya-brain';
 import {
   AiDifficulty,
   DIFFICULTY_TUNING,
@@ -31,7 +34,7 @@ const WAIT_SLICE_MS = 20_000;
 export interface SpawnAiPlayerEvent {
   roomCode: string;
   nickname: string;
-  brain?: 'bedrock' | 'heuristic';
+  brain?: 'bedrock' | 'heuristic' | 'laya';
   difficulty?: AiDifficulty | string;
   /** Set on planned rotation so the successor rejoins the same seat. */
   previousConnectionId?: string;
@@ -40,8 +43,50 @@ export interface SpawnAiPlayerEvent {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+let cachedUrl: { url: string; at: number } | undefined;
+let cachedApiKey: Promise<string | undefined> | undefined;
+
+function apiKey(): Promise<string | undefined> {
+  const secretId = process.env.OLLAYA_API_KEY_SECRET;
+  const fromEnv = process.env.OLLAYA_API_KEY;
+  if (!secretId) return Promise.resolve(fromEnv);
+  cachedApiKey ??= new SecretsManagerClient({})
+    .send(new GetSecretValueCommand({ SecretId: secretId }))
+    .then((out) => out.SecretString || fromEnv);
+  return cachedApiKey;
+}
+
+/** URL written by the power Lambda after the instance has a public address. */
+export async function resolveLayaEndpoint(): Promise<{ url: string; apiKey?: string } | null> {
+  const direct = process.env.OLLAYA_URL?.trim();
+  if (direct) return { url: direct, apiKey: await apiKey() };
+
+  const name = process.env.OLLAYA_URL_PARAMETER;
+  if (!name) return null;
+  if (!cachedUrl || Date.now() - cachedUrl.at > 15_000) {
+    const out = await new SSMClient({}).send(new GetParameterCommand({ Name: name }));
+    const value = out.Parameter?.Value?.trim() ?? '';
+    cachedUrl = { url: value.startsWith('http') ? value : '', at: Date.now() };
+  }
+  if (!cachedUrl.url) return null;
+  return { url: cachedUrl.url, apiKey: await apiKey() };
+}
+
 function buildBrain(event: SpawnAiPlayerEvent, difficulty: AiDifficulty): MoveBrain {
   const mode = event.brain ?? process.env.BRAIN ?? 'heuristic';
+  if (mode === 'laya') {
+    console.log(`[AI] brain=laya nickname=${event.nickname} difficulty=${difficulty}`);
+    return new LayaBrain({
+      endpoint: resolveLayaEndpoint,
+      onFailure: () => {
+        cachedUrl = undefined;
+      },
+      fallbackSeed: event.nickname,
+      difficulty,
+      model: process.env.OLLAYA_MODEL,
+      timeoutMs: Number(process.env.LAYA_TIMEOUT_MS ?? 12_000),
+    });
+  }
   if (mode === 'bedrock') {
     console.log(`[AI] brain=bedrock nickname=${event.nickname} difficulty=${difficulty}`);
     return new BedrockBrain({

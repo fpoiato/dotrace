@@ -22,6 +22,7 @@ import {
   ttl24h,
 } from './ddb';
 import { applyRaceStatDeltas, getTop10, RaceStatDelta } from './leaderboard';
+import { requestOllayaPower } from './ollaya-control';
 import { WsEnvelope } from './response';
 
 const PLAYER_COLOR_HOST = '#EF4444';
@@ -127,6 +128,7 @@ export async function handleClientAction(
         status: 'approved',
         ttl: ttl24h(),
       });
+      await requestOllayaPower('start');
 
       await replyToCaller(
         connectionId,
@@ -230,6 +232,7 @@ export async function handleClientAction(
         // the pilot stuck waiting for approval and never taking its turn.
         await replyToCaller(connectionId, approvedEnvelope, result, pushToCaller);
         await broadcastToApproved(code, approvedEnvelope, connectionId);
+        await requestOllayaPower('start');
         break;
       }
 
@@ -266,6 +269,7 @@ export async function handleClientAction(
         },
         roomCode: code,
       });
+      await requestOllayaPower('start');
       break;
     }
 
@@ -352,6 +356,7 @@ export async function handleClientAction(
       });
 
       await deleteGhost(code, nickname.trim());
+      await requestOllayaPower('start');
 
       const approved = await getApprovedConnections(code);
       const pending = (await getRoomConnections(code)).filter((c) => c.status === 'pending');
@@ -655,7 +660,8 @@ export async function handleClientAction(
         break;
       }
 
-      const brain = brainRaw === 'bedrock' ? 'bedrock' : 'heuristic';
+      const brain =
+        brainRaw === 'bedrock' ? 'bedrock' : brainRaw === 'laya' ? 'laya' : 'heuristic';
       const difficulty =
         difficultyRaw === 'easy' ||
         difficultyRaw === 'medium' ||

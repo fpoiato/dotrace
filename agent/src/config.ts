@@ -14,8 +14,8 @@ export interface AgentConfig {
   modelId: string;
   /** AWS region for Bedrock. */
   region: string;
-  /** 'bedrock' uses the LLM brain; 'heuristic' skips Bedrock entirely. */
-  brain: 'bedrock' | 'heuristic';
+  /** 'laya' asks Ollaya; 'bedrock' uses Nova; 'heuristic' is local. */
+  brain: 'bedrock' | 'heuristic' | 'laya';
   /** easy | medium | hard | pro — tunes speed, mistakes, gear cap. */
   difficulty: AiDifficulty;
   /** Artificial delay before each move (ms) so the race feels natural. */
@@ -35,7 +35,8 @@ function requireRoomCode(roomCode: string): string {
 export function loadConfig(): AgentConfig {
   const roomCode = requireRoomCode(process.env.ROOM_CODE ?? process.argv[2] ?? '');
   const nickname = (process.env.NICKNAME ?? process.argv[3] ?? 'AI Pilot').trim();
-  const brain = process.env.BRAIN === 'heuristic' ? 'heuristic' : 'bedrock';
+  const brain =
+    process.env.BRAIN === 'heuristic' ? 'heuristic' : process.env.BRAIN === 'laya' ? 'laya' : 'bedrock';
   const difficulty = difficultyFromUnknown(process.env.DIFFICULTY);
   const defaultDelay = DIFFICULTY_TUNING[difficulty].moveDelayMs;
 

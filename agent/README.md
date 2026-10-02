@@ -4,8 +4,7 @@ An AI **network player** for Dot Race. It joins a room through the same
 protocol as any human (`JOIN_ROOM` → host approval → `RELAY` →
 `FORWARD_TO_HOST`/`SUBMIT_MOVE`), and picks moves with either:
 
-- **Bot / heuristic** — track-aware planner with a per-nickname driving style
-  (aggression / caution) so two bots don't shadow each other. Free.
+- **Bot / Laya** — the lobby Bot asks [Ollaya](https://ollaya.dev) (`laya`, Convai Innovations) to pick one of the nine gear changes from a track window, the other pilots, and a 3-round coast. The model runs on a `t4g.medium` that the `DotRaceOllayaPower` Lambda starts on the first connection and stops after the room has been empty for 3 minutes. If Ollaya is still booting or the call fails, the styled heuristic plays that turn.
 - **IA / Bedrock** — Amazon Bedrock Converse (`amazon.nova-micro-v1:0`), IAM
   auth. Falls back to the styled heuristic on model failure. Small per-turn cost.
 
@@ -62,6 +61,8 @@ Typical agent flow: `join_room` (host approves) → loop `wait_for_turn` →
 | `src/session.ts` | `GameSession` — WS+HTTP player session, state cache, `waitForTurn` |
 | `src/tools.ts` | Pure tools: board summary, annotated legal moves |
 | `src/brain.ts` | `HeuristicBrain` + `BedrockBrain` (with fallback) |
+| `src/laya-brain.ts` | `LayaBrain` — Ollaya `/api/decide`, heuristic fallback |
+| `src/laya-scene.ts` | Grid window, coast, and the nine gear-change criteria |
 | `src/agent.ts` | Autonomous CLI runner |
 | `src/mcp-server.ts` | MCP stdio server |
 

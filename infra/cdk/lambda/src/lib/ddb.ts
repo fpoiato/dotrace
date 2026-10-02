@@ -5,6 +5,7 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  ScanCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
@@ -62,6 +63,70 @@ export function isAiMarker(connectionId: string): boolean {
 
 export function isHandoffMarker(connectionId: string): boolean {
   return connectionId.startsWith(HANDOFF_PREFIX);
+}
+
+const OLLAYA_CONTROL_ID = 'sys#ollaya';
+
+/** Websocket rows. Ghosts, AI markers, handoff markers, and the power record are not players. */
+export function isLiveSocket(connectionId: string): boolean {
+  return (
+    !isGhost(connectionId) &&
+    !isAiMarker(connectionId) &&
+    !isHandoffMarker(connectionId) &&
+    !connectionId.startsWith('sys#')
+  );
+}
+
+export interface OllayaControl {
+  generation: number;
+  desired: 'running' | 'stopped' | '';
+}
+
+/** Bump the generation so an in-flight idle stop observes that it is stale. */
+export async function bumpOllayaGeneration(desired: 'running' | 'stopped'): Promise<number> {
+  const result = await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { connectionId: OLLAYA_CONTROL_ID },
+      UpdateExpression: 'ADD generation :one SET desired = :desired, roomCode = :room',
+      ExpressionAttributeValues: {
+        ':one': 1,
+        ':desired': desired,
+        ':room': 'sys',
+      },
+      ReturnValues: 'UPDATED_NEW',
+    })
+  );
+  return Number(result.Attributes?.generation ?? 0);
+}
+
+export async function getOllayaControl(): Promise<OllayaControl> {
+  const result = await ddb.send(
+    new GetCommand({ TableName: TABLE, Key: { connectionId: OLLAYA_CONTROL_ID } })
+  );
+  const item = result.Item as { generation?: number; desired?: string } | undefined;
+  const desired = item?.desired === 'running' || item?.desired === 'stopped' ? item.desired : '';
+  return { generation: Number(item?.generation ?? 0), desired };
+}
+
+export async function countLiveSockets(): Promise<number> {
+  let count = 0;
+  let startKey: Record<string, unknown> | undefined;
+  do {
+    const result = await ddb.send(
+      new ScanCommand({
+        TableName: TABLE,
+        ProjectionExpression: 'connectionId',
+        ExclusiveStartKey: startKey,
+      })
+    );
+    for (const item of result.Items ?? []) {
+      const id = String((item as { connectionId?: string }).connectionId ?? '');
+      if (isLiveSocket(id)) count += 1;
+    }
+    startKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (startKey);
+  return count;
 }
 
 export function handoffMarkerId(roomCode: string, nickname: string): string {

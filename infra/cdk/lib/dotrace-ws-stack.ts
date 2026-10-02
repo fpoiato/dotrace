@@ -15,9 +15,27 @@ import {
   HttpLambdaIntegration,
   WebSocketLambdaIntegration,
 } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  BlockDeviceVolume,
+  EbsDeviceVolumeType,
+  Instance,
+  InstanceClass,
+  InstanceInitiatedShutdownBehavior,
+  InstanceSize,
+  InstanceType,
+  MachineImage,
+  OperatingSystemType,
+  Peer,
+  Port,
+  SubnetType,
+  UserData,
+  Vpc,
+} from 'aws-cdk-lib/aws-ec2';
 import { RecursiveLoop, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
+import { StringParameter } from 'aws-cdk-lib/aws-ssm';
+import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps, Tags } from 'aws-cdk-lib';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import * as path from 'path';
@@ -222,11 +240,177 @@ export class DotRaceWsStack extends Stack {
     messageFn.addToRolePolicy(invokeAiPlayer);
     aiPlayerFn.addToRolePolicy(invokeAiPlayer);
 
+    const ollaya = addOllayaHost(this, {
+      connectionsTable,
+      aiPlayerFn,
+      httpFn,
+      messageFn,
+      disconnectFn,
+    });
+
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
     new CfnOutput(this, 'HttpApiUrl', { value: httpApi.apiEndpoint });
     new CfnOutput(this, 'HttpApiId', { value: httpApi.httpApiId });
     new CfnOutput(this, 'ConnectionsTableName', { value: connectionsTable.tableName });
     new CfnOutput(this, 'LeaderboardTableName', { value: leaderboardTable.tableName });
+    new CfnOutput(this, 'OllayaInstanceId', { value: ollaya.instanceId });
+    new CfnOutput(this, 'OllayaUrlParameter', { value: ollaya.urlParameterName });
   }
+}
+
+const OLLAYA_POWER_FUNCTION_NAME = 'DotRaceOllayaPower';
+
+function ollayaUserData(secretId: string, region: string): UserData {
+  const userData = UserData.forLinux();
+  userData.addCommands(
+    'set -euo pipefail',
+    'trap "shutdown -h now" EXIT',
+    'exec > /var/log/ollaya-bootstrap.log 2>&1',
+    'export DEBIAN_FRONTEND=noninteractive',
+    'apt-get update',
+    'apt-get install -y curl unzip ca-certificates',
+    'curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o /tmp/awscliv2.zip',
+    'unzip -q /tmp/awscliv2.zip -d /tmp',
+    '/tmp/aws/install',
+    'curl -fsSL https://ollaya.dev/install.sh | sh',
+    `SECRET_ID="${secretId}"`,
+    `REGION="${region}"`,
+    'KEY="$(aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --region "$REGION" --query SecretString --output text)"',
+    'install -d -m 700 /etc/ollaya',
+    'umask 077',
+    'printf "OLLAYA_HOST=0.0.0.0:11435\\nOLLAYA_API_KEY=%s\\nOLLAYA_KEEP_ALIVE=-1\\n" "$KEY" > /etc/ollaya/env',
+    'BIN="$(command -v ollaya || true)"',
+    'if [ -z "$BIN" ]; then BIN=/usr/local/bin/ollaya; fi',
+    'cat > /etc/systemd/system/ollaya.service << EOF',
+    '[Unit]',
+    'Description=Ollaya decision server',
+    'After=network-online.target',
+    'Wants=network-online.target',
+    '[Service]',
+    'Type=simple',
+    'EnvironmentFile=/etc/ollaya/env',
+    'ExecStart=${BIN} serve',
+    'Restart=on-failure',
+    'RestartSec=2',
+    '[Install]',
+    'WantedBy=multi-user.target',
+    'EOF',
+    'systemctl daemon-reload',
+    'systemctl enable ollaya',
+    'systemctl restart ollaya',
+    'if curl -sf --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:11435/; then',
+    '  OLLAYA_HOST=127.0.0.1:11435 OLLAYA_API_KEY="$KEY" ollaya pull laya || echo "ollaya pull failed"',
+    'else',
+    '  echo "ollaya did not become healthy"',
+    'fi',
+    'shutdown -h now'
+  );
+  return userData;
+}
+
+function addOllayaHost(
+  stack: DotRaceWsStack,
+  deps: {
+    connectionsTable: Table;
+    aiPlayerFn: NodejsFunction;
+    httpFn: NodejsFunction;
+    messageFn: NodejsFunction;
+    disconnectFn: NodejsFunction;
+  }
+): { instanceId: string; urlParameterName: string } {
+  const vpc = new Vpc(stack, 'OllayaVpc', {
+    maxAzs: 1,
+    natGateways: 0,
+    subnetConfiguration: [{ name: 'public', subnetType: SubnetType.PUBLIC, cidrMask: 24 }],
+  });
+
+  const apiKey = new Secret(stack, 'OllayaApiKey', {
+    description: 'Bearer token the Dot Race bot sends to Ollaya',
+    generateSecretString: { excludePunctuation: true, passwordLength: 32 },
+  });
+
+  const urlParameter = new StringParameter(stack, 'OllayaUrl', {
+    parameterName: '/dotrace/ollaya-url',
+    stringValue: 'pending',
+    description: 'Current Ollaya base URL. pending while the instance is stopped.',
+  });
+
+  const host = new Instance(stack, 'OllayaHost', {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PUBLIC },
+    instanceType: InstanceType.of(InstanceClass.T4G, InstanceSize.MEDIUM),
+    machineImage: MachineImage.fromSsmParameter(
+      '/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id',
+      { os: OperatingSystemType.LINUX }
+    ),
+    requireImdsv2: true,
+    instanceInitiatedShutdownBehavior: InstanceInitiatedShutdownBehavior.STOP,
+    blockDevices: [
+      {
+        deviceName: '/dev/sda1',
+        volume: BlockDeviceVolume.ebs(20, {
+          volumeType: EbsDeviceVolumeType.GP3,
+          encrypted: true,
+        }),
+      },
+    ],
+    userData: ollayaUserData(apiKey.secretArn, stack.region),
+  });
+  host.connections.allowFrom(Peer.anyIpv4(), Port.tcp(11435), 'Ollaya decide API');
+  Tags.of(host).add('Name', 'dotrace-ollaya');
+  apiKey.grantRead(host);
+
+  const powerFn = new NodejsFunction(stack, 'OllayaPowerHandler', {
+    entry: path.join(__dirname, '..', 'lambda', 'src', 'ollaya-power.ts'),
+    handler: 'handler',
+    functionName: OLLAYA_POWER_FUNCTION_NAME,
+    runtime: Runtime.NODEJS_20_X,
+    timeout: Duration.minutes(4),
+    memorySize: 256,
+    environment: {
+      NODE_OPTIONS: '--enable-source-maps',
+      CONNECTIONS_TABLE: deps.connectionsTable.tableName,
+      OLLAYA_INSTANCE_ID: host.instanceId,
+      OLLAYA_URL_PARAMETER: urlParameter.parameterName,
+      OLLAYA_API_KEY_SECRET: apiKey.secretArn,
+      OLLAYA_IDLE_MS: String(3 * 60 * 1000),
+      OLLAYA_MODEL: 'laya',
+    },
+    bundling: { externalModules: ['@aws-sdk/*'] },
+  });
+  deps.connectionsTable.grantReadWriteData(powerFn);
+  apiKey.grantRead(powerFn);
+  urlParameter.grantWrite(powerFn);
+  urlParameter.grantRead(deps.aiPlayerFn);
+  apiKey.grantRead(deps.aiPlayerFn);
+  powerFn.addToRolePolicy(
+    new PolicyStatement({
+      actions: ['ec2:StartInstances', 'ec2:StopInstances'],
+      resources: [`arn:aws:ec2:${stack.region}:${stack.account}:instance/${host.instanceId}`],
+    })
+  );
+  powerFn.addToRolePolicy(
+    new PolicyStatement({
+      actions: ['ec2:DescribeInstances'],
+      resources: ['*'],
+    })
+  );
+
+  const invokePower = new PolicyStatement({
+    actions: ['lambda:InvokeFunction'],
+    resources: [
+      `arn:aws:lambda:${stack.region}:${stack.account}:function:${OLLAYA_POWER_FUNCTION_NAME}`,
+    ],
+  });
+  for (const fn of [deps.httpFn, deps.messageFn, deps.disconnectFn]) {
+    fn.addEnvironment('OLLAYA_POWER_FUNCTION_NAME', OLLAYA_POWER_FUNCTION_NAME);
+    fn.addToRolePolicy(invokePower);
+  }
+
+  deps.aiPlayerFn.addEnvironment('OLLAYA_URL_PARAMETER', urlParameter.parameterName);
+  deps.aiPlayerFn.addEnvironment('OLLAYA_API_KEY_SECRET', apiKey.secretArn);
+  deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', 'laya');
+
+  return { instanceId: host.instanceId, urlParameterName: urlParameter.parameterName };
 }
