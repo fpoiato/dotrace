@@ -36,7 +36,12 @@ import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps, Tags } from 'aws-cdk-lib';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Alarm, ComparisonOperator, Metric, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
+import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
+import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Topic } from 'aws-cdk-lib/aws-sns';
+import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -88,6 +93,7 @@ export class DotRaceWsStack extends Stack {
       runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(10),
       environment: lambdaEnv,
+      logRetention: RetentionDays.TWO_WEEKS,
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
@@ -97,6 +103,7 @@ export class DotRaceWsStack extends Stack {
       runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(10),
       environment: lambdaEnv,
+      logRetention: RetentionDays.TWO_WEEKS,
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
@@ -106,6 +113,7 @@ export class DotRaceWsStack extends Stack {
       runtime: Runtime.NODEJS_20_X,
       timeout: Duration.seconds(30),
       environment: lambdaEnv,
+      logRetention: RetentionDays.TWO_WEEKS,
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
@@ -116,6 +124,7 @@ export class DotRaceWsStack extends Stack {
       timeout: Duration.seconds(30),
       memorySize: 256,
       environment: lambdaEnv,
+      logRetention: RetentionDays.TWO_WEEKS,
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
@@ -215,6 +224,7 @@ export class DotRaceWsStack extends Stack {
         AI_HANDOFF_AFTER_MS: String(10 * 60 * 1000),
         BEDROCK_TIMEOUT_MS: '12000',
       },
+      logRetention: RetentionDays.TWO_WEEKS,
       bundling: { externalModules: ['@aws-sdk/*'] },
     });
 
@@ -240,6 +250,10 @@ export class DotRaceWsStack extends Stack {
     messageFn.addToRolePolicy(invokeAiPlayer);
     aiPlayerFn.addToRolePolicy(invokeAiPlayer);
 
+    new CfnOutput(this, 'AiPlayerFunctionName', { value: aiPlayerFunctionName }).overrideLogicalId(
+      'AiPlayerFunctionName'
+    );
+
     const ollaya = addOllayaHost(this, {
       connectionsTable,
       aiPlayerFn,
@@ -247,6 +261,90 @@ export class DotRaceWsStack extends Stack {
       messageFn,
       disconnectFn,
     });
+
+    // Already deployed and imported by DotRaceCostGuardStack. Keep the same
+    // construct path and export name so this update does not drop the topic.
+    const alerts = new Topic(this, 'OpsAlerts', {
+      displayName: 'DotRace ops and cost alerts',
+      topicName: 'dotrace-ops-alerts',
+    });
+    alerts.addSubscription(new EmailSubscription('nandopoiato@gmail.com'));
+    alerts.addToResourcePolicy(
+      new PolicyStatement({
+        sid: 'CloudWatchAlarmsPublish',
+        actions: ['sns:Publish'],
+        principals: [new ServicePrincipal('cloudwatch.amazonaws.com')],
+        resources: [alerts.topicArn],
+        conditions: {
+          ArnLike: {
+            'aws:SourceArn': `arn:aws:cloudwatch:${this.region}:${this.account}:alarm:*`,
+          },
+        },
+      })
+    );
+    alerts.addToResourcePolicy(
+      new PolicyStatement({
+        sid: 'AWSAnomalyDetectionSNSPublishingPermissions',
+        actions: ['sns:Publish'],
+        principals: [new ServicePrincipal('costalerts.amazonaws.com')],
+        resources: [alerts.topicArn],
+        conditions: { StringEquals: { 'aws:SourceAccount': this.account } },
+      })
+    );
+    const alertExport = new CfnOutput(this, 'ExportsOutputRefOpsAlertsB39E82AA7157E178', {
+      value: alerts.topicArn,
+      exportName: 'DotRaceWsStack:ExportsOutputRefOpsAlertsB39E82AA7157E178',
+    });
+    alertExport.overrideLogicalId('ExportsOutputRefOpsAlertsB39E82AA7157E178');
+    new CfnOutput(this, 'AlertTopicArn', { value: alerts.topicArn }).overrideLogicalId('AlertTopicArn');
+
+    const notify = new SnsAction(alerts);
+    const aiErrors = new Alarm(this, 'AiPlayerErrorsAlarm', {
+      alarmName: 'DotRaceAiPlayer-Errors',
+      alarmDescription: 'AI worker errors > 0 over 5 minutes',
+      metric: aiPlayerFn.metricErrors({ period: Duration.minutes(5), statistic: 'Sum' }),
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    aiErrors.addAlarmAction(notify);
+    const aiDuration = new Alarm(this, 'AiPlayerDurationAlarm', {
+      alarmName: 'DotRaceAiPlayer-DurationP99',
+      alarmDescription: 'AI worker p99 duration > 80% of 30s timeout',
+      metric: aiPlayerFn.metricDuration({ period: Duration.minutes(5), statistic: 'p99' }),
+      threshold: 24000,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    aiDuration.addAlarmAction(notify);
+    const aiInvocations = new Alarm(this, 'AiPlayerInvocationsAlarm', {
+      alarmName: 'DotRaceAiPlayer-Invocations',
+      alarmDescription: 'AI worker invocations > 150 per 5 minutes',
+      metric: aiPlayerFn.metricInvocations({ period: Duration.minutes(5), statistic: 'Sum' }),
+      threshold: 150,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    aiInvocations.addAlarmAction(notify);
+    const aiConcurrent = new Alarm(this, 'AiPlayerConcurrentAlarm', {
+      alarmName: 'DotRaceAiPlayer-ConcurrentExecutions',
+      alarmDescription: 'AI worker concurrent > 2 (reserved cap missing or raised)',
+      metric: new Metric({
+        namespace: 'AWS/Lambda',
+        metricName: 'ConcurrentExecutions',
+        dimensionsMap: { FunctionName: aiPlayerFunctionName },
+        statistic: 'Maximum',
+        period: Duration.minutes(5),
+      }),
+      threshold: 2,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+    });
+    aiConcurrent.addAlarmAction(notify);
 
     new CfnOutput(this, 'WebSocketUrl', { value: stage.url });
     new CfnOutput(this, 'WebSocketApiId', { value: webSocketApi.apiId });
