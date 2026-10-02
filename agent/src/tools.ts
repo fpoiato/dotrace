@@ -19,6 +19,7 @@ import {
   segmentCrossesFinish,
   segmentEntersRect,
 } from '../../shared/ws-types';
+import { buildLayaScene, type LayaScene } from './laya-scene';
 import {
   annotatePath,
   describeTrackSituation,
@@ -72,6 +73,8 @@ export interface BoardSummary {
   goalPoint: Vector2D;
   /** Where we are on the directed circuit (for LLM / logs). */
   situation: TrackSituation;
+  /** Grid window, coast, and the nine gear changes for the Laya brain. */
+  scene: LayaScene;
   opponents: {
     nickname: string;
     position: Vector2D;
@@ -179,6 +182,7 @@ export function buildBoardSummary(
       player.velocity,
       player.passedCheckpoint ?? false
     ),
+    scene: buildLayaScene(player, state, track),
     opponents: state.players
       .filter((p) => p.connectionId !== player.connectionId)
       .map((p) => ({

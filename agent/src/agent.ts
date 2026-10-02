@@ -12,6 +12,7 @@ import { getTrackById } from '../../shared/tracks';
 import { HttpClient } from '../../bot/src/http-client';
 import { WsClient } from '../../bot/src/ws-client';
 import { BedrockBrain, HeuristicBrain, MoveBrain } from './brain';
+import { LayaBrain } from './laya-brain';
 import { AgentConfig, loadConfig } from './config';
 import { GameSession } from './session';
 import { buildBoardSummary, listAnnotatedMoves } from './tools';
@@ -136,6 +137,19 @@ export async function raceLoop(
 }
 
 function buildBrain(config: AgentConfig): MoveBrain {
+  if (config.brain === 'laya') {
+    console.log(`[BRAIN] laya model=${process.env.OLLAYA_MODEL ?? 'laya'} difficulty=${config.difficulty}`);
+    return new LayaBrain({
+      endpoint: async () => {
+        const url = process.env.OLLAYA_URL;
+        if (!url) return null;
+        return { url, apiKey: process.env.OLLAYA_API_KEY };
+      },
+      fallbackSeed: config.nickname,
+      difficulty: config.difficulty,
+      model: process.env.OLLAYA_MODEL,
+    });
+  }
   if (config.brain === 'heuristic') {
     console.log(`[BRAIN] heuristic style=${config.nickname} difficulty=${config.difficulty}`);
     return new HeuristicBrain({ styleOrSeed: config.nickname, difficulty: config.difficulty });

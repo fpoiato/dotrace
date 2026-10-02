@@ -39,7 +39,7 @@
   "lobby.difficulty.medium": "Médio",
   "lobby.difficulty.hard": "Difícil",
   "lobby.difficulty.pro": "Pro",
-  "lobby.aiHint": "Escolha a dificuldade, depois Bot (grátis) ou IA (Nova Micro). Fácil erra mais; Pro quase não erra.",
+  "lobby.aiHint": "Escolha a dificuldade, depois Bot (Laya) ou IA (Nova Micro). Fácil erra mais; Pro quase não erra.",
   "lobby.aiJoining": "Piloto entrando…",
   "lobby.aiError": "Não foi possível adicionar o piloto — tente de novo",
   "lobby.youAreHost": "Você é o host",

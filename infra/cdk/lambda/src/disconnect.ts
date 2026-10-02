@@ -1,12 +1,14 @@
 import { APIGatewayProxyHandler } from 'aws-lambda';
 import {
   broadcastToRoom,
+  countLiveSockets,
   deleteConnection,
   getAiHandoffMarker,
   getConnection,
   promoteNextHost,
   saveGhost,
 } from './lib/ddb';
+import { requestOllayaPower } from './lib/ollaya-control';
 import { ok } from './lib/response';
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -26,6 +28,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   await deleteConnection(connectionId);
+
+  if ((await countLiveSockets()) === 0) {
+    await requestOllayaPower('stop');
+  }
 
   // Planned AI Lambda rotation: keep the car in the race; successor rejoins
   // via ghost + PLAYER_REJOINED. Do not emit PLAYER_LEFT.

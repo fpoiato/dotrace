@@ -113,7 +113,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   }
 
   async addBotPilot(players: Player[]): Promise<void> {
-    await this.spawnPilot(players, 'heuristic', this.botNames);
+    await this.spawnPilot(players, 'laya', this.botNames);
   }
 
   async addIaPilot(players: Player[]): Promise<void> {
@@ -122,7 +122,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   private async spawnPilot(
     players: Player[],
-    brain: 'bedrock' | 'heuristic',
+    brain: 'bedrock' | 'heuristic' | 'laya',
     names: string[]
   ): Promise<void> {
     if (this.aiSpawning) return;
