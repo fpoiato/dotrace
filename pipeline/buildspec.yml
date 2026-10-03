@@ -25,7 +25,22 @@ phases:
   build:
     commands:
       - echo "Deploying CDK stack..."
-      - (cd infra/cdk && npm run deploy)
+      - |
+        set +e
+        ./pipeline/laya-detach-ready.sh
+        LAYA_READY=$?
+        set -e
+        if [ "$LAYA_READY" -eq 0 ]; then
+          LAYA_MODE=external
+        elif [ "$LAYA_READY" -eq 2 ]; then
+          echo "Laya host already left this stack, but LayaHostStack is not healthy. Refusing to recreate the EC2."
+          exit 1
+        else
+          echo "Keeping the Laya EC2 in this stack (embedded) until it is retained and LayaHostStack is up."
+          LAYA_MODE=embedded
+        fi
+        echo "layaMode=$LAYA_MODE"
+        (cd infra/cdk && npx cdk deploy --require-approval never -c layaMode="$LAYA_MODE")
       - export WS_URL=$(aws cloudformation describe-stacks --stack-name DotRaceWsStack --query "Stacks[0].Outputs[?OutputKey=='WebSocketUrl'].OutputValue" --output text)
       - export HTTP_API_URL=$(aws cloudformation describe-stacks --stack-name DotRaceWsStack --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" --output text)
       - echo "WebSocket URL=$WS_URL"

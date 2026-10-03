@@ -35,14 +35,14 @@ import { RecursiveLoop, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
-import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps, Tags } from 'aws-cdk-lib';
+import { Aspects, CfnOutput, CfnResource, Duration, RemovalPolicy, Stack, StackProps, Tags } from 'aws-cdk-lib';
 import { Alarm, ComparisonOperator, Metric, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
 import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
-import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Topic } from 'aws-cdk-lib/aws-sns';
 import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
-import { Construct } from 'constructs';
+import { Construct, IConstruct } from 'constructs';
 import * as path from 'path';
 
 export class DotRaceWsStack extends Stack {
@@ -254,13 +254,26 @@ export class DotRaceWsStack extends Stack {
       'AiPlayerFunctionName'
     );
 
-    const ollaya = addOllayaHost(this, {
-      connectionsTable,
-      aiPlayerFn,
-      httpFn,
-      messageFn,
-      disconnectFn,
-    });
+    // embedded until pipeline/laya-detach-ready.sh sees a retained instance and
+    // a healthy LayaHostStack. external drops the machine from this stack and
+    // keeps calling it through LayaPower. The game payload does not change.
+    const layaMode = this.node.tryGetContext('layaMode') === 'external' ? 'external' : 'embedded';
+    const ollaya =
+      layaMode === 'external'
+        ? useSharedLayaHost(this, {
+            connectionsTable,
+            aiPlayerFn,
+            httpFn,
+            messageFn,
+            disconnectFn,
+          })
+        : addOllayaHost(this, {
+            connectionsTable,
+            aiPlayerFn,
+            httpFn,
+            messageFn,
+            disconnectFn,
+          });
 
     // Already deployed and imported by DotRaceCostGuardStack. Keep the same
     // construct path and export name so this update does not drop the topic.
@@ -354,11 +367,77 @@ export class DotRaceWsStack extends Stack {
     new CfnOutput(this, 'LeaderboardTableName', { value: leaderboardTable.tableName });
     new CfnOutput(this, 'OllayaInstanceId', { value: ollaya.instanceId });
     new CfnOutput(this, 'OllayaUrlParameter', { value: ollaya.urlParameterName });
+    new CfnOutput(this, 'OllayaApiKeyArn', { value: ollaya.apiKeyArn });
   }
 }
 
 const OLLAYA_POWER_FUNCTION_NAME = 'DotRaceOllayaPower';
+const LAYA_POWER_FUNCTION_NAME = 'LayaPower';
+const LAYA_URL_PARAMETER = '/laya/url';
+const LAYA_API_KEY_SECRET_PARAMETER = '/laya/api-key-secret-arn';
 
+/**
+ * Dot Race keeps the same start/stop calls. The host itself lives in
+ * fpoiato/laya-host; this only grants the game Lambdas access to it.
+ */
+function useSharedLayaHost(
+  stack: DotRaceWsStack,
+  deps: {
+    connectionsTable: Table;
+    aiPlayerFn: NodejsFunction;
+    httpFn: NodejsFunction;
+    messageFn: NodejsFunction;
+    disconnectFn: NodejsFunction;
+  }
+): { instanceId: string; urlParameterName: string; apiKeyArn: string } {
+  const secretArn = StringParameter.valueForStringParameter(stack, LAYA_API_KEY_SECRET_PARAMETER);
+  const instanceId = StringParameter.valueForStringParameter(stack, '/laya/instance-id');
+
+  deps.aiPlayerFn.addEnvironment('OLLAYA_URL_PARAMETER', LAYA_URL_PARAMETER);
+  deps.aiPlayerFn.addEnvironment('OLLAYA_API_KEY_SECRET', secretArn);
+  deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', 'laya');
+  deps.aiPlayerFn.addToRolePolicy(
+    new PolicyStatement({
+      actions: ['ssm:GetParameter'],
+      resources: [`arn:aws:ssm:${stack.region}:${stack.account}:parameter/laya/url`],
+    })
+  );
+  deps.aiPlayerFn.addToRolePolicy(
+    new PolicyStatement({
+      actions: ['secretsmanager:GetSecretValue'],
+      resources: [secretArn],
+    })
+  );
+
+  const invokePower = new PolicyStatement({
+    actions: ['lambda:InvokeFunction'],
+    resources: [
+      `arn:aws:lambda:${stack.region}:${stack.account}:function:${LAYA_POWER_FUNCTION_NAME}`,
+    ],
+  });
+  for (const fn of [deps.httpFn, deps.messageFn, deps.disconnectFn]) {
+    fn.addEnvironment('OLLAYA_POWER_FUNCTION_NAME', LAYA_POWER_FUNCTION_NAME);
+    fn.addToRolePolicy(invokePower);
+  }
+
+  // The power Lambda still reads sys#ollaya and live sockets, the same check
+  // Dot Race does today, and also refuses to stop while another project is running.
+  const powerRole = Role.fromRoleArn(
+    stack,
+    'LayaPowerRole',
+    `arn:aws:iam::${stack.account}:role/LayaPowerRole`,
+    { mutable: true }
+  );
+  deps.connectionsTable.grantReadData(powerRole);
+
+  return { instanceId, urlParameterName: LAYA_URL_PARAMETER, apiKeyArn: secretArn };
+}
+
+/**
+ * Temporary owner of the EC2. The source of truth is fpoiato/laya-host.
+ * This copy stays so a deploy can set DeletionPolicy Retain before the
+ * pipeline flips `-c layaMode=external` and drops the resources.
+ */
 function ollayaUserData(secretId: string, region: string): UserData {
   const userData = UserData.forLinux();
   userData.addCommands(
@@ -416,7 +495,7 @@ function addOllayaHost(
     messageFn: NodejsFunction;
     disconnectFn: NodejsFunction;
   }
-): { instanceId: string; urlParameterName: string } {
+): { instanceId: string; urlParameterName: string; apiKeyArn: string } {
   const vpc = new Vpc(stack, 'OllayaVpc', {
     maxAzs: 1,
     natGateways: 0,
@@ -458,6 +537,13 @@ function addOllayaHost(
   host.connections.allowFrom(Peer.anyIpv4(), Port.tcp(11435), 'Ollaya decide API');
   Tags.of(host).add('Name', 'dotrace-ollaya');
   apiKey.grantRead(host);
+
+  // Keep the machine, its disk, the API key, and the URL parameter if this
+  // stack stops owning them. The power Lambda is not retained: laya-host
+  // replaces that controller, and the old function name must be free.
+  for (const resource of [vpc, host, apiKey, urlParameter]) {
+    retainOnDelete(resource);
+  }
 
   const powerFn = new NodejsFunction(stack, 'OllayaPowerHandler', {
     entry: path.join(__dirname, '..', 'lambda', 'src', 'ollaya-power.ts'),
@@ -510,5 +596,20 @@ function addOllayaHost(
   deps.aiPlayerFn.addEnvironment('OLLAYA_API_KEY_SECRET', apiKey.secretArn);
   deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', 'laya');
 
-  return { instanceId: host.instanceId, urlParameterName: urlParameter.parameterName };
+  return {
+    instanceId: host.instanceId,
+    urlParameterName: urlParameter.parameterName,
+    apiKeyArn: apiKey.secretArn,
+  };
+}
+
+/** DeletionPolicy Retain on this construct and the resources it creates. */
+function retainOnDelete(scope: Construct): void {
+  Aspects.of(scope).add({
+    visit(node: IConstruct) {
+      if (CfnResource.isCfnResource(node)) {
+        node.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      }
+    },
+  });
 }
