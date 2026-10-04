@@ -126,6 +126,33 @@ describe('GameSession', () => {
     await expect(done).resolves.toBe(false);
   });
 
+  it('settles a move when the sole pilot is handed the turn again', async () => {
+    const { push, session } = setup();
+    await session.join();
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
+
+    const state = relayState();
+    state.turnOrder = ['conn-ai'];
+    state.currentTurnIndex = 0;
+    state.round = 2;
+    const me = state.players.find((p) => p.connectionId === 'conn-ai')!;
+    me.position = { x: 12, y: 28 };
+    push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
+    expect(session.isMyTurn()).toBe(true);
+
+    const settled = session.waitUntilMoveSettled({
+      round: 2,
+      x: 12,
+      y: 28,
+      replay: 0,
+    });
+    me.position = { x: 16, y: 28 };
+    state.round = 3;
+    push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
+    await expect(settled).resolves.toBeUndefined();
+    expect(session.isMyTurn()).toBe(true);
+  });
+
   it('waitForTurn times out instead of hanging forever', async () => {
     const { session, push } = setup();
     await session.join();
@@ -201,7 +228,7 @@ describe('GameSession', () => {
     expect(session.getSnapshot().status).toBe('approved');
   });
 
-  it('waitUntilNotMyTurn resolves after the turn advances', async () => {
+  it('waitUntilMoveSettled resolves after the turn advances', async () => {
     const { push, session } = setup();
     await session.join();
     push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
@@ -210,8 +237,14 @@ describe('GameSession', () => {
     state.currentTurnIndex = 1;
     push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
     expect(session.isMyTurn()).toBe(true);
+    const me = state.players.find((p) => p.connectionId === 'conn-ai')!;
 
-    const done = session.waitUntilNotMyTurn(5_000);
+    const done = session.waitUntilMoveSettled({
+      round: state.round,
+      x: me.position.x,
+      y: me.position.y,
+      replay: state.replayLog?.length ?? 0,
+    });
     state.currentTurnIndex = 0;
     push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
     await expect(done).resolves.toBeUndefined();

@@ -85,7 +85,7 @@ function buildBrain(event: SpawnAiPlayerEvent, difficulty: AiDifficulty): MoveBr
       fallbackSeed: event.nickname,
       difficulty,
       model: process.env.OLLAYA_MODEL || LAYA_DECIDE_MODEL,
-      timeoutMs: Number(process.env.LAYA_TIMEOUT_MS ?? 12_000),
+      timeoutMs: Number(process.env.LAYA_TIMEOUT_MS ?? 2_500),
     });
   }
   if (mode === 'bedrock') {
@@ -95,7 +95,7 @@ function buildBrain(event: SpawnAiPlayerEvent, difficulty: AiDifficulty): MoveBr
       region: process.env.AWS_REGION ?? 'us-east-1',
       fallbackSeed: event.nickname,
       difficulty,
-      timeoutMs: Number(process.env.BEDROCK_TIMEOUT_MS ?? 12_000),
+      timeoutMs: Number(process.env.BEDROCK_TIMEOUT_MS ?? 2_500),
     });
   }
   console.log(`[AI] brain=heuristic nickname=${event.nickname} difficulty=${difficulty}`);

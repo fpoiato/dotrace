@@ -6,7 +6,9 @@
  */
 import { AiDifficulty, difficultyFromUnknown } from './difficulty';
 import { HeuristicBrain, MoveBrain } from './brain';
-import { LAYA_DECIDE_MODEL, layaDecideBody, LayaScene, parseMoveLabel } from './laya-scene';
+import { supervisedChoice } from './bedrock-dataset';
+import { LAYA_DECIDE_MODEL, layaDecideBody, LayaScene } from './laya-scene';
+import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
 
 export interface LayaEndpoint {
@@ -52,7 +54,7 @@ export class LayaBrain implements MoveBrain {
         difficulty: this.difficulty,
       });
     this.model = options.model ?? LAYA_DECIDE_MODEL;
-    this.timeoutMs = options.timeoutMs ?? 12_000;
+    this.timeoutMs = options.timeoutMs ?? 2_500;
     this.onFailure = options.onFailure;
   }
 
@@ -60,6 +62,13 @@ export class LayaBrain implements MoveBrain {
     const heuristic = () => this.fallback.pickMove(summary, moves);
     const scene = summary.scene;
     if (!scene || moves.length === 0) return heuristic();
+
+    // The scene already names the step Laya would be overwritten with.
+    // Asking Ollaya and then discarding the answer is what made each turn slow.
+    const labeled = supervisedChoice(scene);
+    if (labeled) {
+      return applySceneChoice('Laya', scene, moves, labeled, await heuristic());
+    }
 
     let target: LayaEndpoint | null;
     try {
@@ -78,72 +87,14 @@ export class LayaBrain implements MoveBrain {
         return heuristic();
       }
       const choice = body.answers?.move?.choice;
-      if (typeof choice !== 'string' || !parseMoveLabel(choice)) {
-        console.warn(`[BRAIN] Laya returned no move label (${JSON.stringify(choice)}) — using heuristic`);
-        return heuristic();
-      }
-      const option = scene.options.find((item) => item.label === choice);
-      if (!option || option.illegal) {
-        console.warn(`[BRAIN] Laya picked ${choice} which is illegal — using heuristic`);
-        return heuristic();
-      }
-      const match = moves.find(
-        (move) => move.velocity.x === option.velocity.x && move.velocity.y === option.velocity.y
+      const heuristicPick = await heuristic();
+      return applySceneChoice(
+        'Laya',
+        scene,
+        moves,
+        typeof choice === 'string' ? choice : null,
+        heuristicPick
       );
-      if (!match) {
-        console.warn(`[BRAIN] Laya picked ${choice} which is not a legal move — using heuristic`);
-        return heuristic();
-      }
-      const bestOption = scene.options.find((item) => item.detail.startsWith('best '));
-      const bestMove = bestOption
-        ? moves.find(
-            (move) =>
-              move.velocity.x === bestOption.velocity.x && move.velocity.y === bestOption.velocity.y
-          )
-        : undefined;
-      if (bestMove) {
-        if (
-          match.velocity.x !== bestMove.velocity.x ||
-          match.velocity.y !== bestMove.velocity.y
-        ) {
-          console.warn(`[BRAIN] Laya picked ${choice} — using best`);
-        }
-        return bestMove;
-      }
-      const backOption = scene.options.find((item) => item.detail.startsWith('back '));
-      const backMove = backOption
-        ? moves.find(
-            (move) =>
-              move.velocity.x === backOption.velocity.x && move.velocity.y === backOption.velocity.y
-          )
-        : undefined;
-      if (backMove) {
-        if (
-          match.velocity.x !== backMove.velocity.x ||
-          match.velocity.y !== backMove.velocity.y
-        ) {
-          console.warn(`[BRAIN] Laya picked ${choice} — using back`);
-        }
-        return backMove;
-      }
-      const stationary = match.velocity.x === 0 && match.velocity.y === 0;
-      const hasMotion = moves.some((move) => move.velocity.x !== 0 || move.velocity.y !== 0);
-      if (stationary && hasMotion) {
-        console.warn('[BRAIN] Laya picked standstill — using heuristic');
-        return heuristic();
-      }
-      const leavesAsphalt =
-        match.grassShortcut || match.landingTile === 'grass' || match.landingTile === 'rumble';
-      const canStayOnAsphalt = moves.some(
-        (move) =>
-          !move.grassShortcut &&
-          (move.landingTile === 'track' || move.landingTile === 'finish')
-      );
-      if (leavesAsphalt && canStayOnAsphalt) {
-        console.warn('[BRAIN] Laya left the asphalt — using heuristic');
-        return heuristic();
-      }
-      return match;
     } catch (err) {
       console.warn('[BRAIN] Laya call failed — using heuristic:', errText(err));
       this.onFailure?.();

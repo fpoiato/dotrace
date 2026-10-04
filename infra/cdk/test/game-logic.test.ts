@@ -247,6 +247,66 @@ describe('game over conditions', () => {
     expect(isGameOver(state)).toBe(false);
   });
 
+  it('ends when every human has finished and only an AI pilot is still racing', () => {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ finishOrder: 1 }),
+        makePlayer({ connectionId: 'ai', nickname: 'IA Nova', joinOrder: 1 }),
+      ],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: ['c1', 'ai'],
+      currentTurnIndex: 1,
+      round: 4,
+      totalLaps: 1,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
+    };
+    expect(isGameOver(state)).toBe(true);
+  });
+
+  it('keeps going while a human is still racing beside the AI', () => {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer(),
+        makePlayer({ connectionId: 'ai', nickname: 'Bot Laya', joinOrder: 1, finishOrder: 1 }),
+      ],
+      hostId: 'c1',
+      trackId: 'test',
+      turnOrder: ['c1', 'ai'],
+      currentTurnIndex: 0,
+      round: 2,
+      totalLaps: 1,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [{ connectionId: 'ai', nickname: 'Bot Laya', position: 1 }],
+    };
+    expect(isGameOver(state)).toBe(false);
+  });
+
+  it('does not end a bots-only race when the first bot finishes', () => {
+    const state: GameState = {
+      phase: 'GAME_ROUND',
+      players: [
+        makePlayer({ nickname: 'IA Alfa', finishOrder: 1 }),
+        makePlayer({ connectionId: 'ai2', nickname: 'Bot Beta', joinOrder: 1 }),
+      ],
+      hostId: 'ai2',
+      trackId: 'test',
+      turnOrder: ['c1', 'ai2'],
+      currentTurnIndex: 1,
+      round: 3,
+      totalLaps: 1,
+      gameMode: 'TURNS',
+      diceRolls: {},
+      podium: [{ connectionId: 'c1', nickname: 'IA Alfa', position: 1 }],
+    };
+    expect(isGameOver(state)).toBe(false);
+  });
+
   it('ends timed mode as soon as the first player finishes', () => {
     const state: GameState = {
       phase: 'GAME_ROUND',

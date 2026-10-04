@@ -50,7 +50,7 @@ export const DIFFICULTY_TUNING: Record<AiDifficulty, DifficultyTuning> = {
     clearSqrtScale: 1.0,
     mistakeChance: 0.45,
     topK: 3,
-    moveDelayMs: 900,
+    moveDelayMs: 320,
   },
   medium: {
     id: 'medium',
@@ -63,7 +63,7 @@ export const DIFFICULTY_TUNING: Record<AiDifficulty, DifficultyTuning> = {
     clearSqrtScale: 1.8,
     mistakeChance: 0.08,
     topK: 2,
-    moveDelayMs: 500,
+    moveDelayMs: 140,
   },
   hard: {
     id: 'hard',
@@ -76,7 +76,7 @@ export const DIFFICULTY_TUNING: Record<AiDifficulty, DifficultyTuning> = {
     clearSqrtScale: 2.3,
     mistakeChance: 0,
     topK: 1,
-    moveDelayMs: 250,
+    moveDelayMs: 60,
   },
   pro: {
     id: 'pro',
@@ -89,7 +89,7 @@ export const DIFFICULTY_TUNING: Record<AiDifficulty, DifficultyTuning> = {
     clearSqrtScale: 2.6,
     mistakeChance: 0,
     topK: 1,
-    moveDelayMs: 150,
+    moveDelayMs: 30,
   },
 };
 

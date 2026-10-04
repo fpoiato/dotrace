@@ -651,7 +651,12 @@ export function isGameOver(state: GameState): boolean {
   }
   if (state.podium.length >= PODIUM_SIZE) return true;
   const racing = state.players.filter((p) => p.finishOrder === undefined);
-  return racing.length === 0 && state.turnOrder.length > 0;
+  if (racing.length === 0 && state.turnOrder.length > 0) return true;
+  // A human already finished and only AI pilots are still on track. Waiting
+  // them out freezes the podium and the replay, so the race ends here.
+  const humans = state.players.filter((p) => !isAiPilotNickname(p.nickname));
+  const humansStillRacing = humans.some((p) => p.finishOrder === undefined);
+  return humans.length > 0 && !humansStillRacing && state.podium.length > 0;
 }
 
 /** Build a telemetry snapshot from the current game state. */

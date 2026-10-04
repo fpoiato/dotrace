@@ -9,7 +9,8 @@
     "start": "node dist/agent.js",
     "dev": "tsx src/agent.ts",
     "mcp": "tsx src/mcp-server.ts",
-    "test": "jest"
+    "test": "jest",
+    "finetune:dataset": "tsx scripts/build-bedrock-dataset.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.0.0",
