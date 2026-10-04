@@ -110,6 +110,24 @@ export class LayaBrain implements MoveBrain {
         console.warn('[BRAIN] Laya left the asphalt — using heuristic');
         return heuristic();
       }
+      const bestOption = scene.options.find((item) => item.detail.startsWith('best '));
+      const bestMove = bestOption
+        ? moves.find(
+            (move) =>
+              move.velocity.x === bestOption.velocity.x && move.velocity.y === bestOption.velocity.y
+          )
+        : undefined;
+      const drifted = option.detail.startsWith('drift ');
+      const heldBack =
+        scene.state.bend === 'straight' && bestMove != null && match.gear < bestMove.gear;
+      if (bestMove && bestMove !== match && (drifted || heldBack)) {
+        console.warn(
+          drifted
+            ? '[BRAIN] Laya drifted off the circuit — using best'
+            : '[BRAIN] Laya held gear back on a straight — using best'
+        );
+        return bestMove;
+      }
       return match;
     } catch (err) {
       console.warn('[BRAIN] Laya call failed — using heuristic:', errText(err));
