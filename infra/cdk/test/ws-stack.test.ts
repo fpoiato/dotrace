@@ -18,6 +18,7 @@ describe('DotRaceWsStack', () => {
       FunctionName: 'DotRaceAiPlayer',
       RecursiveLoop: 'Allow',
     });
+    expect(JSON.stringify(template.toJSON())).toContain('custom-model/*');
   });
 
   it('creates a stopped-by-default Ollaya host and its power lambda', () => {

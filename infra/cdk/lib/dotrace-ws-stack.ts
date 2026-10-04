@@ -234,6 +234,9 @@ export class DotRaceWsStack extends Stack {
         resources: [
           'arn:aws:bedrock:*::foundation-model/amazon.nova-*',
           `arn:aws:bedrock:*:${this.account}:inference-profile/*.amazon.nova-*`,
+          // Nova Micro fine-tune trained on the Laya decide packet.
+          `arn:aws:bedrock:*:${this.account}:custom-model/*`,
+          `arn:aws:bedrock:*:${this.account}:provisioned-model/*`,
         ],
       })
     );

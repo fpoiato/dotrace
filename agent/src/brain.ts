@@ -3,9 +3,10 @@
  *
  * Every brain receives the annotated legal-move list and MUST return one of
  * those moves — illegal outputs are impossible by construction. The Bedrock
- * brain asks an LLM to pick; on any failure (throttle, bad JSON, out-of-range
- * index) it silently falls back to the deterministic heuristic so a race is
- * never stalled by the model.
+ * brain asks Nova with the same decide packet Laya is fine-tuned on. A legal
+ * choice id is driven like Laya (the `best` asphalt step, or `back` off
+ * track). On any failure it falls back to the heuristic so a race is never
+ * stalled by the model.
  */
 import {
   BedrockRuntimeClient,
@@ -17,6 +18,13 @@ import {
   DifficultyTuning,
   difficultyFromUnknown,
 } from './difficulty';
+import {
+  BEDROCK_LAYA_SYSTEM,
+  layaPromptText,
+  supervisedChoice,
+} from './bedrock-dataset';
+import { parseMoveLabel } from './laya-scene';
+import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
 
 export interface MoveBrain {
@@ -228,28 +236,6 @@ export class HeuristicBrain implements MoveBrain {
 
 // --------------------------------------------------------------- bedrock
 
-const SYSTEM_PROMPT = `You are a race driver in Vector Rally, a grid-based racing game with momentum.
-Each turn you pick ONE move from a numbered list of legal moves.
-
-You receive "situation" describing WHERE you are on the circuit:
-- lapProgressPct: how far along the directed racing line this lap (0–100).
-- raceHeading: the direction the racing line wants you to go RIGHT NOW.
-- travelHeading / alignment: your velocity vs raceHeading. Prefer "with_traffic"; never choose a move that stays "against" when a with_traffic option exists.
-- cellsToCorner / ahead[].turn: upcoming bends — brake before hairpin/left/right when cellsToCorner is small; accelerate on long straights (suggestedMaxGear).
-- cellsToGoal: remaining racing-line distance to checkpoint or finish.
-- lateralOffset: how far you are from the ideal line (keep it small).
-
-Rules of thumb:
-- NEVER pick velocity {"x":0,"y":0} unless it is the ONLY legal move — standing still wastes the turn.
-- Moves flagged "grassShortcut" incur heavy penalties: avoid them unless every move has one.
-- Before "passedCheckpoint" is true you must route through the checkpoint zone; prefer moves with "entersCheckpoint".
-- After the checkpoint, head for the finish; moves with "crossesFinish" complete the lap.
-- Prefer higher "pathProgress" and lower "pathDistance" (asphalt corridor toward the goal) — this is the racing line.
-- Never pick negative pathProgress when a positive option exists (that is driving the wrong way).
-- "clearAhead" is how many asphalt cells you can keep flying at the new velocity; accelerate when it is large, brake when it is small or "overspeed" is true.
-- Aim gear near situation.suggestedMaxGear when alignment is with_traffic.
-- Lower "distanceToGoal" is a weak hint only; trust pathDistance and situation over it.
-Respond with ONLY a JSON object: {"moveIndex": <number>} — no prose.`;
 
 /** Narrow client surface so tests can stub Bedrock without the real SDK. */
 export interface ConverseClient {
@@ -312,7 +298,7 @@ export class BedrockBrain implements MoveBrain {
         styleOrSeed: options.fallbackSeed ?? 'bedrock-fallback',
         difficulty: this.difficulty,
       });
-    this.maxTokens = options.maxTokens ?? 200;
+    this.maxTokens = options.maxTokens ?? 64;
     this.timeoutMs = options.timeoutMs ?? 12_000;
   }
 
@@ -326,47 +312,36 @@ export class BedrockBrain implements MoveBrain {
     // Always know the safe pick first — used as floor quality and as recovery path.
     const heuristicPick = await this.fallback.pickMove(summary, moves);
 
+    const scene = summary.scene;
+    if (!scene) return heuristicPick;
+
     // While gear-capped (grass / off-track), skip the LLM — recovery must be fast
-    // and correct; Nova Micro is slow and often freezes the turn UI.
+    // and correct; Nova Micro is slow and often freezes the turn UI. The same
+    // `best` / `back` label the fine-tune learns is already on the scene.
     if (summary.gearLimited) {
-      return heuristicPick;
+      const label = supervisedChoice(scene);
+      return label
+        ? applySceneChoice('Bedrock', scene, moves, label, heuristicPick)
+        : heuristicPick;
     }
 
     try {
       const command = new ConverseCommand({
         modelId: this.modelId,
-        system: [{ text: SYSTEM_PROMPT }],
+        system: [{ text: BEDROCK_LAYA_SYSTEM }],
         messages: [
           {
             role: 'user',
-            content: [{ text: this.buildPrompt(summary, moves) }],
+            content: [{ text: layaPromptText(scene) }],
           },
         ],
-        inferenceConfig: { maxTokens: this.maxTokens, temperature: 0.2 },
+        inferenceConfig: { maxTokens: this.maxTokens, temperature: 0 },
       });
 
       const response = await this.sendWithTimeout(command);
       const text = response.output?.message?.content?.[0]?.text ?? '';
-      const index = this.parseMoveIndex(text);
-
-      if (index !== null && index >= 0 && index < moves.length) {
-        const chosen = moves[index]!;
-        const stationary = chosen.velocity.x === 0 && chosen.velocity.y === 0;
-        const hasMotion = moves.some((m) => m.velocity.x !== 0 || m.velocity.y !== 0);
-        if (stationary && hasMotion) {
-          console.warn('[BRAIN] Model picked standstill — using heuristic');
-          return heuristicPick;
-        }
-        if (isDominatedByHeuristic(chosen, heuristicPick)) {
-          console.warn(
-            `[BRAIN] Model pick dominated (gear=${chosen.gear} prog=${chosen.pathProgress.toFixed(2)} ` +
-              `vs heuristic gear=${heuristicPick.gear} prog=${heuristicPick.pathProgress.toFixed(2)}) — using heuristic`
-          );
-          return heuristicPick;
-        }
-        return chosen;
-      }
-      console.warn(`[BRAIN] Model returned invalid move index (${text.slice(0, 80)}) — using heuristic`);
+      const choice = this.parseChoice(text, scene, moves);
+      return applySceneChoice('Bedrock', scene, moves, choice, heuristicPick);
     } catch (err) {
       console.warn('[BRAIN] Bedrock call failed — using heuristic:', err instanceof Error ? err.message : err);
     }
@@ -392,51 +367,32 @@ export class BedrockBrain implements MoveBrain {
     });
   }
 
-  private buildPrompt(summary: BoardSummary, moves: AnnotatedMove[]): string {
-    return JSON.stringify({
-      race: {
-        round: summary.round,
-        lap: summary.lap,
-        totalLaps: summary.totalLaps,
-        position: summary.position,
-        velocity: summary.velocity,
-        gear: summary.gear,
-        passedCheckpoint: summary.passedCheckpoint,
-        gearLimited: summary.gearLimited,
-        goal: summary.goal,
-        goalPoint: summary.goalPoint,
-        situation: summary.situation,
-        opponents: summary.opponents,
-      },
-      // Hint: best pathProgress among legal moves (model should meet or beat this).
-      bestPathProgress: moves.reduce((m, x) => Math.max(m, x.pathProgress), Number.NEGATIVE_INFINITY),
-      legalMoves: moves.map((m) => ({
-        moveIndex: m.index,
-        velocity: m.velocity,
-        landing: m.landing,
-        gear: m.gear,
-        landingTile: m.landingTile,
-        grassShortcut: m.grassShortcut,
-        entersCheckpoint: m.entersCheckpoint,
-        crossesFinish: m.crossesFinish,
-        distanceToGoal: m.distanceToGoal,
-        pathDistance: Number.isFinite(m.pathDistance) ? m.pathDistance : null,
-        pathProgress: m.pathProgress,
-        clearAhead: m.clearAhead,
-        overspeed: m.overspeed,
-      })),
-    });
-  }
-
-  private parseMoveIndex(text: string): number | null {
-    // Models sometimes wrap JSON in fences or prose — grab the first object.
+  /**
+   * The fine-tune answers with a bare choice id (`d0_p1`). A base Nova may
+   * still wrap that id in JSON, or answer with the old moveIndex.
+   */
+  private parseChoice(text: string, scene: BoardSummary['scene'], moves: AnnotatedMove[]): string | null {
+    const trimmed = text.trim();
+    if (parseMoveLabel(trimmed)) return trimmed;
     const match = text.match(/\{[^{}]*\}/);
     if (!match) return null;
     try {
-      const parsed = JSON.parse(match[0]) as { moveIndex?: unknown };
-      return typeof parsed.moveIndex === 'number' && Number.isInteger(parsed.moveIndex)
-        ? parsed.moveIndex
-        : null;
+      const parsed = JSON.parse(match[0]) as {
+        choice?: unknown;
+        move?: unknown;
+        moveIndex?: unknown;
+      };
+      if (typeof parsed.choice === 'string' && parseMoveLabel(parsed.choice)) return parsed.choice;
+      if (typeof parsed.move === 'string' && parseMoveLabel(parsed.move)) return parsed.move;
+      if (typeof parsed.moveIndex === 'number' && Number.isInteger(parsed.moveIndex)) {
+        const move = moves[parsed.moveIndex];
+        if (!move) return null;
+        const option = scene.options.find(
+          (item) => item.velocity.x === move.velocity.x && item.velocity.y === move.velocity.y
+        );
+        return option?.label ?? null;
+      }
+      return null;
     } catch {
       return null;
     }
