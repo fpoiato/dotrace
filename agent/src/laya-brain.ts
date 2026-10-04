@@ -99,6 +99,17 @@ export class LayaBrain implements MoveBrain {
         console.warn('[BRAIN] Laya picked standstill — using heuristic');
         return heuristic();
       }
+      const leavesAsphalt =
+        match.grassShortcut || match.landingTile === 'grass' || match.landingTile === 'rumble';
+      const canStayOnAsphalt = moves.some(
+        (move) =>
+          !move.grassShortcut &&
+          (move.landingTile === 'track' || move.landingTile === 'finish')
+      );
+      if (leavesAsphalt && canStayOnAsphalt) {
+        console.warn('[BRAIN] Laya left the asphalt — using heuristic');
+        return heuristic();
+      }
       return match;
     } catch (err) {
       console.warn('[BRAIN] Laya call failed — using heuristic:', errText(err));

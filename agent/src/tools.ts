@@ -73,7 +73,7 @@ export interface BoardSummary {
   goalPoint: Vector2D;
   /** Where we are on the directed circuit (for LLM / logs). */
   situation: TrackSituation;
-  /** Grid window, coast, and the nine gear changes for the Laya brain. */
+  /** Grid window, hold course, and the nine gear changes for the Laya brain. */
   scene: LayaScene;
   opponents: {
     nickname: string;
