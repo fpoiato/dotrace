@@ -59,6 +59,37 @@ const PAD_GLYPHS: Record<string, string> = {
   standalone: true,
   imports: [AsyncPipe, TranslateModule, TrackCanvasComponent, MiniMapComponent, LoadingSpinnerComponent, LeaderboardComponent, ReplayViewerComponent],
   templateUrl: './game-room.component.html',
+  styles: [
+    `
+      @media (max-height: 520px) {
+        .race-screen {
+          max-width: none;
+        }
+        .race-body {
+          flex-direction: row;
+          align-items: stretch;
+          gap: 0.5rem;
+        }
+        .race-controls {
+          display: flex;
+          width: 11.5rem;
+          min-height: 0;
+          margin-top: 0;
+          flex-direction: column;
+          justify-content: flex-end;
+        }
+        .race-hint,
+        .race-standings {
+          display: none;
+        }
+        .race-pad {
+          width: 100%;
+          max-width: none;
+          margin: 0;
+        }
+      }
+    `,
+  ],
 })
 export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);

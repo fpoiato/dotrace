@@ -1,57 +1,125 @@
 @if (state$ | async; as state) {
-  <div class="mx-auto max-w-lg px-3 py-4">
-    @if (state.phase === 'GRID_ORDER') {
-      <div class="mb-4 rounded-xl bg-slate-800 p-4 text-center">
-        <h2 class="text-lg font-bold text-orange-400">{{ 'game.gridOrder' | translate }}</h2>
-        <ul class="mt-3 space-y-2">
-          @for (p of state.players; track p.connectionId) {
-            <li class="flex items-center justify-between rounded-lg bg-slate-900 px-4 py-3">
-              <span class="flex items-center gap-2">
-                <span class="h-3 w-3 rounded-full" [style.background]="p.color"></span>
-                {{ p.nickname }}
-              </span>
-              <span class="text-2xl font-bold">🎲 {{ p.diceRoll ?? state.diceRolls[p.connectionId] }}</span>
-            </li>
-          }
-        </ul>
-      </div>
-    }
-
-    @if (state.phase === 'GAME_ROUND' || state.phase === 'GAME_OVER') {
-      <div class="mb-3 flex items-center justify-between gap-2 text-sm">
+  @if (state.phase === 'GAME_ROUND') {
+    <div class="race-screen mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col overflow-hidden px-2 pt-2">
+      <div class="mb-1.5 flex shrink-0 items-center gap-1.5 overflow-x-auto text-xs">
         @if (game.isMyTurn()) {
           @if (state.gameMode === 'TIMED') {
-            <span class="rounded-full bg-green-600 px-3 py-1 font-bold">{{ 'game.raceOn' | translate }}</span>
+            <span class="shrink-0 rounded-full bg-green-600 px-2.5 py-1 font-bold">{{ 'game.raceOn' | translate }}</span>
           } @else {
-            <span class="rounded-full bg-green-600 px-3 py-1 font-bold">{{ 'game.yourTurn' | translate }}</span>
+            <span class="shrink-0 rounded-full bg-green-600 px-2.5 py-1 font-bold">{{ 'game.yourTurn' | translate }}</span>
           }
-        } @else if (state.phase === 'GAME_ROUND') {
-          @if (state.gameMode === 'TIMED') {
-            <span class="text-slate-400">{{ 'game.timedRace' | translate }}</span>
-          } @else {
-            <span class="text-slate-400">{{ 'game.waitTurn' | translate: { name: currentPlayerName() } }}</span>
-          }
+        } @else if (state.gameMode === 'TIMED') {
+          <span class="shrink-0 text-slate-400">{{ 'game.timedRace' | translate }}</span>
+        } @else {
+          <span class="shrink-0 text-slate-400">{{ 'game.waitTurn' | translate: { name: currentPlayerName() } }}</span>
         }
         @if (state.gameMode !== 'TIMED') {
-          <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+          <span class="shrink-0 rounded-full bg-slate-800 px-2.5 py-1 font-mono text-slate-300">
             {{ 'game.round' | translate }} {{ state.round }}
           </span>
         }
         @if (telemetry.elapsedMs$ | async; as elapsed) {
           @if (elapsed > 0) {
-            <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+            <span class="shrink-0 rounded-full bg-slate-800 px-2.5 py-1 font-mono text-slate-300">
               ⏱ {{ formatRaceTime(elapsed) }}
             </span>
           }
         }
         @if (myPlayer(state); as me) {
-          <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+          <span class="shrink-0 rounded-full bg-slate-800 px-2.5 py-1 font-mono text-slate-300">
             {{ 'game.lap' | translate }} {{ me.lap }}/{{ state.totalLaps }}
           </span>
         }
       </div>
 
-      @if (state.gameMode === 'TIMED' && state.phase === 'GAME_ROUND' && penaltyCountdownSec > 0) {
+      @if (myPlayer(state); as me) {
+        @if (me.isOffTrack) {
+          <p
+            class="mb-1.5 shrink-0 rounded-lg border border-amber-500/40 bg-amber-950/80 px-2 py-1 text-center text-xs font-semibold text-amber-300"
+            role="status"
+          >
+            {{ 'game.offTrack' | translate }}
+          </p>
+        } @else if (hasGearPenalty(state, me)) {
+          <p
+            class="mb-1.5 shrink-0 rounded-lg border border-amber-500/40 bg-amber-950/80 px-2 py-1 text-center text-xs font-semibold text-amber-300"
+            role="status"
+          >
+            {{ 'game.grassPenaltyTurns' | translate }}
+          </p>
+        }
+      }
+
+      <div class="race-body flex min-h-0 flex-1 flex-col">
+        <div class="race-stage relative min-h-0 flex-1">
+          <app-track-canvas class="absolute inset-0" [state]="state" [fill]="true" />
+          <div class="pointer-events-none absolute left-2 top-2 z-10 w-24 opacity-95">
+            <app-mini-map [state]="state" [compact]="true" />
+          </div>
+        </div>
+
+        <div class="race-controls mt-2 shrink-0">
+          <div class="race-pad mx-auto grid max-w-[16rem] grid-cols-3 gap-1.5">
+            @for (opt of padOptions; track opt.key) {
+              <button
+                type="button"
+                (click)="pad(opt)"
+                [disabled]="!opt.enabled"
+                class="h-12 rounded-xl border-2 text-xl font-bold transition active:scale-95"
+                [class.border-slate-600]="!opt.grass"
+                [class.bg-slate-800]="opt.enabled && !opt.grass"
+                [class.text-white]="opt.enabled && !opt.grass"
+                [class.border-amber-500]="opt.enabled && opt.grass"
+                [class.bg-amber-900]="opt.enabled && opt.grass"
+                [class.text-amber-300]="opt.enabled && opt.grass"
+                [class.opacity-25]="!opt.enabled"
+              >
+                {{ opt.glyph }}
+              </button>
+            }
+          </div>
+          @if (game.isMyTurn()) {
+            <p class="race-hint mt-1 text-center text-[11px] leading-tight text-slate-400">
+              @if (state.gameMode === 'TIMED') {
+                {{ 'game.timedHint' | translate }}
+              } @else {
+                {{ 'game.tapHint' | translate }}
+              }
+            </p>
+          }
+          @if (liveStandings(state); as standings) {
+            <div
+              class="race-standings mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5"
+              role="list"
+              [attr.aria-label]="'game.standings' | translate"
+            >
+              @for (row of standings; track row.connectionId) {
+                <span
+                  class="flex shrink-0 items-center gap-1 rounded-full bg-slate-800/90 px-2 py-1 text-[11px]"
+                  role="listitem"
+                >
+                  <span
+                    class="font-mono font-bold tabular-nums"
+                    [class.text-orange-400]="row.rank === 1"
+                    [class.text-slate-300]="row.rank !== 1"
+                  >{{ row.rank }}</span>
+                  <span class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20" [style.background]="row.color"></span>
+                  <span class="max-w-[5.5rem] truncate font-medium text-white">{{ row.nickname }}</span>
+                  <span class="font-mono text-[10px] text-slate-400">
+                    @if (row.finishOrder !== undefined) {
+                      &#35;{{ row.finishOrder }}
+                    } @else {
+                      {{ row.lap }}/{{ state.totalLaps }}
+                    }
+                  </span>
+                </span>
+              }
+            </div>
+          }
+        </div>
+      </div>
+
+      @if (state.gameMode === 'TIMED' && penaltyCountdownSec > 0) {
         <div
           class="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4"
           role="alertdialog"
@@ -71,143 +139,91 @@
           </div>
         </div>
       }
-
-      <app-track-canvas [state]="state" />
-
-      @if (state.phase === 'GAME_ROUND') {
-        @if (myPlayer(state); as me) {
-          @if (me.isOffTrack) {
-            <p
-              class="mt-3 rounded-xl border border-amber-500/40 bg-amber-950/80 px-3 py-2 text-center text-sm font-semibold text-amber-300"
-              role="status"
-            >
-              {{ 'game.offTrack' | translate }}
-            </p>
-          } @else if (hasGearPenalty(state, me)) {
-            <p
-              class="mt-3 rounded-xl border border-amber-500/40 bg-amber-950/80 px-3 py-2 text-center text-sm font-semibold text-amber-300"
-              role="status"
-            >
-              {{ 'game.grassPenaltyTurns' | translate }}
-            </p>
-          }
-        }
-
-        <div class="mx-auto mt-3 grid max-w-[17rem] grid-cols-3 gap-2">
-          @for (opt of padOptions; track opt.key) {
-            <button
-              type="button"
-              (click)="pad(opt)"
-              [disabled]="!opt.enabled"
-              class="min-h-14 rounded-xl border-2 text-2xl font-bold transition active:scale-95"
-              [class.border-slate-600]="!opt.grass"
-              [class.bg-slate-800]="opt.enabled && !opt.grass"
-              [class.text-white]="opt.enabled && !opt.grass"
-              [class.border-amber-500]="opt.enabled && opt.grass"
-              [class.bg-amber-900]="opt.enabled && opt.grass"
-              [class.text-amber-300]="opt.enabled && opt.grass"
-              [class.opacity-25]="!opt.enabled"
-            >
-              {{ opt.glyph }}
-            </button>
-          }
-        </div>
-        @if (game.isMyTurn()) {
-          <p class="mt-2 text-center text-xs text-slate-400">
-            @if (state.gameMode === 'TIMED') {
-              {{ 'game.timedHint' | translate }}
-            } @else {
-              {{ 'game.tapHint' | translate }}
+    </div>
+  } @else {
+    <div class="mx-auto min-h-0 w-full max-w-lg flex-1 overflow-y-auto px-3 py-4">
+      @if (state.phase === 'GRID_ORDER') {
+        <div class="mb-4 rounded-xl bg-slate-800 p-4 text-center">
+          <h2 class="text-lg font-bold text-orange-400">{{ 'game.gridOrder' | translate }}</h2>
+          <ul class="mt-3 space-y-2">
+            @for (p of state.players; track p.connectionId) {
+              <li class="flex items-center justify-between rounded-lg bg-slate-900 px-4 py-3">
+                <span class="flex items-center gap-2">
+                  <span class="h-3 w-3 rounded-full" [style.background]="p.color"></span>
+                  {{ p.nickname }}
+                </span>
+                <span class="text-2xl font-bold">🎲 {{ p.diceRoll ?? state.diceRolls[p.connectionId] }}</span>
+              </li>
             }
-          </p>
-        }
+          </ul>
+        </div>
+      }
 
-        <div class="mt-4">
-          <app-mini-map [state]="state" />
+      @if (state.phase === 'GAME_OVER') {
+        <div class="mb-3 flex items-center justify-between gap-2 text-sm">
+          @if (state.gameMode !== 'TIMED') {
+            <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+              {{ 'game.round' | translate }} {{ state.round }}
+            </span>
+          }
+          @if (telemetry.elapsedMs$ | async; as elapsed) {
+            @if (elapsed > 0) {
+              <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+                ⏱ {{ formatRaceTime(elapsed) }}
+              </span>
+            }
+          }
+          @if (myPlayer(state); as me) {
+            <span class="rounded-full bg-slate-800 px-3 py-1 font-mono text-slate-300">
+              {{ 'game.lap' | translate }} {{ me.lap }}/{{ state.totalLaps }}
+            </span>
+          }
         </div>
 
-        @if (liveStandings(state); as standings) {
-          <section class="mt-3 overflow-hidden rounded-xl bg-slate-800/80 text-sm">
-            <h3 class="border-b border-slate-700 px-4 py-3 font-semibold text-slate-200">
-              {{ 'game.standings' | translate }}
-            </h3>
-            <ul class="divide-y divide-slate-700/80">
-              @for (row of standings; track row.connectionId) {
-                <li
-                  class="flex items-center gap-3 px-4 py-2.5"
-                  [class.bg-slate-900]="row.rank % 2 === 0"
-                >
-                  <span
-                    class="w-7 shrink-0 text-center font-mono text-base font-bold tabular-nums"
-                    [class.text-orange-400]="row.rank === 1"
-                    [class.text-slate-300]="row.rank !== 1"
-                  >{{ row.rank }}</span>
-                  <span
-                    class="h-3 w-3 shrink-0 rounded-full ring-1 ring-white/20"
-                    [style.background]="row.color"
-                    [attr.title]="row.nickname"
-                  ></span>
-                  <span class="min-w-0 flex-1 truncate font-medium text-white">
-                    {{ row.nickname }}
-                    @if (row.isOffTrack) {
-                      <span class="ml-1 text-xs font-normal text-amber-400">{{ 'game.offTrackShort' | translate }}</span>
-                    }
-                  </span>
-                  <span class="shrink-0 font-mono text-xs text-slate-400">
-                    @if (row.finishOrder !== undefined) {
-                      <span>&#127945; &#35;{{ row.finishOrder }}</span>
-                    } @else {
-                      <span>{{ 'game.lap' | translate }} {{ row.lap }}/{{ state.totalLaps }}</span>
-                    }
-                  </span>
-                </li>
-              }
-            </ul>
-          </section>
+        <app-track-canvas [state]="state" />
+      }
+
+      @if (state.phase === 'GAME_OVER' || showCelebration) {
+        <app-leaderboard [state]="state" />
+        @if (!showReplay && (state.replayLog?.length ?? 0) > 0) {
+          <button
+            type="button"
+            (click)="openReplay()"
+            class="mt-3 min-h-12 w-full rounded-xl bg-slate-700 text-base font-bold text-white active:bg-slate-600"
+          >
+            🎬 {{ 'game.replay' | translate }}
+          </button>
         }
-      }
-    }
-
-    @if (state.phase === 'GAME_OVER' || showCelebration) {
-      <app-leaderboard [state]="state" />
-      @if (!showReplay && (state.replayLog?.length ?? 0) > 0) {
+        @if (showReplay) {
+          <app-replay-viewer [state]="state" (closed)="closeReplay()" />
+        }
+        @if (game.isHost) {
+          <button
+            type="button"
+            (click)="playAgain()"
+            class="mt-3 min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold text-white active:bg-orange-600"
+          >
+            {{ 'game.playAgain' | translate }}
+          </button>
+        } @else {
+          <p class="mt-3 text-center text-sm text-slate-400">{{ 'game.waitPlayAgain' | translate }}</p>
+        }
         <button
           type="button"
-          (click)="openReplay()"
-          class="mt-3 min-h-12 w-full rounded-xl bg-slate-700 text-base font-bold text-white active:bg-slate-600"
+          (click)="backToMenu()"
+          class="mt-3 min-h-14 w-full rounded-xl bg-slate-800 text-lg font-bold text-white"
         >
-          🎬 {{ 'game.replay' | translate }}
+          {{ 'game.backMenu' | translate }}
         </button>
       }
-      @if (showReplay) {
-        <app-replay-viewer [state]="state" (closed)="closeReplay()" />
-      }
-      @if (game.isHost) {
-        <button
-          type="button"
-          (click)="playAgain()"
-          class="mt-3 min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold text-white active:bg-orange-600"
-        >
-          {{ 'game.playAgain' | translate }}
-        </button>
-      } @else {
-        <p class="mt-3 text-center text-sm text-slate-400">{{ 'game.waitPlayAgain' | translate }}</p>
-      }
-      <button
-        type="button"
-        (click)="backToMenu()"
-        class="mt-3 min-h-14 w-full rounded-xl bg-slate-800 text-lg font-bold text-white"
-      >
-        {{ 'game.backMenu' | translate }}
-      </button>
-    }
 
-    @if (state.phase === 'LOBBY') {
-      <p class="text-center text-slate-400">{{ 'lobby.waitHost' | translate }}</p>
-    }
-  </div>
+      @if (state.phase === 'LOBBY') {
+        <p class="text-center text-slate-400">{{ 'lobby.waitHost' | translate }}</p>
+      }
+    </div>
+  }
 } @else {
-  <div class="mx-auto flex flex-1 max-w-lg items-center justify-center">
+  <div class="mx-auto flex min-h-0 max-w-lg flex-1 items-center justify-center">
     <app-loading-spinner />
   </div>
 }

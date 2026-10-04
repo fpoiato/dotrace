@@ -66,10 +66,11 @@ function buildGaugeSegments(): string[] {
   standalone: true,
   imports: [TranslateModule],
   template: `
-    <div class="relative">
+    <div class="relative" [class.h-full]="fill" [class.w-full]="fill">
       <canvas
         #canvas
-        class="h-[48dvh] w-full cursor-grab touch-none rounded-xl border border-slate-600 active:cursor-grabbing md:h-[62dvh]"
+        class="track-sheet w-full cursor-grab touch-none rounded-xl border border-slate-600 active:cursor-grabbing"
+        [class.track-sheet-fill]="fill"
       ></canvas>
       @if (gaugePlayer; as me) {
         <div class="pointer-events-none absolute bottom-2 left-2 rounded-xl bg-slate-900/75 px-1 pb-1 pt-2">
@@ -131,12 +132,25 @@ function buildGaugeSegments(): string[] {
         display: block;
         background: #0b1220;
       }
+      .track-sheet {
+        height: 48dvh;
+      }
+      .track-sheet-fill {
+        height: 100%;
+      }
+      @media (min-width: 768px) {
+        .track-sheet:not(.track-sheet-fill) {
+          height: 62dvh;
+        }
+      }
     `,
   ],
 })
 export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy {
   @ViewChild('canvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
   @Input() state: GameState | null = null;
+  /** Stretch the sheet to the parent instead of a fixed viewport slice. */
+  @Input() fill = false;
 
   private readonly game = inject(GameEngineService);
   private readonly haptic = inject(HapticService);
@@ -168,6 +182,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private readonly onResize = () => requestAnimationFrame(() => this.draw());
   private readonly onMouseMoveBound = (e: MouseEvent) => this.onMouseMove(e);
   private readonly onMouseUpBound = () => this.onMouseUp();
+  private resizeObserver: ResizeObserver | null = null;
+  private lastCssW = 0;
+  private lastCssH = 0;
 
   ngAfterViewInit(): void {
     const canvas = this.canvasRef.nativeElement;
@@ -179,10 +196,20 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     canvas.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
     canvas.addEventListener('touchend', (e) => this.onTouchEnd(e), { passive: false });
     window.addEventListener('resize', this.onResize);
+    this.resizeObserver = new ResizeObserver(() => {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (w === this.lastCssW && h === this.lastCssH) return;
+      this.lastCssW = w;
+      this.lastCssH = h;
+      this.draw();
+    });
+    this.resizeObserver.observe(canvas);
     requestAnimationFrame(() => this.draw());
   }
 
   ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('mousemove', this.onMouseMoveBound);
     window.removeEventListener('mouseup', this.onMouseUpBound);
