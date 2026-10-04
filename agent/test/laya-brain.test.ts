@@ -29,15 +29,13 @@ function race() {
 }
 
 describe('laya scene', () => {
-  it('marks the car, the other pilot, and a 3-round coast', () => {
+  it('marks the car, the other pilot, and a 3-round hold', () => {
     const { me, state } = race();
     const scene = buildLayaScene(me, state, track);
     const grid = String(scene.state.grid);
     expect(grid).toContain('@');
     expect(grid).toContain('A');
-    expect(scene.state.coast).toContain('1 18,28 ');
-    expect(scene.state.coast).toContain('2 24,28 ');
-    expect(scene.state.coast).toContain('3 30,28 ');
+    expect(scene.state.hold).toBe('leaves grass on 1: 1 grass, 2 grass, 3 grass');
   });
 
   it('offers all nine gear changes and marks gear 7 as illegal', () => {
@@ -120,6 +118,8 @@ describe('laya scene', () => {
     expect(body.questions.move.instructions).toContain('dir is the circuit direction');
     expect(body.questions.move.instructions).toContain('stopDist');
     expect(body.questions.move.instructions).toContain('Shed one gear per turn');
+    expect(body.questions.move.instructions).toContain('penalty caps gear at 1');
+    expect(body.questions.move.instructions).toContain('hold is the next 3 turns');
   });
 
   it('calls the step back to the asphalt when the car is stuck off Interlagos', () => {
@@ -177,10 +177,10 @@ describe('LayaBrain', () => {
   }
 
   it('submits the velocity for the chosen legal label', async () => {
-    const legal = moves.find((move) => move.velocity.x === 5 && move.velocity.y === 0);
+    const legal = summary.scene.options.find((option) => option.detail.startsWith('best '));
     expect(legal).toBeDefined();
     const chosen = await brain({
-      answers: { move: { choice: moveLabel(-1, 0) } },
+      answers: { move: { choice: legal!.label } },
     }).pickMove(summary, moves);
     expect(chosen.velocity).toEqual(legal!.velocity);
   });
@@ -200,6 +200,17 @@ describe('LayaBrain', () => {
       answers: { move: { choice: moveLabel(-1, 0) } },
     }).pickMove(summary, moves);
     expect(truncated).toBe(heuristic);
+  });
+
+  it('shows that holding course on the Monza straight leaves the grass', () => {
+    const monza = getTrackById('monza')!;
+    const { me, state } = race();
+    me.position = { x: 48, y: 47 };
+    me.velocity = { x: 1, y: -2 };
+    const scene = buildLayaScene(me, state, monza);
+    expect(scene.state.hold).toBe('leaves grass on 2: 1 asphalt, 2 grass, 3 grass');
+    const intoGrass = scene.options.find((option) => option.velocity.x === 1 && option.velocity.y === -3);
+    expect(intoGrass?.detail).toBe('penalty gear 1');
   });
 
   it('falls back when Laya stands still and the car can move', async () => {
@@ -225,6 +236,28 @@ describe('LayaBrain', () => {
       timeoutMs: 1000,
     });
     const chosen = await local.pickMove(summary, moves);
+    expect(chosen.velocity).toEqual(heuristic.velocity);
+  });
+
+  it('falls back when Laya cuts the grass and an asphalt option exists', async () => {
+    const fallback = new HeuristicBrain('Bot Alfa');
+    const heuristic = await fallback.pickMove(summary, moves);
+    const grass = summary.scene.options.find((option) => option.detail === 'penalty gear 1');
+    expect(grass).toBeDefined();
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ answers: { move: { choice: grass!.label } } }),
+    })) as unknown as typeof fetch;
+    const local = new LayaBrain({
+      endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
+      fetchImpl,
+      fallback,
+      timeoutMs: 1000,
+    });
+    const chosen = await local.pickMove(summary, moves);
+    expect(chosen.grassShortcut).toBe(false);
     expect(chosen.velocity).toEqual(heuristic.velocity);
   });
 

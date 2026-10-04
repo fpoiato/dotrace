@@ -44,8 +44,8 @@ const WINDOW = 4;
 
 /**
  * Char budget for the JSON decide body. Measured with the ModernBERT
- * tokenizer laya:en uses: the heaviest race packet is ~479 tokens
- * (~1310 chars). 1360 chars stays under ~495 tokens, inside the 512
+ * tokenizer laya:en uses: the heaviest race packet is ~477 tokens
+ * (~1320 chars). 1360 chars stays under ~490 tokens, inside the 512
  * window with the [CLS]/marker wrapper still to add.
  */
 export const LAYA_REQUEST_CHAR_BUDGET = 1360;
@@ -143,6 +143,31 @@ function stepsToAsphalt(track: TrackDefinition, x: number, y: number): number {
 
 /** Below this, a landing has not moved along the racing line. */
 const PROGRESS_STEP = 0.05;
+
+function surfaceWord(track: TrackDefinition, x: number, y: number): string {
+  const tile = getTileAt(track, x, y);
+  if (tile === 'track' || tile === 'finish') return 'asphalt';
+  if (tile === 'grass') return 'grass';
+  if (tile === 'rumble') return 'rumble';
+  return 'void';
+}
+
+/**
+ * Next three turns if velocity is left unchanged. The first bad surface
+ * is named up front so a straight that ends in grass is obvious.
+ */
+function holdCourse(track: TrackDefinition, position: Vector2D, velocity: Vector2D): string {
+  if (velocity.x === 0 && velocity.y === 0) return 'stopped';
+  const steps = [1, 2, 3].map((k) => {
+    const surface = surfaceWord(track, position.x + k * velocity.x, position.y + k * velocity.y);
+    return `${k} ${surface}`;
+  });
+  const line = steps.join(', ');
+  const firstBad = steps.findIndex((step) => !step.endsWith('asphalt'));
+  if (firstBad < 0) return line;
+  const surface = steps[firstBad]!.split(' ')[1];
+  return `leaves ${surface} on ${firstBad + 1}: ${line}`;
+}
 
 /** Cells still traveled while shedding gear down to zero, one step per turn. */
 function stoppingDistance(gear: number): number {
@@ -342,7 +367,7 @@ export function buildLayaScene(
     if (option.bucket === 'illegal') detail = `illegal ${option.reason}`;
     else if (option.bucket === 'off') {
       detail = `${index === backIndex ? 'back' : 'away'} ${option.steps} ${velocityText}`;
-    } else if (option.bucket === 'grass') detail = 'grass';
+    } else if (option.bucket === 'grass') detail = 'penalty gear 1';
     else if (option.bucket === 'forward') {
       let head = 'with race';
       if (index === bestIndex) head = 'best';
@@ -380,14 +405,14 @@ export function buildLayaScene(
       goal: goalIsFinish ? 'finish' : 'checkpoint',
       toGoal: situation.cellsToGoal,
       off: offTrack ? stepsToAsphalt(track, position.x, position.y) : 0,
-      coast: coast.map((cell) => `${cell.k} ${cell.x},${cell.y} ${cell.tile}`).join('; '),
+      hold: holdCourse(track, position, velocity),
     },
     options,
   };
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. aim is velocity vs dir. bend is the next turn. pace is the gear to hold. line is cells off the racing line. Option: velocity, g gear, r asphalt ahead. Pick best. with race follows. brake slows. too fast cannot stop. gate is checkpoint or finish. Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 coast. Never pick wrong way, idle, or illegal. Avoid grass. Off asphalt, pick back.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 hold. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
 
 /** JSON body posted to Ollaya `/api/decide`. */
 export function layaDecideBody(scene: LayaScene, model: string) {
