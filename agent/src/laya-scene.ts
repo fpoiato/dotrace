@@ -5,8 +5,9 @@
  * tokens, questions included). The router name `laya` still sends English to
  * `laya:en`, whose window is 512. A 33×33 window plus a sentence per gear
  * change used to fill that smaller window; Ollaya then sets `state_truncated`
- * and the brain discards the answer. Keep the local map small and each
- * criterion to a few words.
+ * and the brain discards the answer. The map is only the road ahead of
+ * the car, including the next three landings if velocity stays. Each
+ * criterion stays a few words.
  *
  * The model matches short labels. It does not rank "+1.3" above "-1.0", so
  * every option says what it does in the race: `best`, `with race`, `brake`,
@@ -45,18 +46,24 @@ export const LAYA_CONTEXT_TOKENS = 1024;
 export const LAYA_DECIDE_MODEL = 'laya:typed-decisions';
 
 /**
- * Local map radius. 16 (a 33×33 grid) does not fit next to nine criteria.
- * 4 covers the cars that can actually block the next landing.
+ * Cells of track drawn beside the path. The map does not extend behind
+ * the car: a square window spent half of its tokens on road already passed,
+ * and at gear 6 the next three landings sat outside it.
  */
-const WINDOW = 4;
+const SIDE = 4;
+
+/** Road drawn ahead when the car is slow or stopped. */
+const AHEAD = 14;
+
+const HOLD_TURNS = 3;
 
 /**
  * Char budget for the JSON decide body. Measured with the ModernBERT
- * tokenizer: the heaviest race packet is ~477 tokens (~1320 chars). 1360
- * chars keeps that packet from growing by accident. The 1024-token window
- * still has room when a later change adds decision context on purpose.
+ * tokenizer: the heaviest forward map (gear 6 on a diagonal) is ~546
+ * tokens (~1860 chars). 2000 chars stays under ~600 tokens, inside the
+ * 1024 window with the [CLS]/marker wrapper still to add.
  */
-export const LAYA_REQUEST_CHAR_BUDGET = 1360;
+export const LAYA_REQUEST_CHAR_BUDGET = 2000;
 
 const OPPONENT_LETTERS = 'ABDEFGHIJKLMNPQRSTUVWXYZ';
 
@@ -161,19 +168,74 @@ function surfaceWord(track: TrackDefinition, x: number, y: number): string {
 }
 
 /**
- * Next three turns if velocity is left unchanged. The first bad surface
- * is named up front so a straight that ends in grass is obvious.
+ * One cell along the dominant axes. A shallow heading stays on one axis
+ * so the map does not open a diagonal box for a nearly straight road.
+ */
+function dominantStep(heading: { x: number; y: number }): Vector2D {
+  const x = Math.abs(heading.x) < 0.35 ? 0 : heading.x > 0 ? 1 : -1;
+  const y = Math.abs(heading.y) < 0.35 ? 0 : heading.y > 0 ? 1 : -1;
+  if (x === 0 && y === 0) return { x: heading.x >= 0 ? 1 : -1, y: 0 };
+  return { x, y };
+}
+
+/**
+ * Rectangle from the car forward along travel (the circuit, when stopped).
+ * Cells behind the car are left out. The box always covers the next three
+ * held-velocity landings, and at least AHEAD cells of road in front.
+ */
+function forwardSpan(
+  position: Vector2D,
+  velocity: Vector2D,
+  raceHeading: { x: number; y: number }
+): { x0: number; y0: number; x1: number; y1: number } {
+  const moving = velocity.x !== 0 || velocity.y !== 0;
+  const step = moving ? velocity : dominantStep(raceHeading);
+  const samples: Vector2D[] = [{ x: position.x, y: position.y }];
+  if (moving) {
+    for (let k = 1; k <= HOLD_TURNS; k++) {
+      samples.push({
+        x: position.x + k * velocity.x,
+        y: position.y + k * velocity.y,
+      });
+    }
+  }
+  const cheb = Math.max(Math.abs(step.x), Math.abs(step.y)) || 1;
+  const reach = moving
+    ? Math.max(AHEAD, HOLD_TURNS * Math.max(Math.abs(velocity.x), Math.abs(velocity.y)))
+    : AHEAD;
+  for (let k = 1; k <= reach; k++) {
+    samples.push({
+      x: position.x + Math.round((k * step.x) / cheb),
+      y: position.y + Math.round((k * step.y) / cheb),
+    });
+  }
+
+  let x0 = Math.min(...samples.map((p) => p.x)) - SIDE;
+  let x1 = Math.max(...samples.map((p) => p.x)) + SIDE;
+  let y0 = Math.min(...samples.map((p) => p.y)) - SIDE;
+  let y1 = Math.max(...samples.map((p) => p.y)) + SIDE;
+  if (step.x > 0) x0 = position.x;
+  else if (step.x < 0) x1 = position.x;
+  if (step.y > 0) y0 = position.y;
+  else if (step.y < 0) y1 = position.y;
+  return { x0, y0, x1, y1 };
+}
+
+/**
+ * Next three turns if velocity is left unchanged. Each step names the cell
+ * and the surface. The first bad surface is named up front.
  */
 function holdCourse(track: TrackDefinition, position: Vector2D, velocity: Vector2D): string {
   if (velocity.x === 0 && velocity.y === 0) return 'stopped';
   const steps = [1, 2, 3].map((k) => {
-    const surface = surfaceWord(track, position.x + k * velocity.x, position.y + k * velocity.y);
-    return `${k} ${surface}`;
+    const x = position.x + k * velocity.x;
+    const y = position.y + k * velocity.y;
+    return `${k} ${x},${y} ${surfaceWord(track, x, y)}`;
   });
   const line = steps.join(', ');
   const firstBad = steps.findIndex((step) => !step.endsWith('asphalt'));
   if (firstBad < 0) return line;
-  const surface = steps[firstBad]!.split(' ')[1];
+  const surface = steps[firstBad]!.split(' ').pop();
   return `leaves ${surface} on ${firstBad + 1}: ${line}`;
 }
 
@@ -251,10 +313,11 @@ export function buildLayaScene(
   });
   marks.set(cellKey(position.x, position.y), '@');
 
+  const span = forwardSpan(position, velocity, situation.raceHeading);
   const lines: string[] = [];
-  for (let y = position.y - WINDOW; y <= position.y + WINDOW; y++) {
+  for (let y = span.y0; y <= span.y1; y++) {
     let row = '';
-    for (let x = position.x - WINDOW; x <= position.x + WINDOW; x++) {
+    for (let x = span.x0; x <= span.x1; x++) {
       row += marks.get(cellKey(x, y)) ?? terrainChar(track, x, y);
     }
     lines.push(row);
@@ -420,7 +483,7 @@ export function buildLayaScene(
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 hold. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
 
 /** JSON body posted to Ollaya `/api/decide`. */
 export function layaDecideBody(scene: LayaScene, model: string) {

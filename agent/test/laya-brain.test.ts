@@ -36,7 +36,15 @@ describe('laya scene', () => {
     const grid = String(scene.state.grid);
     expect(grid).toContain('@');
     expect(grid).toContain('A');
-    expect(scene.state.hold).toBe('leaves grass on 1: 1 grass, 2 grass, 3 grass');
+    expect(scene.state.hold).toBe(
+      'leaves grass on 1: 1 18,28 grass, 2 24,28 grass, 3 30,28 grass'
+    );
+    const rows = grid.split('\n');
+    const row = rows.find((line) => line.includes('@'));
+    expect(row?.startsWith('@')).toBe(true);
+    expect(row).toContain('1');
+    expect(row).toContain('2');
+    expect(row).toContain('3');
   });
 
   it('offers all nine gear changes and marks gear 7 as illegal', () => {
@@ -71,6 +79,9 @@ describe('laya scene', () => {
     me.position = { x: 30, y: 8 };
     me.velocity = { x: -5, y: 0 };
     scenes.push(buildLayaScene(me, state, interlagos));
+    me.position = { x: 20, y: 30 };
+    me.velocity = { x: 6, y: -6 };
+    scenes.push(buildLayaScene(me, state, track));
 
     for (const scene of scenes) {
       const text = JSON.stringify(layaDecideBody(scene, LAYA_DECIDE_MODEL));
@@ -122,6 +133,10 @@ describe('laya scene', () => {
     expect(body.questions.move.instructions).toContain('Shed one gear per turn');
     expect(body.questions.move.instructions).toContain('penalty caps gear at 1');
     expect(body.questions.move.instructions).toContain('hold is the next 3 turns');
+    expect(body.questions.move.instructions).toContain('Grid is only the road ahead');
+    expect(body.questions.move.instructions).toContain('Nothing behind');
+    const ahead = String(scene.state.grid).split('\n').find((line) => line.includes('@'));
+    expect(ahead?.endsWith('@')).toBe(true);
   });
 
   it('calls the step back to the asphalt when the car is stuck off Interlagos', () => {
@@ -155,6 +170,11 @@ describe('laya scene', () => {
     expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeLessThan(5);
     expect(held?.detail.startsWith('best')).toBe(false);
     expect(held?.detail.startsWith('too fast') || held?.detail.startsWith('with race')).toBe(true);
+    const ahead = String(scene.state.grid).split('\n').find((line) => line.includes('@'));
+    expect(ahead?.endsWith('@')).toBe(true);
+    expect(ahead).toContain('1');
+    expect(ahead).toContain('2');
+    expect(ahead).toContain('3');
   });
 });
 
@@ -233,7 +253,14 @@ describe('LayaBrain', () => {
     me.position = { x: 48, y: 47 };
     me.velocity = { x: 1, y: -2 };
     const scene = buildLayaScene(me, state, monza);
-    expect(scene.state.hold).toBe('leaves grass on 2: 1 asphalt, 2 grass, 3 grass');
+    expect(scene.state.hold).toBe(
+      'leaves grass on 2: 1 49,45 asphalt, 2 50,43 grass, 3 51,41 grass'
+    );
+    const rows = String(scene.state.grid).split('\n');
+    expect(rows[rows.length - 1]?.startsWith('@')).toBe(true);
+    expect(scene.state.grid).toContain('1');
+    expect(scene.state.grid).toContain('2');
+    expect(scene.state.grid).toContain('3');
     const intoGrass = scene.options.find((option) => option.velocity.x === 1 && option.velocity.y === -3);
     expect(intoGrass?.detail).toBe('penalty gear 1');
   });
