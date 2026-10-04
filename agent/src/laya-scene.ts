@@ -5,6 +5,11 @@
  * A 33×33 window plus a sentence per gear change fills it, Ollaya sets
  * `state_truncated`, and the brain discards the answer. Keep the local map
  * small and each criterion to a few words so the whole decide body fits.
+ *
+ * The model matches short labels. It does not rank "+1.3" above "-1.0", so
+ * every option says what it does in the race: `best`, `with race`, `brake`,
+ * `too fast`, `wrong way`, `stop`, `grass`, `back`, or `illegal`. Gear,
+ * runway, and the next bend are written beside those words.
  */
 import {
   GameState,
@@ -17,12 +22,15 @@ import {
   isGrassShortcut,
   isValidGearChange,
   landingPosition,
+  segmentCrossesFinish,
+  segmentEntersRect,
 } from '../../shared/ws-types';
 import {
   annotatePath,
   describeTrackSituation,
   segmentGoals,
   sharedPathCache,
+  type TrackSituation,
 } from './track-path';
 
 /** laya:en context window, questions included. */
@@ -36,11 +44,11 @@ const WINDOW = 4;
 
 /**
  * Char budget for the JSON decide body. Measured with the ModernBERT
- * tokenizer laya:en uses: a race packet is ~330 tokens (~850 chars).
- * 1050 chars stays under ~400 tokens, inside the 512 window with the
- * [CLS]/marker wrapper still to add.
+ * tokenizer laya:en uses: the heaviest race packet is ~479 tokens
+ * (~1310 chars). 1360 chars stays under ~495 tokens, inside the 512
+ * window with the [CLS]/marker wrapper still to add.
  */
-export const LAYA_REQUEST_CHAR_BUDGET = 1050;
+export const LAYA_REQUEST_CHAR_BUDGET = 1360;
 
 const OPPONENT_LETTERS = 'ABDEFGHIJKLMNPQRSTUVWXYZ';
 
@@ -133,12 +141,46 @@ function stepsToAsphalt(track: TrackDefinition, x: number, y: number): number {
   return 99;
 }
 
-/** One decimal, with a sign. The 1e9 grass-to-asphalt jump is just "back". */
-function formatProgress(progress: number): string {
-  if (!Number.isFinite(progress) || Math.abs(progress) > 50) return 'back';
-  const rounded = Math.round(progress * 10) / 10;
-  const text = rounded.toFixed(1);
-  return rounded > 0 ? `+${text}` : text;
+/** Below this, a landing has not moved along the racing line. */
+const PROGRESS_STEP = 0.05;
+
+/** Cells still traveled while shedding gear down to zero, one step per turn. */
+function stoppingDistance(gear: number): number {
+  return (gear * (gear + 1)) / 2;
+}
+
+function aimWord(alignment: string): string {
+  if (alignment === 'with_traffic') return 'with';
+  if (alignment === 'against') return 'against';
+  if (alignment === 'across') return 'across';
+  return 'stopped';
+}
+
+/** Next bend within a full gear-6 stop. Farther than that is a straight. */
+function bendWord(situation: TrackSituation): string {
+  const cells = situation.cellsToCorner;
+  if (cells == null || cells > 24 || situation.cornerTurn == null) return 'straight';
+  return `${situation.cornerTurn} ${cells}`;
+}
+
+function forwardScore(
+  option: { progress: number; gear: number; clearAhead: number; overspeed: boolean; gate: boolean },
+  currentGear: number,
+  bendClose: boolean
+): number {
+  const delta = option.gear - currentGear;
+  let score = option.progress * 10;
+  if (option.gate) score += 40;
+  if (option.overspeed) score -= 60;
+  if (option.clearAhead === 0 && option.gear > 0) score -= 30;
+  if (option.gear >= 2 && option.clearAhead < option.gear) {
+    score -= 6 * (option.gear - option.clearAhead);
+  }
+  if (option.clearAhead >= 5 && delta > 0 && !option.overspeed && !bendClose) score += 3 * delta;
+  if ((option.overspeed || option.clearAhead <= 2 || bendClose) && delta < 0) score += 8;
+  if (bendClose && delta >= 0 && currentGear >= 3) score -= 10 * (delta + 1);
+  if (option.clearAhead >= 6 && !option.overspeed && !bendClose) score += option.gear;
+  return score;
 }
 
 function illegalReason(reasons: string[]): string {
@@ -186,7 +228,27 @@ export function buildLayaScene(
   }
 
   const occupied = new Set(opponents.map((p) => cellKey(p.position.x, p.position.y)));
-  const options: LayaOption[] = [];
+  const offTrack =
+    player.isOffTrack ||
+    getTileAt(track, position.x, position.y) === 'grass' ||
+    getTileAt(track, position.x, position.y) === 'rumble';
+  const currentGear = gearOf(velocity);
+  const stopDist = stoppingDistance(currentGear);
+  const bendClose =
+    situation.cellsToCorner != null && situation.cellsToCorner <= stopDist + 2;
+  const goalIsFinish = passedCheckpoint || !track.checkpoint;
+  type Bucket = 'illegal' | 'off' | 'grass' | 'forward' | 'wrong' | 'stop';
+  interface PendingOption extends LayaOption {
+    bucket: Bucket;
+    steps: number;
+    progress: number;
+    reason: string;
+    gear: number;
+    clearAhead: number;
+    overspeed: boolean;
+    gate: boolean;
+  }
+  const pending: PendingOption[] = [];
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
       const next: Vector2D = { x: velocity.x + dx, y: velocity.y + dy };
@@ -204,58 +266,128 @@ export function buildLayaScene(
       const illegal = reasons.length > 0;
       const onGrid = getTileAt(track, landing.x, landing.y) !== null;
       const grass = onGrid && isGrassShortcut(track, position, landing);
-      const pathProgress = onGrid
-        ? annotatePath(track, position, next, landing, field).pathProgress
-        : 0;
+      const path = onGrid
+        ? annotatePath(track, position, next, landing, field)
+        : { pathProgress: 0, clearAhead: 0, overspeed: false };
+      const pathProgress = path.pathProgress;
       const asphalt = onAsphalt(track, landing.x, landing.y);
-      let detail: string;
+      const gate =
+        asphalt &&
+        (goalIsFinish
+          ? segmentCrossesFinish(track, position, landing)
+          : segmentEntersRect(position, landing, track.checkpoint!));
+      let bucket: Bucket;
+      let steps = 0;
       if (illegal) {
-        detail = `illegal ${illegalReason(reasons)}`;
+        bucket = 'illegal';
       } else if (!asphalt) {
-        // Grass-to-grass pathProgress is 0, so the useful signal is how
-        // many steps this landing is from the track.
-        detail = `grass away ${stepsToAsphalt(track, landing.x, landing.y)}`;
-      } else if (grass) {
-        detail = `grass ${formatProgress(pathProgress)}`;
+        if (offTrack) {
+          // Grass-to-grass pathProgress is 0. Steps to asphalt is the signal.
+          bucket = 'off';
+          steps = stepsToAsphalt(track, landing.x, landing.y);
+        } else {
+          // Leaving the circuit. `back` is reserved for a car already off it.
+          bucket = 'grass';
+        }
+      } else if (grass && !offTrack) {
+        bucket = 'grass';
+      } else if (pathProgress > PROGRESS_STEP) {
+        bucket = 'forward';
+      } else if (pathProgress < -PROGRESS_STEP) {
+        bucket = 'wrong';
       } else {
-        const name = getTileAt(track, landing.x, landing.y) === 'finish' ? 'finish' : 'asphalt';
-        detail = `${name} ${formatProgress(pathProgress)}`;
+        bucket = 'stop';
       }
-      options.push({
+      pending.push({
         label: moveLabel(dx, dy),
         dx,
         dy,
         velocity: next,
         landing,
         illegal,
-        detail,
+        detail: '',
+        bucket,
+        steps,
+        progress: pathProgress,
+        reason: illegalReason(reasons),
+        gear: gearOf(next),
+        clearAhead: path.clearAhead,
+        overspeed: path.overspeed,
+        gate,
       });
     }
   }
 
-  const offTrack =
-    player.isOffTrack ||
-    getTileAt(track, position.x, position.y) === 'grass' ||
-    getTileAt(track, position.x, position.y) === 'rumble';
+  let bestIndex = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let backIndex = -1;
+  let backSteps = Number.POSITIVE_INFINITY;
+  pending.forEach((option, index) => {
+    if (option.bucket === 'forward') {
+      const score = forwardScore(option, currentGear, bendClose);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+    if (option.bucket === 'off' && option.steps < backSteps) {
+      backSteps = option.steps;
+      backIndex = index;
+    }
+  });
+
+  const options: LayaOption[] = pending.map((option, index) => {
+    const velocityText = `${option.velocity.x},${option.velocity.y}`;
+    let detail: string;
+    if (option.bucket === 'illegal') detail = `illegal ${option.reason}`;
+    else if (option.bucket === 'off') {
+      detail = `${index === backIndex ? 'back' : 'away'} ${option.steps} ${velocityText}`;
+    } else if (option.bucket === 'grass') detail = 'grass';
+    else if (option.bucket === 'forward') {
+      let head = 'with race';
+      if (index === bestIndex) head = 'best';
+      else if (option.overspeed || (option.gear >= 3 && option.clearAhead + 1 < option.gear)) {
+        head = 'too fast';
+      } else if (option.gear < currentGear) head = 'brake';
+      const gate = option.gate ? ' gate' : '';
+      detail = `${head}${gate} ${velocityText} g${option.gear} r${option.clearAhead}`;
+    } else if (option.bucket === 'wrong') detail = `wrong way ${velocityText}`;
+    else detail = `stop ${velocityText}`;
+    return {
+      label: option.label,
+      dx: option.dx,
+      dy: option.dy,
+      velocity: option.velocity,
+      landing: option.landing,
+      illegal: option.illegal,
+      detail,
+    };
+  });
 
   return {
     state: {
+      kind: 'vector race',
+      dir: `${situation.raceHeading.x},${situation.raceHeading.y}`,
+      aim: aimWord(situation.alignment),
+      bend: bendWord(situation),
+      pace: situation.suggestedMaxGear,
+      line: Math.round(situation.lateralOffset),
+      stopDist,
       grid: lines.join('\n'),
       vel: `${velocity.x},${velocity.y}`,
-      gear: gearOf(velocity),
+      gear: currentGear,
       capped: gearLimited ? 1 : 0,
-      goal: passedCheckpoint || !track.checkpoint ? 'finish' : 'checkpoint',
+      goal: goalIsFinish ? 'finish' : 'checkpoint',
       toGoal: situation.cellsToGoal,
-      corner: situation.cellsToCorner,
       off: offTrack ? stepsToAsphalt(track, position.x, position.y) : 0,
-      coast,
+      coast: coast.map((cell) => `${cell.k} ${cell.x},${cell.y} ${cell.tile}`).join('; '),
     },
     options,
   };
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 coast. y grows downward. Pick the highest legal asphalt or finish progress. Reject illegal. Avoid grass. Off the track, pick the lowest away.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. aim is velocity vs dir. bend is the next turn. pace is the gear to hold. line is cells off the racing line. Option: velocity, g gear, r asphalt ahead. Pick best. with race follows. brake slows. too fast cannot stop. gate is checkpoint or finish. Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 coast. Never pick wrong way, stop, or illegal. Avoid grass. Off asphalt, pick back.';
 
 /** JSON body posted to Ollaya `/api/decide`. */
 export function layaDecideBody(scene: LayaScene, model: string) {
