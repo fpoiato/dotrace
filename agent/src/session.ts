@@ -221,15 +221,26 @@ export class GameSession {
   }
 
   /**
-   * Block until the host has applied our move and advanced the turn (or the
-   * race ended). Prevents the race loop from double-submitting while the
-   * cached state still says isMyTurn.
+   * Block until the host has applied our move (or the race ended).
+   *
+   * A sole remaining pilot is handed the turn again immediately, so "not my
+   * turn" never happens and the old wait sat for 30s after every move.
    */
-  waitUntilNotMyTurn(timeoutMs = 30_000): Promise<void> {
+  waitUntilMoveSettled(
+    before: { round: number; x: number; y: number; replay: number },
+    timeoutMs = 4_000
+  ): Promise<void> {
     return this.waitFor(
       () => {
-        if (this.lastState?.phase === 'GAME_OVER') return true;
-        return this.isMyTurn() ? false : true;
+        const state = this.lastState;
+        if (!state || state.phase === 'GAME_OVER') return true;
+        if (!this.isMyTurn()) return true;
+        const me = this.getMyPlayer();
+        if (!me) return true;
+        if (state.round !== before.round) return true;
+        if (me.position.x !== before.x || me.position.y !== before.y) return true;
+        if ((state.replayLog?.length ?? 0) !== before.replay) return true;
+        return false;
       },
       timeoutMs,
       'turn end'

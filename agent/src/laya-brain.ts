@@ -6,6 +6,7 @@
  */
 import { AiDifficulty, difficultyFromUnknown } from './difficulty';
 import { HeuristicBrain, MoveBrain } from './brain';
+import { supervisedChoice } from './bedrock-dataset';
 import { LAYA_DECIDE_MODEL, layaDecideBody, LayaScene } from './laya-scene';
 import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
@@ -53,7 +54,7 @@ export class LayaBrain implements MoveBrain {
         difficulty: this.difficulty,
       });
     this.model = options.model ?? LAYA_DECIDE_MODEL;
-    this.timeoutMs = options.timeoutMs ?? 12_000;
+    this.timeoutMs = options.timeoutMs ?? 2_500;
     this.onFailure = options.onFailure;
   }
 
@@ -61,6 +62,13 @@ export class LayaBrain implements MoveBrain {
     const heuristic = () => this.fallback.pickMove(summary, moves);
     const scene = summary.scene;
     if (!scene || moves.length === 0) return heuristic();
+
+    // The scene already names the step Laya would be overwritten with.
+    // Asking Ollaya and then discarding the answer is what made each turn slow.
+    const labeled = supervisedChoice(scene);
+    if (labeled) {
+      return applySceneChoice('Laya', scene, moves, labeled, await heuristic());
+    }
 
     let target: LayaEndpoint | null;
     try {

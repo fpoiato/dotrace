@@ -195,9 +195,29 @@ describe('BedrockBrain', () => {
     return match!;
   }
 
-  it('sends the Laya decide packet and drives the best label', async () => {
+  it('drives best without calling Bedrock', async () => {
     const { summary, moves } = fixtures();
     const best = bestMove(summary, moves);
+    let called = false;
+    const brain = new BedrockBrain({
+      ...options,
+      fallbackSeed: 'AI Pilot',
+      client: {
+        send: () => {
+          called = true;
+          return Promise.reject(new Error('should not call Bedrock'));
+        },
+      },
+    });
+    const chosen = await brain.pickMove(summary, moves);
+    expect(called).toBe(false);
+    expect(chosen.velocity).toEqual(best.velocity);
+  });
+
+  it('sends the Laya decide packet when the scene has no labeled step', async () => {
+    const { summary, moves } = fixtures();
+    const best = bestMove(summary, moves);
+    hideSupervised(summary);
     let sent: { input?: { system?: { text?: string }[]; messages?: { content?: { text?: string }[] }[] } } | undefined;
     const brain = new BedrockBrain({
       ...options,
@@ -220,25 +240,10 @@ describe('BedrockBrain', () => {
     expect(user).toContain('"kind":"vector race"');
   });
 
-  it('plays best when the model names another legal gear change', async () => {
-    const { summary, moves } = fixtures();
-    const best = bestMove(summary, moves);
-    const other = summary.scene.options.find(
-      (option) => !option.illegal && option.label !== labelOf(summary, best)
-    );
-    expect(other).toBeDefined();
-    const brain = new BedrockBrain({
-      ...options,
-      fallbackSeed: 'AI Pilot',
-      client: stubClient(other!.label),
-    });
-    const chosen = await brain.pickMove(summary, moves);
-    expect(chosen.velocity).toEqual(best.velocity);
-  });
-
   it('parses a choice id wrapped in prose or fences', async () => {
     const { summary, moves } = fixtures();
     const best = bestMove(summary, moves);
+    hideSupervised(summary);
     const brain = new BedrockBrain({
       ...options,
       fallbackSeed: 'AI Pilot',
@@ -248,20 +253,28 @@ describe('BedrockBrain', () => {
     expect(chosen.velocity).toEqual(best.velocity);
   });
 
-  it('still accepts a legacy moveIndex and then drives best', async () => {
+  it('still accepts a legacy moveIndex', async () => {
     const { summary, moves } = fixtures();
-    const best = bestMove(summary, moves);
+    hideSupervised(summary);
+    const alt = moves.find(
+      (move) =>
+        (move.velocity.x !== 0 || move.velocity.y !== 0) &&
+        !move.grassShortcut &&
+        (move.landingTile === 'track' || move.landingTile === 'finish')
+    );
+    expect(alt).toBeDefined();
     const brain = new BedrockBrain({
       ...options,
       fallbackSeed: 'AI Pilot',
-      client: stubClient(JSON.stringify({ moveIndex: moves[0]!.index })),
+      client: stubClient(JSON.stringify({ moveIndex: alt!.index })),
     });
     const chosen = await brain.pickMove(summary, moves);
-    expect(chosen.velocity).toEqual(best.velocity);
+    expect(chosen).toBe(alt);
   });
 
   it('falls back to heuristic on an out-of-range index', async () => {
     const { summary, moves } = fixtures();
+    hideSupervised(summary);
     const heuristic = await new HeuristicBrain('bedrock-fallback').pickMove(summary, moves);
     const brain = new BedrockBrain({
       ...options,
@@ -273,6 +286,7 @@ describe('BedrockBrain', () => {
 
   it('falls back to heuristic on malformed output', async () => {
     const { summary, moves } = fixtures();
+    hideSupervised(summary);
     const heuristic = await new HeuristicBrain('bedrock-fallback').pickMove(summary, moves);
     const brain = new BedrockBrain({
       ...options,
@@ -284,6 +298,7 @@ describe('BedrockBrain', () => {
 
   it('falls back to heuristic when Bedrock throws (throttle, auth, offline)', async () => {
     const { summary, moves } = fixtures();
+    hideSupervised(summary);
     const heuristic = await new HeuristicBrain('bedrock-fallback').pickMove(summary, moves);
     const brain = new BedrockBrain({
       ...options,
@@ -293,16 +308,21 @@ describe('BedrockBrain', () => {
     expect(chosen).toBe(heuristic);
   });
 
-  it('plays best when the model stands still and a best step exists', async () => {
+  it('plays best when a best step exists, even if the model would stand still', async () => {
     const { summary, moves } = fixtures();
     const best = bestMove(summary, moves);
-    const zero = summary.scene.options.find((option) => option.dx === 0 && option.dy === 0);
-    expect(zero).toBeDefined();
+    let called = false;
     const brain = new BedrockBrain({
       ...options,
-      client: stubClient(zero!.label),
+      client: {
+        send: () => {
+          called = true;
+          return Promise.reject(new Error('should not call Bedrock'));
+        },
+      },
     });
     const chosen = await brain.pickMove(summary, moves);
+    expect(called).toBe(false);
     expect(chosen.velocity).toEqual(best.velocity);
     expect(chosen.velocity.x !== 0 || chosen.velocity.y !== 0).toBe(true);
   });
@@ -340,6 +360,7 @@ describe('BedrockBrain', () => {
 
   it('falls back to heuristic when Bedrock exceeds the timeout', async () => {
     const { summary, moves } = fixtures();
+    hideSupervised(summary);
     const heuristic = await new HeuristicBrain('AI Pilot').pickMove(summary, moves);
     const brain = new BedrockBrain({
       ...options,
@@ -351,6 +372,14 @@ describe('BedrockBrain', () => {
     expect(chosen).toBe(heuristic);
   });
 });
+
+function hideSupervised(summary: BoardSummary): void {
+  for (const option of summary.scene.options) {
+    if (option.detail.startsWith('best ') || option.detail.startsWith('back ')) {
+      option.detail = `with race${option.detail.slice(option.detail.indexOf(' '))}`;
+    }
+  }
+}
 
 function labelOf(summary: BoardSummary, move: AnnotatedMove): string {
   const option = summary.scene.options.find(

@@ -88,10 +88,6 @@ export async function raceLoop(
       return 'finished';
     }
 
-    // Let the GRID_ORDER_DONE / TURN_ADVANCED relay settle so we plan from the
-    // host's placed positions, not a stale lobby snapshot.
-    await sleep(150);
-
     const state = session.getState();
     const player = session.getMyPlayer();
     if (!state || !player) continue;
@@ -118,12 +114,17 @@ export async function raceLoop(
     );
 
     if (moveDelayMs > 0) await sleep(moveDelayMs);
+    const before = {
+      round: state.round,
+      x: player.position.x,
+      y: player.position.y,
+      replay: state.replayLog?.length ?? 0,
+    };
     try {
       await session.submitMove(chosen.velocity);
-      // Do not re-enter waitForTurn while the cached state still says it is
-      // our turn — that caused a second SUBMIT_MOVE (often standstill) before
-      // the host relayed TURN_ADVANCED.
-      await session.waitUntilNotMyTurn();
+      // When this pilot is the only one still racing, the host hands the turn
+      // straight back. Waiting until it is no longer our turn then hangs.
+      await session.waitUntilMoveSettled(before);
     } catch (err) {
       console.warn('[MOVE FAILED]', err instanceof Error ? err.message : err);
       // If the host never advanced (illegal/stale move), retry quickly with a

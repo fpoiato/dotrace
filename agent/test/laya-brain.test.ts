@@ -291,44 +291,69 @@ describe('LayaBrain', () => {
     expect(chosen.velocity).toEqual(legal!.velocity);
   });
 
-  it('asks laya:typed-decisions when no model is configured', async () => {
+  it('drives best without calling Ollaya', async () => {
     const legal = summary.scene.options.find((option) => option.detail.startsWith('best '));
     expect(legal).toBeDefined();
-    let posted = '';
-    const fetchImpl = jest.fn(async (_url: unknown, init?: { body?: string }) => {
-      posted = init?.body ?? '';
-      return {
-        ok: true,
-        status: 200,
-        text: async () => '',
-        json: async () => ({ answers: { move: { choice: legal!.label } } }),
-      };
-    }) as unknown as typeof fetch;
+    const fetchImpl = jest.fn() as unknown as typeof fetch;
     const local = new LayaBrain({
       endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
       fetchImpl,
       fallback: new HeuristicBrain('Bot Alfa'),
       timeoutMs: 1000,
     });
-    await local.pickMove(summary, moves);
-    expect(JSON.parse(posted).model).toBe(LAYA_DECIDE_MODEL);
+    const chosen = await local.pickMove(summary, moves);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(chosen.velocity).toEqual(legal!.velocity);
+  });
+
+  it('asks laya:typed-decisions when the scene has no labeled step', async () => {
+    const restore = hideLabeledStep(summary);
+    try {
+      const legal = summary.scene.options.find((option) => !option.illegal);
+      expect(legal).toBeDefined();
+      let posted = '';
+      const fetchImpl = jest.fn(async (_url: unknown, init?: { body?: string }) => {
+        posted = init?.body ?? '';
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '',
+          json: async () => ({ answers: { move: { choice: legal!.label } } }),
+        };
+      }) as unknown as typeof fetch;
+      const local = new LayaBrain({
+        endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
+        fetchImpl,
+        fallback: new HeuristicBrain('Bot Alfa'),
+        timeoutMs: 1000,
+      });
+      await local.pickMove(summary, moves);
+      expect(JSON.parse(posted).model).toBe(LAYA_DECIDE_MODEL);
+    } finally {
+      restore();
+    }
   });
 
   it('falls back when the label is illegal or the call fails', async () => {
-    const heuristic = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
-    const illegal = await brain({
-      answers: { move: { choice: moveLabel(1, 0) } },
-    }).pickMove(summary, moves);
-    expect(illegal).toBe(heuristic);
+    const restore = hideLabeledStep(summary);
+    try {
+      const heuristic = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
+      const illegal = await brain({
+        answers: { move: { choice: moveLabel(1, 0) } },
+      }).pickMove(summary, moves);
+      expect(illegal).toBe(heuristic);
 
-    const down = await brain({}, 503).pickMove(summary, moves);
-    expect(down).toBe(heuristic);
+      const down = await brain({}, 503).pickMove(summary, moves);
+      expect(down).toBe(heuristic);
 
-    const truncated = await brain({
-      state_truncated: true,
-      answers: { move: { choice: moveLabel(-1, 0) } },
-    }).pickMove(summary, moves);
-    expect(truncated).toBe(heuristic);
+      const truncated = await brain({
+        state_truncated: true,
+        answers: { move: { choice: moveLabel(-1, 0) } },
+      }).pickMove(summary, moves);
+      expect(truncated).toBe(heuristic);
+    } finally {
+      restore();
+    }
   });
 
   it('shows that holding course on the Monza straight leaves the grass', () => {
@@ -457,13 +482,43 @@ describe('LayaBrain', () => {
     expect(chosen.velocity).toEqual(best ? best.velocity : heuristic.velocity);
   });
 
-  it('falls back when no endpoint is published yet', async () => {
-    const heuristic = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
+  it('drives best when no endpoint is published yet', async () => {
+    const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
     const local = new LayaBrain({
       endpoint: async () => null,
       fetchImpl: jest.fn() as unknown as typeof fetch,
       fallback: new HeuristicBrain('Bot Alfa'),
     });
-    expect(await local.pickMove(summary, moves)).toBe(heuristic);
+    const chosen = await local.pickMove(summary, moves);
+    expect(chosen.velocity).toEqual(best!.velocity);
+  });
+
+  it('falls back when no endpoint is published and the scene has no labeled step', async () => {
+    const restore = hideLabeledStep(summary);
+    try {
+      const heuristic = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
+      const local = new LayaBrain({
+        endpoint: async () => null,
+        fetchImpl: jest.fn() as unknown as typeof fetch,
+        fallback: new HeuristicBrain('Bot Alfa'),
+      });
+      expect(await local.pickMove(summary, moves)).toBe(heuristic);
+    } finally {
+      restore();
+    }
   });
 });
+
+function hideLabeledStep(board: { scene: { options: { detail: string }[] } }): () => void {
+  const saved = board.scene.options.map((option) => option.detail);
+  for (const option of board.scene.options) {
+    if (option.detail.startsWith('best ') || option.detail.startsWith('back ')) {
+      option.detail = `with race${option.detail.slice(option.detail.indexOf(' '))}`;
+    }
+  }
+  return () => {
+    board.scene.options.forEach((option, index) => {
+      option.detail = saved[index]!;
+    });
+  };
+}

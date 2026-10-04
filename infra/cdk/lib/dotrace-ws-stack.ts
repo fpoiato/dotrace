@@ -222,7 +222,8 @@ export class DotRaceWsStack extends Stack {
         // Fallback when spawn payload omits brain; host chooses per pilot in lobby.
         BRAIN: 'heuristic',
         AI_HANDOFF_AFTER_MS: String(10 * 60 * 1000),
-        BEDROCK_TIMEOUT_MS: '12000',
+        BEDROCK_TIMEOUT_MS: '2500',
+        LAYA_TIMEOUT_MS: '2500',
       },
       logRetention: RetentionDays.TWO_WEEKS,
       bundling: { externalModules: ['@aws-sdk/*'] },

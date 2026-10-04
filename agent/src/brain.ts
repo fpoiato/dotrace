@@ -299,7 +299,7 @@ export class BedrockBrain implements MoveBrain {
         difficulty: this.difficulty,
       });
     this.maxTokens = options.maxTokens ?? 64;
-    this.timeoutMs = options.timeoutMs ?? 12_000;
+    this.timeoutMs = options.timeoutMs ?? 2_500;
   }
 
   get moveDelayMs(): number {
@@ -315,14 +315,17 @@ export class BedrockBrain implements MoveBrain {
     const scene = summary.scene;
     if (!scene) return heuristicPick;
 
-    // While gear-capped (grass / off-track), skip the LLM — recovery must be fast
-    // and correct; Nova Micro is slow and often freezes the turn UI. The same
-    // `best` / `back` label the fine-tune learns is already on the scene.
+    // `best` / `back` is the move the fine-tune is taught to echo, and the
+    // same label we would play after the model answered. Skip the round trip.
+    const labeled = supervisedChoice(scene);
+    if (labeled) {
+      return applySceneChoice('Bedrock', scene, moves, labeled, heuristicPick);
+    }
+
+    // Gear-capped recovery with no labeled step must stay local. Nova is slow
+    // and a miss here freezes the turn.
     if (summary.gearLimited) {
-      const label = supervisedChoice(scene);
-      return label
-        ? applySceneChoice('Bedrock', scene, moves, label, heuristicPick)
-        : heuristicPick;
+      return heuristicPick;
     }
 
     try {
