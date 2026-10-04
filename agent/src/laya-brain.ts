@@ -1,7 +1,8 @@
 /**
  * Asks convaiinnovations/laya (via Ollaya /api/decide) to pick one of the
- * nine gear changes. Any failure, truncated state, or illegal label falls
- * back to the heuristic so a turn is never stuck on the model.
+ * nine gear changes. A legal answer is replaced by the `best` asphalt step
+ * when one exists, and by `back` when the car is already off the track.
+ * Truncation, an illegal label, or a failed call still uses the heuristic.
  */
 import { AiDifficulty, difficultyFromUnknown } from './difficulty';
 import { HeuristicBrain, MoveBrain } from './brain';
@@ -93,6 +94,38 @@ export class LayaBrain implements MoveBrain {
         console.warn(`[BRAIN] Laya picked ${choice} which is not a legal move — using heuristic`);
         return heuristic();
       }
+      const bestOption = scene.options.find((item) => item.detail.startsWith('best '));
+      const bestMove = bestOption
+        ? moves.find(
+            (move) =>
+              move.velocity.x === bestOption.velocity.x && move.velocity.y === bestOption.velocity.y
+          )
+        : undefined;
+      if (bestMove) {
+        if (
+          match.velocity.x !== bestMove.velocity.x ||
+          match.velocity.y !== bestMove.velocity.y
+        ) {
+          console.warn(`[BRAIN] Laya picked ${choice} — using best`);
+        }
+        return bestMove;
+      }
+      const backOption = scene.options.find((item) => item.detail.startsWith('back '));
+      const backMove = backOption
+        ? moves.find(
+            (move) =>
+              move.velocity.x === backOption.velocity.x && move.velocity.y === backOption.velocity.y
+          )
+        : undefined;
+      if (backMove) {
+        if (
+          match.velocity.x !== backMove.velocity.x ||
+          match.velocity.y !== backMove.velocity.y
+        ) {
+          console.warn(`[BRAIN] Laya picked ${choice} — using back`);
+        }
+        return backMove;
+      }
       const stationary = match.velocity.x === 0 && match.velocity.y === 0;
       const hasMotion = moves.some((move) => move.velocity.x !== 0 || move.velocity.y !== 0);
       if (stationary && hasMotion) {
@@ -109,24 +142,6 @@ export class LayaBrain implements MoveBrain {
       if (leavesAsphalt && canStayOnAsphalt) {
         console.warn('[BRAIN] Laya left the asphalt — using heuristic');
         return heuristic();
-      }
-      const bestOption = scene.options.find((item) => item.detail.startsWith('best '));
-      const bestMove = bestOption
-        ? moves.find(
-            (move) =>
-              move.velocity.x === bestOption.velocity.x && move.velocity.y === bestOption.velocity.y
-          )
-        : undefined;
-      const drifted = option.detail.startsWith('drift ');
-      const heldBack =
-        scene.state.bend === 'straight' && bestMove != null && match.gear < bestMove.gear;
-      if (bestMove && bestMove !== match && (drifted || heldBack)) {
-        console.warn(
-          drifted
-            ? '[BRAIN] Laya drifted off the circuit — using best'
-            : '[BRAIN] Laya held gear back on a straight — using best'
-        );
-        return bestMove;
       }
       return match;
     } catch (err) {
