@@ -53,6 +53,8 @@ describe('laya scene', () => {
     expect(parseMoveLabel(moveLabel(-1, 1))).toEqual({ dx: -1, dy: 1 });
     expect(parseMoveLabel('nope')).toBeNull();
     expect(faster?.detail).toBe('illegal gear');
+    expect(scene.options.some((option) => option.detail.startsWith('back'))).toBe(false);
+    expect(scene.options.some((option) => option.detail === 'best')).toBe(true);
   });
 
   it('fits the laya:en context, questions included', () => {
@@ -63,6 +65,12 @@ describe('laya scene', () => {
     me.velocity = { x: 0, y: 0 };
     me.isOffTrack = true;
     scenes.push(buildLayaScene(me, state, monaco));
+
+    const interlagos = getTrackById('interlagos')!;
+    me.position = { x: 42, y: 6 };
+    me.velocity = { x: 0, y: 0 };
+    me.isOffTrack = false;
+    scenes.push(buildLayaScene(me, state, interlagos));
 
     for (const scene of scenes) {
       const text = JSON.stringify(layaDecideBody(scene, 'laya'));
@@ -79,9 +87,45 @@ describe('laya scene', () => {
     const scene = buildLayaScene(me, state, monaco);
     const toward = scene.options.find((option) => option.label === moveLabel(1, -1));
     const away = scene.options.find((option) => option.label === moveLabel(0, 1));
-    const steps = (detail: string | undefined) => Number(/away (\d+)/.exec(detail ?? '')?.[1]);
-    expect(toward?.detail).toContain('away');
+    const steps = (detail: string | undefined) =>
+      Number(/(?:back|away) (\d+)/.exec(detail ?? '')?.[1]);
     expect(steps(toward?.detail)).toBeLessThan(steps(away?.detail));
+    const back = scene.options.filter((option) => option.detail.startsWith('back '));
+    expect(back).toHaveLength(1);
+    expect(steps(back[0]?.detail)).toBeLessThanOrEqual(steps(toward?.detail));
+  });
+
+  it('names the circuit direction on the Interlagos grid', () => {
+    const interlagos = getTrackById('interlagos')!;
+    const { me, state } = race();
+    me.position = { x: 42, y: 6 };
+    me.velocity = { x: 0, y: 0 };
+    const scene = buildLayaScene(me, state, interlagos);
+    expect(scene.state.kind).toBe('vector race');
+    expect(String(scene.state.dir).startsWith('-')).toBe(true);
+    const best = scene.options.find((option) => option.detail === 'best');
+    expect(best?.velocity.x).toBeLessThan(0);
+    const right = scene.options.find((option) => option.label === moveLabel(1, 0));
+    expect(right?.detail).toBe('wrong way');
+    const body = layaDecideBody(scene, 'laya');
+    expect(body.questions.move.instructions).toContain('Vector race');
+    expect(body.questions.move.instructions).toContain('dir is the circuit direction');
+  });
+
+  it('calls the step back to the asphalt when the car is stuck off Interlagos', () => {
+    const interlagos = getTrackById('interlagos')!;
+    const { me, state } = race();
+    me.position = { x: 51, y: 2 };
+    me.velocity = { x: 0, y: 0 };
+    me.isOffTrack = true;
+    const scene = buildLayaScene(me, state, interlagos);
+    const stopped = scene.options.find((option) => option.label === moveLabel(0, 0));
+    const back = scene.options.find((option) => option.detail.startsWith('back '));
+    const steps = (detail: string | undefined) =>
+      Number(/(?:back|away) (\d+)/.exec(detail ?? '')?.[1]);
+    expect(back).toBeDefined();
+    expect(stopped?.detail.startsWith('back')).toBe(false);
+    expect(steps(back?.detail)).toBeLessThan(steps(stopped?.detail));
   });
 });
 
