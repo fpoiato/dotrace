@@ -1,4 +1,4 @@
-import { createInitialState, createLobbyPlayer } from '../../shared/ws-types';
+import { createInitialState, createLobbyPlayer, segmentCrossesFinish } from '../../shared/ws-types';
 import { getTrackById } from '../../shared/tracks';
 import { HeuristicBrain } from '../src/brain';
 import { LayaBrain } from '../src/laya-brain';
@@ -156,7 +156,7 @@ describe('laya scene', () => {
     expect(stopped?.detail).toMatch(/^away \d+ 0,0$/);
   });
 
-  it('brakes before the Interlagos left kink when gear cannot stop in time', () => {
+  it('turns into the Interlagos kink and keeps the gear', () => {
     const interlagos = getTrackById('interlagos')!;
     const { me, state } = race();
     me.position = { x: 30, y: 8 };
@@ -167,7 +167,8 @@ describe('laya scene', () => {
     expect(scene.state.stopDist).toBe(15);
     expect(String(scene.state.bend)).not.toBe('straight');
     expect(best).toBeDefined();
-    expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeLessThan(5);
+    expect(best!.velocity.y).toBeGreaterThan(0);
+    expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBe(5);
     expect(held?.detail.startsWith('best')).toBe(false);
     expect(held?.detail.startsWith('too fast') || held?.detail.startsWith('with race')).toBe(true);
     const ahead = String(scene.state.grid).split('\n').find((line) => line.includes('@'));
@@ -197,7 +198,67 @@ describe('laya scene', () => {
     const scene = buildLayaScene(corner.me, corner.state, monza);
     const brake = scene.options.find((option) => option.detail.startsWith('best '));
     expect(brake?.velocity.y).toBeLessThanOrEqual(0);
-    expect(brake?.velocity.x).toBeLessThan(4);
+    expect(Math.max(Math.abs(brake!.velocity.x), Math.abs(brake!.velocity.y))).toBeGreaterThanOrEqual(4);
+  });
+
+  it('keeps speed down the Monza return straight', () => {
+    const monza = getTrackById('monza')!;
+    const { me, state } = race();
+    me.position = { x: 7, y: 19 };
+    me.velocity = { x: 1, y: 2 };
+    me.passedCheckpoint = true;
+    const scene = buildLayaScene(me, state, monza);
+    expect(scene.state.bend).toBe('straight');
+    expect(scene.state.pace).toBe(6);
+    const best = scene.options.find((option) => option.detail.startsWith('best '));
+    expect(best?.velocity.y).toBeGreaterThanOrEqual(2);
+    expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('finishes a lap on Monza, Interlagos, and Monaco without leaving the asphalt', () => {
+    const starts = [
+      ['monza', 47, 50, 50],
+      ['interlagos', 42, 6, 70],
+      ['monaco', 42, 30, 55],
+    ] as const;
+    for (const [id, x, y, limit] of starts) {
+      const circuit = getTrackById(id)!;
+      const me = createLobbyPlayer('ai-1', 'Bot Alfa', false, 1, '#3B82F6');
+      me.position = { x, y };
+      me.velocity = { x: 0, y: 0 };
+      const state = createInitialState([me], 'human');
+      state.phase = 'GAME_ROUND';
+      state.trackId = id;
+      state.players = [me];
+      let maxGear = 0;
+      let finished = 0;
+      for (let turn = 1; turn <= limit; turn++) {
+        state.round = turn;
+        const scene = buildLayaScene(me, state, circuit);
+        const best = scene.options.find((option) => option.detail.startsWith('best '));
+        expect(best).toBeDefined();
+        maxGear = Math.max(maxGear, Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y)));
+        const from = { ...me.position };
+        me.velocity = { ...best!.velocity };
+        me.position = { ...best!.landing };
+        const cp = circuit.checkpoint;
+        if (
+          cp &&
+          me.position.x >= cp.x0 &&
+          me.position.x <= cp.x1 &&
+          me.position.y >= cp.y0 &&
+          me.position.y <= cp.y1
+        ) {
+          me.passedCheckpoint = true;
+        }
+        if (me.passedCheckpoint && segmentCrossesFinish(circuit, from, me.position)) {
+          finished = turn;
+          break;
+        }
+      }
+      expect(finished).toBeGreaterThan(0);
+      expect(maxGear).toBe(6);
+    }
   });
 });
 
@@ -311,7 +372,9 @@ describe('LayaBrain', () => {
       timeoutMs: 1000,
     });
     const chosen = await local.pickMove(summary, moves);
-    expect(chosen.velocity).toEqual(heuristic.velocity);
+    const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
+    expect(best?.velocity).toEqual({ x: 1, y: 0 });
+    expect(chosen.velocity).toEqual(best!.velocity);
   });
 
   it('uses best when Laya sheds gear on an open straight', async () => {
@@ -389,8 +452,9 @@ describe('LayaBrain', () => {
       timeoutMs: 1000,
     });
     const chosen = await local.pickMove(summary, moves);
+    const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
     expect(chosen.grassShortcut).toBe(false);
-    expect(chosen.velocity).toEqual(heuristic.velocity);
+    expect(chosen.velocity).toEqual(best ? best.velocity : heuristic.velocity);
   });
 
   it('falls back when no endpoint is published yet', async () => {

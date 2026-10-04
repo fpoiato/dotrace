@@ -30,7 +30,9 @@ import {
 } from '../../shared/ws-types';
 import {
   annotatePath,
+  densifyRacingLine,
   describeTrackSituation,
+  racingLine,
   segmentGoals,
   sharedPathCache,
   type TrackSituation,
@@ -293,6 +295,60 @@ function isDrift(
   return toward < -0.2;
 }
 
+const lineCache = new Map<string, Vector2D[]>();
+
+/** Chebyshev distance from a cell to the racing line. The corridor is ~7 wide. */
+function lineOffset(track: TrackDefinition, point: Vector2D): number {
+  let line = lineCache.get(track.id);
+  if (!line) {
+    line = densifyRacingLine(racingLine(track), 1);
+    lineCache.set(track.id, line);
+  }
+  let best = Number.POSITIVE_INFINITY;
+  let nearest = point;
+  for (const sample of line) {
+    const d = (sample.x - point.x) ** 2 + (sample.y - point.y) ** 2;
+    if (d < best) {
+      best = d;
+      nearest = sample;
+    }
+  }
+  return Math.max(Math.abs(nearest.x - point.x), Math.abs(nearest.y - point.y));
+}
+
+/** Heading of the racing line a few cells in front of the car. */
+function headingAhead(track: TrackDefinition, point: Vector2D, cells: number): Vector2D {
+  let line = lineCache.get(track.id);
+  if (!line) {
+    line = densifyRacingLine(racingLine(track), 1);
+    lineCache.set(track.id, line);
+  }
+  if (line.length === 0) return { x: 1, y: 0 };
+  let best = 0;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < line.length; i++) {
+    const sample = line[i]!;
+    const d = (sample.x - point.x) ** 2 + (sample.y - point.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  const at = (best + Math.max(1, Math.round(cells))) % line.length;
+  const a = line[at]!;
+  const b = line[(at + 1) % line.length]!;
+  return { x: b.x - a.x, y: b.y - a.y };
+}
+
+/**
+ * Racing score for one asphalt step.
+ *
+ * The car is aimed at the racing line a few cells ahead, so a bend starts
+ * while there is still room to rotate. Speed stays up while that aim lines
+ * up and the asphalt holds. Braking is for a step that is still pointing
+ * down the straight, or that runs out of road. Crossing the gate stays a
+ * valid step even when the landing is past the stripe.
+ */
 function forwardScore(
   option: {
     progress: number;
@@ -301,33 +357,40 @@ function forwardScore(
     overspeed: boolean;
     gate: boolean;
     velocity: Vector2D;
+    lateral: number;
   },
   currentGear: number,
-  bendClose: boolean,
-  heading: { x: number; y: number },
-  cornerTurn: TrackSituation['cornerTurn']
+  currentLateral: number,
+  situation: TrackSituation,
+  targetHeading: Vector2D
 ): number {
+  const { align, cross } = steerSin(option.velocity, targetHeading);
   const delta = option.gear - currentGear;
-  const { align, cross } = steerSin(option.velocity, heading);
-  let score = option.progress * 10;
-  if (option.gate) score += 40;
-  if (option.overspeed) score -= 80;
-  if (option.clearAhead === 0 && option.gear > 0) score -= 40;
-  if (option.gear >= 2 && option.clearAhead < option.gear) {
-    score -= 8 * (option.gear - option.clearAhead);
-  }
-  score += align * 14;
+  const edge = Math.max(0, option.lateral - 3);
+  const cells = situation.cellsToCorner ?? 99;
+  const misaligned = align < 0.75;
+  const bendSoon = cells <= 8;
 
-  if (!bendClose || cornerTurn == null || cornerTurn === 'hairpin') {
-    score -= Math.abs(cross) * 36;
-    if (option.clearAhead >= 5 && delta > 0 && !option.overspeed) score += 10 * delta;
-    if (option.clearAhead >= 8 && !option.overspeed) score += option.gear * 4;
-  } else {
-    const toward = cornerTurn === 'right' ? -cross : cross;
-    score += toward * 28;
-    if (delta < 0 && align > 0.5) score += 10;
-    if (delta >= 0 && currentGear >= 3) score -= 14 * (delta + 1);
+  let score = option.gate ? 0 : option.progress * 8;
+  if (option.gate) score += 400;
+  if (option.overspeed) score -= 140;
+  if (option.clearAhead === 0 && option.gear > 0) score -= 100;
+  else if (option.clearAhead <= 1 && option.gear >= 3) score -= 50;
+  else if (option.clearAhead <= 2 && option.gear >= 5) score -= 25;
+
+  score += align * 24;
+  score -= Math.abs(cross) * 28;
+  score -= edge * 14;
+  if (option.lateral > currentLateral) {
+    score -= (option.lateral - currentLateral) * 16;
   }
+
+  const roadOk = !option.overspeed && option.clearAhead >= 2 && option.lateral <= 3 && !misaligned;
+  if (roadOk && delta > 0) score += 18 * delta;
+  if (roadOk) score += option.gear * 4;
+  if (roadOk && delta < 0) score -= 14 * -delta;
+  if (misaligned && bendSoon && delta >= 0 && currentGear >= 3) score -= 20 * (delta + 1);
+  if (misaligned && bendSoon && delta < 0 && align > 0.35) score += 12;
   return score;
 }
 
@@ -383,8 +446,9 @@ export function buildLayaScene(
     getTileAt(track, position.x, position.y) === 'rumble';
   const currentGear = gearOf(velocity);
   const stopDist = stoppingDistance(currentGear);
+  const currentLateral = lineOffset(track, position);
   const bendClose =
-    situation.cellsToCorner != null && situation.cellsToCorner <= stopDist + 2;
+    situation.cellsToCorner != null && situation.cellsToCorner < stopDist;
   const goalIsFinish = passedCheckpoint || !track.checkpoint;
   type Bucket = 'illegal' | 'off' | 'grass' | 'forward' | 'wrong' | 'stop';
   interface PendingOption extends LayaOption {
@@ -440,7 +504,12 @@ export function buildLayaScene(
         }
       } else if (grass && !offTrack) {
         bucket = 'grass';
-      } else if (pathProgress > PROGRESS_STEP) {
+      } else if (
+        pathProgress > PROGRESS_STEP ||
+        (gate && steerSin(next, situation.raceHeading).align > 0.35)
+      ) {
+        // Jumping the stripe wraps the distance field negative. It is still
+        // the lap when the car is aimed with the circuit.
         bucket = 'forward';
       } else if (pathProgress < -PROGRESS_STEP) {
         bucket = 'wrong';
@@ -467,6 +536,8 @@ export function buildLayaScene(
     }
   }
 
+  const look = Math.min(6, situation.cellsToCorner ?? 6);
+  const targetHeading = headingAhead(track, position, look);
   let bestIndex = -1;
   let bestScore = Number.NEGATIVE_INFINITY;
   let backIndex = -1;
@@ -474,11 +545,19 @@ export function buildLayaScene(
   pending.forEach((option, index) => {
     if (option.bucket === 'forward') {
       const score = forwardScore(
-        option,
+        {
+          progress: option.progress,
+          gear: option.gear,
+          clearAhead: option.clearAhead,
+          overspeed: option.overspeed,
+          gate: option.gate,
+          velocity: option.velocity,
+          lateral: lineOffset(track, option.landing),
+        },
         currentGear,
-        bendClose,
-        situation.raceHeading,
-        situation.cornerTurn
+        currentLateral,
+        situation,
+        targetHeading
       );
       if (score > bestScore) {
         bestScore = score;
@@ -506,9 +585,16 @@ export function buildLayaScene(
         situation.cornerTurn,
         bendClose
       );
+      const cannotStop =
+        situation.cellsToCorner != null &&
+        stoppingDistance(option.gear) > situation.cellsToCorner;
       if (index === bestIndex) head = 'best';
       else if (drift) head = 'drift';
-      else if (option.overspeed || (option.gear >= 3 && option.clearAhead + 1 < option.gear)) {
+      else if (
+        option.overspeed ||
+        cannotStop ||
+        (option.gear >= 3 && option.clearAhead + 1 < option.gear)
+      ) {
         head = 'too fast';
       } else if (option.gear < currentGear) head = 'brake';
       const gate = option.gate ? ' gate' : '';
