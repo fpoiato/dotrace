@@ -1,14 +1,16 @@
 /**
  * Situation packet for the Laya decision model.
  *
- * `laya:en` has a 512-token context and that budget includes the questions.
- * A 33×33 window plus a sentence per gear change fills it, Ollaya sets
- * `state_truncated`, and the brain discards the answer. Keep the local map
- * small and each criterion to a few words so the whole decide body fits.
+ * Dot Race asks `laya:typed-decisions` (ModernBERT-large, English, 1024
+ * tokens, questions included). The router name `laya` still sends English to
+ * `laya:en`, whose window is 512. A 33×33 window plus a sentence per gear
+ * change used to fill that smaller window; Ollaya then sets `state_truncated`
+ * and the brain discards the answer. Keep the local map small and each
+ * criterion to a few words.
  *
  * The model matches short labels. It does not rank "+1.3" above "-1.0", so
  * every option says what it does in the race: `best`, `with race`, `brake`,
- * `too fast`, `wrong way`, `idle`, `grass`, `back`, or `illegal`. Gear,
+ * `too fast`, `wrong way`, `idle`, `penalty`, `back`, or `illegal`. Gear,
  * runway, and the next bend are written beside those words.
  */
 import {
@@ -33,8 +35,14 @@ import {
   type TrackSituation,
 } from './track-path';
 
-/** laya:en context window, questions included. */
-export const LAYA_CONTEXT_TOKENS = 512;
+/**
+ * `laya:typed-decisions` context, questions included. Same ModernBERT-large
+ * weights as `laya:en` (512); this tag is the 1024-token fine-tune.
+ */
+export const LAYA_CONTEXT_TOKENS = 1024;
+
+/** Tag posted to `/api/decide`. The router `laya` does not select this model. */
+export const LAYA_DECIDE_MODEL = 'laya:typed-decisions';
 
 /**
  * Local map radius. 16 (a 33×33 grid) does not fit next to nine criteria.
@@ -44,9 +52,9 @@ const WINDOW = 4;
 
 /**
  * Char budget for the JSON decide body. Measured with the ModernBERT
- * tokenizer laya:en uses: the heaviest race packet is ~477 tokens
- * (~1320 chars). 1360 chars stays under ~490 tokens, inside the 512
- * window with the [CLS]/marker wrapper still to add.
+ * tokenizer: the heaviest race packet is ~477 tokens (~1320 chars). 1360
+ * chars keeps that packet from growing by accident. The 1024-token window
+ * still has room when a later change adds decision context on purpose.
  */
 export const LAYA_REQUEST_CHAR_BUDGET = 1360;
 

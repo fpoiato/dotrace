@@ -371,6 +371,13 @@ export class DotRaceWsStack extends Stack {
   }
 }
 
+/**
+ * English typed-choice tag (ModernBERT-large, 1024 tokens). The router name
+ * `laya` still resolves English to `laya:en` (512). Keep this in sync with
+ * `LAYA_DECIDE_MODEL` in agent/src/laya-scene.ts.
+ */
+const OLLAYA_DECIDE_MODEL = 'laya:typed-decisions';
+
 const OLLAYA_POWER_FUNCTION_NAME = 'DotRaceOllayaPower';
 const LAYA_POWER_FUNCTION_NAME = 'LayaPower';
 const LAYA_URL_PARAMETER = '/laya/url';
@@ -395,7 +402,7 @@ function useSharedLayaHost(
 
   deps.aiPlayerFn.addEnvironment('OLLAYA_URL_PARAMETER', LAYA_URL_PARAMETER);
   deps.aiPlayerFn.addEnvironment('OLLAYA_API_KEY_SECRET', secretArn);
-  deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', 'laya');
+  deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', OLLAYA_DECIDE_MODEL);
   deps.aiPlayerFn.addToRolePolicy(
     new PolicyStatement({
       actions: ['ssm:GetParameter'],
@@ -477,7 +484,8 @@ function ollayaUserData(secretId: string, region: string): UserData {
     'systemctl enable ollaya',
     'systemctl restart ollaya',
     'if curl -sf --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:11435/; then',
-    '  OLLAYA_HOST=127.0.0.1:11435 OLLAYA_API_KEY="$KEY" ollaya pull laya || echo "ollaya pull failed"',
+    '  OLLAYA_HOST=127.0.0.1:11435 OLLAYA_API_KEY="$KEY" ollaya pull laya || echo "ollaya pull laya failed"',
+    '  OLLAYA_HOST=127.0.0.1:11435 OLLAYA_API_KEY="$KEY" ollaya pull laya:typed-decisions || echo "ollaya pull laya:typed-decisions failed"',
     'else',
     '  echo "ollaya did not become healthy"',
     'fi',
@@ -559,7 +567,7 @@ function addOllayaHost(
       OLLAYA_URL_PARAMETER: urlParameter.parameterName,
       OLLAYA_API_KEY_SECRET: apiKey.secretArn,
       OLLAYA_IDLE_MS: String(3 * 60 * 1000),
-      OLLAYA_MODEL: 'laya',
+      OLLAYA_MODEL: OLLAYA_DECIDE_MODEL,
     },
     bundling: { externalModules: ['@aws-sdk/*'] },
   });
@@ -594,7 +602,7 @@ function addOllayaHost(
 
   deps.aiPlayerFn.addEnvironment('OLLAYA_URL_PARAMETER', urlParameter.parameterName);
   deps.aiPlayerFn.addEnvironment('OLLAYA_API_KEY_SECRET', apiKey.secretArn);
-  deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', 'laya');
+  deps.aiPlayerFn.addEnvironment('OLLAYA_MODEL', OLLAYA_DECIDE_MODEL);
 
   return {
     instanceId: host.instanceId,

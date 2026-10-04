@@ -4,6 +4,7 @@ import { HeuristicBrain } from '../src/brain';
 import { LayaBrain } from '../src/laya-brain';
 import {
   buildLayaScene,
+  LAYA_DECIDE_MODEL,
   LAYA_REQUEST_CHAR_BUDGET,
   layaDecideBody,
   moveLabel,
@@ -53,7 +54,7 @@ describe('laya scene', () => {
     expect(scene.options.some((option) => option.detail.startsWith('best '))).toBe(true);
   });
 
-  it('fits the laya:en context, questions included', () => {
+  it('fits the typed-decisions request budget, questions included', () => {
     const scenes = [buildLayaScene(race().me, race().state, track)];
     const monaco = getTrackById('monaco')!;
     const { me, state } = race();
@@ -72,7 +73,7 @@ describe('laya scene', () => {
     scenes.push(buildLayaScene(me, state, interlagos));
 
     for (const scene of scenes) {
-      const text = JSON.stringify(layaDecideBody(scene, 'laya'));
+      const text = JSON.stringify(layaDecideBody(scene, LAYA_DECIDE_MODEL));
       expect(text.length).toBeLessThan(LAYA_REQUEST_CHAR_BUDGET);
     }
   });
@@ -113,7 +114,8 @@ describe('laya scene', () => {
     expect(best?.detail).toMatch(/^best( gate)? -?\d+,-?\d+ g\d+ r\d+$/);
     const right = scene.options.find((option) => option.label === moveLabel(1, 0));
     expect(right?.detail.startsWith('wrong way')).toBe(true);
-    const body = layaDecideBody(scene, 'laya');
+    const body = layaDecideBody(scene, LAYA_DECIDE_MODEL);
+    expect(body.model).toBe('laya:typed-decisions');
     expect(body.questions.move.instructions).toContain('Vector race');
     expect(body.questions.move.instructions).toContain('dir is the circuit direction');
     expect(body.questions.move.instructions).toContain('stopDist');
@@ -183,6 +185,29 @@ describe('LayaBrain', () => {
       answers: { move: { choice: legal!.label } },
     }).pickMove(summary, moves);
     expect(chosen.velocity).toEqual(legal!.velocity);
+  });
+
+  it('asks laya:typed-decisions when no model is configured', async () => {
+    const legal = summary.scene.options.find((option) => option.detail.startsWith('best '));
+    expect(legal).toBeDefined();
+    let posted = '';
+    const fetchImpl = jest.fn(async (_url: unknown, init?: { body?: string }) => {
+      posted = init?.body ?? '';
+      return {
+        ok: true,
+        status: 200,
+        text: async () => '',
+        json: async () => ({ answers: { move: { choice: legal!.label } } }),
+      };
+    }) as unknown as typeof fetch;
+    const local = new LayaBrain({
+      endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
+      fetchImpl,
+      fallback: new HeuristicBrain('Bot Alfa'),
+      timeoutMs: 1000,
+    });
+    await local.pickMove(summary, moves);
+    expect(JSON.parse(posted).model).toBe(LAYA_DECIDE_MODEL);
   });
 
   it('falls back when the label is illegal or the call fails', async () => {
