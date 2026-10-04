@@ -1,10 +1,10 @@
 /**
  * Situation packet for the Laya decision model.
  *
- * The full circuit does not fit laya:en's context, so the state carries a
- * window around the car, every pilot, and the three cells this car would
- * reach if velocity stayed constant. The nine gear changes are the choice
- * criteria; each one already says whether that change is illegal or cuts grass.
+ * `laya:en` has a 512-token context and that budget includes the questions.
+ * A 33×33 window plus a sentence per gear change fills it, Ollaya sets
+ * `state_truncated`, and the brain discards the answer. Keep the local map
+ * small and each criterion to a few words so the whole decide body fits.
  */
 import {
   GameState,
@@ -25,7 +25,22 @@ import {
   sharedPathCache,
 } from './track-path';
 
-const WINDOW = 16;
+/** laya:en context window, questions included. */
+export const LAYA_CONTEXT_TOKENS = 512;
+
+/**
+ * Local map radius. 16 (a 33×33 grid) does not fit next to nine criteria.
+ * 4 covers the cars that can actually block the next landing.
+ */
+const WINDOW = 4;
+
+/**
+ * Char budget for the JSON decide body. Measured with the ModernBERT
+ * tokenizer laya:en uses: a race packet is ~330 tokens (~850 chars).
+ * 1050 chars stays under ~400 tokens, inside the 512 window with the
+ * [CLS]/marker wrapper still to add.
+ */
+export const LAYA_REQUEST_CHAR_BUDGET = 1050;
 
 const OPPONENT_LETTERS = 'ABDEFGHIJKLMNPQRSTUVWXYZ';
 
@@ -85,6 +100,51 @@ function terrainChar(track: TrackDefinition, x: number, y: number): string {
 
 function tileName(track: TrackDefinition, x: number, y: number): string {
   return getTileAt(track, x, y) ?? 'void';
+}
+
+function onAsphalt(track: TrackDefinition, x: number, y: number): boolean {
+  const tile = getTileAt(track, x, y);
+  return tile === 'track' || tile === 'finish';
+}
+
+/** 8-connected steps to the nearest asphalt cell. 0 when already on it. */
+function stepsToAsphalt(track: TrackDefinition, x: number, y: number): number {
+  if (onAsphalt(track, x, y)) return 0;
+  if (getTileAt(track, x, y) === null) return 99;
+  const seen = new Set<string>([cellKey(x, y)]);
+  const queue: Array<{ x: number; y: number; d: number }> = [{ x, y, d: 0 }];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (cur.d >= 24) return 24;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = cur.x + dx;
+        const ny = cur.y + dy;
+        const key = cellKey(nx, ny);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (onAsphalt(track, nx, ny)) return cur.d + 1;
+        if (getTileAt(track, nx, ny) === null) continue;
+        queue.push({ x: nx, y: ny, d: cur.d + 1 });
+      }
+    }
+  }
+  return 99;
+}
+
+/** One decimal, with a sign. The 1e9 grass-to-asphalt jump is just "back". */
+function formatProgress(progress: number): string {
+  if (!Number.isFinite(progress) || Math.abs(progress) > 50) return 'back';
+  const rounded = Math.round(progress * 10) / 10;
+  const text = rounded.toFixed(1);
+  return rounded > 0 ? `+${text}` : text;
+}
+
+function illegalReason(reasons: string[]): string {
+  if (reasons.some((reason) => reason.includes('outside'))) return 'edge';
+  if (reasons.some((reason) => reason.includes('another car'))) return 'car';
+  return 'gear';
 }
 
 export function buildLayaScene(
@@ -147,8 +207,20 @@ export function buildLayaScene(
       const pathProgress = onGrid
         ? annotatePath(track, position, next, landing, field).pathProgress
         : 0;
-      const status = illegal ? `illegal (${reasons.join('; ')})` : 'legal';
-      const grassNote = grass ? '; grass penalty' : '';
+      const asphalt = onAsphalt(track, landing.x, landing.y);
+      let detail: string;
+      if (illegal) {
+        detail = `illegal ${illegalReason(reasons)}`;
+      } else if (!asphalt) {
+        // Grass-to-grass pathProgress is 0, so the useful signal is how
+        // many steps this landing is from the track.
+        detail = `grass away ${stepsToAsphalt(track, landing.x, landing.y)}`;
+      } else if (grass) {
+        detail = `grass ${formatProgress(pathProgress)}`;
+      } else {
+        const name = getTileAt(track, landing.x, landing.y) === 'finish' ? 'finish' : 'asphalt';
+        detail = `${name} ${formatProgress(pathProgress)}`;
+      }
       options.push({
         label: moveLabel(dx, dy),
         dx,
@@ -156,47 +228,47 @@ export function buildLayaScene(
         velocity: next,
         landing,
         illegal,
-        detail:
-          `accel (${dx},${dy}) -> velocity (${next.x},${next.y}) ` +
-          `lands (${landing.x},${landing.y}) on ${tileName(track, landing.x, landing.y)}; ` +
-          `${status}${grassNote}; pathProgress ${pathProgress.toFixed(2)}`,
+        detail,
       });
     }
   }
 
+  const offTrack =
+    player.isOffTrack ||
+    getTileAt(track, position.x, position.y) === 'grass' ||
+    getTileAt(track, position.x, position.y) === 'rumble';
+
   return {
     state: {
-      legend:
-        '. grass, # asphalt, = rumble, F finish, C checkpoint, @ you, A/B/… other pilots, 1/2/3 where you will be in 1/2/3 rounds if velocity stays constant. y grows downward.',
       grid: lines.join('\n'),
-      round: state.round,
-      lap: player.lap,
-      totalLaps: state.totalLaps,
-      mode: state.gameMode,
+      vel: `${velocity.x},${velocity.y}`,
+      gear: gearOf(velocity),
+      capped: gearLimited ? 1 : 0,
       goal: passedCheckpoint || !track.checkpoint ? 'finish' : 'checkpoint',
-      lapProgressPct: situation.lapProgressPct,
-      cellsToGoal: situation.cellsToGoal,
-      me: {
-        position,
-        velocity,
-        gear: gearOf(velocity),
-        passedCheckpoint,
-      },
+      toGoal: situation.cellsToGoal,
+      corner: situation.cellsToCorner,
+      off: offTrack ? stepsToAsphalt(track, position.x, position.y) : 0,
       coast,
-      pilots: state.players.map((p) => ({
-        nickname: p.nickname,
-        self: p.connectionId === player.connectionId,
-        position: p.position,
-        velocity: p.velocity,
-        gear: gearOf(p.velocity),
-        lap: p.lap,
-        passedCheckpoint: p.passedCheckpoint ?? false,
-        finished: p.finishOrder !== undefined,
-      })),
     },
     options,
   };
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Choose the gear change that stays on the asphalt, does not land on another car, and reaches the checkpoint and then the finish in the fewest rounds. Reject any option marked illegal. Avoid grass.';
+  'Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 coast. y grows downward. Pick the highest legal asphalt or finish progress. Reject illegal. Avoid grass. Off the track, pick the lowest away.';
+
+/** JSON body posted to Ollaya `/api/decide`. */
+export function layaDecideBody(scene: LayaScene, model: string) {
+  return {
+    model,
+    state: scene.state,
+    questions: {
+      move: {
+        type: 'choice' as const,
+        instructions: LAYA_MOVE_INSTRUCTIONS,
+        criteria: Object.fromEntries(scene.options.map((option) => [option.label, option.detail])),
+      },
+    },
+    keep_alive: '-1',
+  };
+}
