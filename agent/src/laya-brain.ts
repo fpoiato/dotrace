@@ -5,7 +5,7 @@
  */
 import { AiDifficulty, difficultyFromUnknown } from './difficulty';
 import { HeuristicBrain, MoveBrain } from './brain';
-import { layaDecideBody, LayaScene, parseMoveLabel } from './laya-scene';
+import { LAYA_DECIDE_MODEL, layaDecideBody, LayaScene, parseMoveLabel } from './laya-scene';
 import type { AnnotatedMove, BoardSummary } from './tools';
 
 export interface LayaEndpoint {
@@ -50,7 +50,7 @@ export class LayaBrain implements MoveBrain {
         styleOrSeed: options.fallbackSeed ?? 'laya-fallback',
         difficulty: this.difficulty,
       });
-    this.model = options.model ?? 'laya';
+    this.model = options.model ?? LAYA_DECIDE_MODEL;
     this.timeoutMs = options.timeoutMs ?? 12_000;
     this.onFailure = options.onFailure;
   }

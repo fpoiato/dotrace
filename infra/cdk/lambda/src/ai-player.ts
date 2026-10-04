@@ -16,6 +16,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { raceLoop, RaceLoopResult } from '../../../../agent/src/agent';
 import { BedrockBrain, HeuristicBrain, MoveBrain } from '../../../../agent/src/brain';
 import { LayaBrain } from '../../../../agent/src/laya-brain';
+import { LAYA_DECIDE_MODEL } from '../../../../agent/src/laya-scene';
 import {
   AiDifficulty,
   DIFFICULTY_TUNING,
@@ -83,7 +84,7 @@ function buildBrain(event: SpawnAiPlayerEvent, difficulty: AiDifficulty): MoveBr
       },
       fallbackSeed: event.nickname,
       difficulty,
-      model: process.env.OLLAYA_MODEL,
+      model: process.env.OLLAYA_MODEL || LAYA_DECIDE_MODEL,
       timeoutMs: Number(process.env.LAYA_TIMEOUT_MS ?? 12_000),
     });
   }

@@ -37,6 +37,9 @@ describe('DotRaceWsStack', () => {
       FunctionName: 'DotRaceOllayaPower',
       Timeout: 240,
     });
+    const json = JSON.stringify(template.toJSON());
+    expect(json).toContain('laya:typed-decisions');
+    expect(json).toContain('ollaya pull laya:typed-decisions');
     const power = template.findResources('AWS::Lambda::Function', {
       Properties: { FunctionName: 'DotRaceOllayaPower' },
     });
@@ -64,6 +67,7 @@ describe('DotRaceWsStack with the shared Laya host', () => {
     const json = JSON.stringify(template.toJSON());
     expect(json).not.toContain('DotRaceOllayaPower');
     expect(json).toContain('function:LayaPower');
+    expect(json).toContain('laya:typed-decisions');
     expect(json).toContain('/laya/url');
     expect(json).toContain('/laya/api-key-secret-arn');
     expect(json).toContain('LayaPowerRole');

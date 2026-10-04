@@ -108,7 +108,7 @@ async function warm(url: string): Promise<void> {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: process.env.OLLAYA_MODEL ?? 'laya',
+      model: process.env.OLLAYA_MODEL || 'laya:typed-decisions',
       state: 'Dot Race warmup.',
       questions: {
         ready: { type: 'noul', instructions: 'The service is ready.' },
