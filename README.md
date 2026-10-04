@@ -10,6 +10,7 @@ Turn-based vector racing party game — mobile-first Angular frontend, API Gatew
 |------|---------|
 | `frontend/dotrace-app` | Angular 19 + Tailwind 3.4 + ngx-translate (pt-BR / en) |
 | `infra/cdk` | DynamoDB, WebSocket API, HTTP API (commands), Lambdas |
+| [fpoiato/laya-host](https://github.com/fpoiato/laya-host) | Shared Ollaya EC2 (`laya`) and the Lambdas that start and stop it. Dot Race keeps calling it the same way. |
 | `infra/terraform` | S3, CloudFront (OAC), ACM, Route53, CodePipeline |
 | `shared/` | WebSocket + game types (`ws-types.ts`, `tracks.ts`) |
 | `bot/` | Headless heuristic client (joins rooms as a player) |
@@ -67,6 +68,8 @@ The pipeline sources code from an S3 zip uploaded by GitHub Actions
 connection is required.
 
 ### 3. CDK + frontend via CodePipeline
+
+The Laya EC2 is the shared host in [fpoiato/laya-host](https://github.com/fpoiato/laya-host). This repo keeps starting it when a room has players and asking it to stop when the room has been empty for 3 minutes. The first deploy of that cutover only marks the instance, disk, VPC, and API key `Retain`. The pipeline moves them out of this stack after `LayaHostStack` is up (`pipeline/laya-detach-ready.sh`). Until then, `cdk deploy` without `-c layaMode=external` still owns the machine.
 
 Every **push to `main`** runs the GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
 
