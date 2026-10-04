@@ -258,23 +258,76 @@ function bendWord(situation: TrackSituation): string {
   return `${situation.cornerTurn} ${cells}`;
 }
 
-function forwardScore(
-  option: { progress: number; gear: number; clearAhead: number; overspeed: boolean; gate: boolean },
-  currentGear: number,
+/** Highest gear whose stopping distance fits in the runway ahead. */
+function paceForStretch(cellsToCorner: number | null): number {
+  const runway = cellsToCorner == null || cellsToCorner > 24 ? 28 : cellsToCorner;
+  for (let gear = 6; gear >= 1; gear--) {
+    if ((gear * (gear + 1)) / 2 <= runway) return gear;
+  }
+  return 1;
+}
+
+function steerSin(
+  velocity: Vector2D,
+  heading: { x: number; y: number }
+): { align: number; cross: number } {
+  const hLen = Math.hypot(heading.x, heading.y) || 1;
+  const vLen = Math.hypot(velocity.x, velocity.y) || 1;
+  return {
+    align: (heading.x * velocity.x + heading.y * velocity.y) / (hLen * vLen),
+    cross: (heading.x * velocity.y - heading.y * velocity.x) / (hLen * vLen),
+  };
+}
+
+/** Sideways step off the circuit, or away from a bend that is already close. */
+function isDrift(
+  velocity: Vector2D,
+  heading: { x: number; y: number },
+  cornerTurn: TrackSituation['cornerTurn'],
   bendClose: boolean
+): boolean {
+  const { cross } = steerSin(velocity, heading);
+  if (Math.abs(cross) < 0.25) return false;
+  if (!bendClose || cornerTurn == null || cornerTurn === 'hairpin') return Math.abs(cross) >= 0.35;
+  const toward = cornerTurn === 'right' ? -cross : cross;
+  return toward < -0.2;
+}
+
+function forwardScore(
+  option: {
+    progress: number;
+    gear: number;
+    clearAhead: number;
+    overspeed: boolean;
+    gate: boolean;
+    velocity: Vector2D;
+  },
+  currentGear: number,
+  bendClose: boolean,
+  heading: { x: number; y: number },
+  cornerTurn: TrackSituation['cornerTurn']
 ): number {
   const delta = option.gear - currentGear;
+  const { align, cross } = steerSin(option.velocity, heading);
   let score = option.progress * 10;
   if (option.gate) score += 40;
-  if (option.overspeed) score -= 60;
-  if (option.clearAhead === 0 && option.gear > 0) score -= 30;
+  if (option.overspeed) score -= 80;
+  if (option.clearAhead === 0 && option.gear > 0) score -= 40;
   if (option.gear >= 2 && option.clearAhead < option.gear) {
-    score -= 6 * (option.gear - option.clearAhead);
+    score -= 8 * (option.gear - option.clearAhead);
   }
-  if (option.clearAhead >= 5 && delta > 0 && !option.overspeed && !bendClose) score += 3 * delta;
-  if ((option.overspeed || option.clearAhead <= 2 || bendClose) && delta < 0) score += 8;
-  if (bendClose && delta >= 0 && currentGear >= 3) score -= 10 * (delta + 1);
-  if (option.clearAhead >= 6 && !option.overspeed && !bendClose) score += option.gear;
+  score += align * 14;
+
+  if (!bendClose || cornerTurn == null || cornerTurn === 'hairpin') {
+    score -= Math.abs(cross) * 36;
+    if (option.clearAhead >= 5 && delta > 0 && !option.overspeed) score += 10 * delta;
+    if (option.clearAhead >= 8 && !option.overspeed) score += option.gear * 4;
+  } else {
+    const toward = cornerTurn === 'right' ? -cross : cross;
+    score += toward * 28;
+    if (delta < 0 && align > 0.5) score += 10;
+    if (delta >= 0 && currentGear >= 3) score -= 14 * (delta + 1);
+  }
   return score;
 }
 
@@ -420,7 +473,13 @@ export function buildLayaScene(
   let backSteps = Number.POSITIVE_INFINITY;
   pending.forEach((option, index) => {
     if (option.bucket === 'forward') {
-      const score = forwardScore(option, currentGear, bendClose);
+      const score = forwardScore(
+        option,
+        currentGear,
+        bendClose,
+        situation.raceHeading,
+        situation.cornerTurn
+      );
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -441,7 +500,14 @@ export function buildLayaScene(
     } else if (option.bucket === 'grass') detail = 'penalty gear 1';
     else if (option.bucket === 'forward') {
       let head = 'with race';
+      const drift = isDrift(
+        option.velocity,
+        situation.raceHeading,
+        situation.cornerTurn,
+        bendClose
+      );
       if (index === bestIndex) head = 'best';
+      else if (drift) head = 'drift';
       else if (option.overspeed || (option.gear >= 3 && option.clearAhead + 1 < option.gear)) {
         head = 'too fast';
       } else if (option.gear < currentGear) head = 'brake';
@@ -466,7 +532,7 @@ export function buildLayaScene(
       dir: `${situation.raceHeading.x},${situation.raceHeading.y}`,
       aim: aimWord(situation.alignment),
       bend: bendWord(situation),
-      pace: situation.suggestedMaxGear,
+      pace: paceForStretch(situation.cellsToCorner),
       line: Math.round(situation.lateralOffset),
       stopDist,
       grid: lines.join('\n'),
@@ -483,7 +549,7 @@ export function buildLayaScene(
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Accelerate up to pace when bend is straight and hold stays on asphalt. Slow down only when bend is inside stopDist. y grows down. dir is the circuit direction. Steer with dir. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
 
 /** JSON body posted to Ollaya `/api/decide`. */
 export function layaDecideBody(scene: LayaScene, model: string) {

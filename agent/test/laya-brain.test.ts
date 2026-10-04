@@ -130,7 +130,7 @@ describe('laya scene', () => {
     expect(body.questions.move.instructions).toContain('Vector race');
     expect(body.questions.move.instructions).toContain('dir is the circuit direction');
     expect(body.questions.move.instructions).toContain('stopDist');
-    expect(body.questions.move.instructions).toContain('Shed one gear per turn');
+    expect(body.questions.move.instructions).toContain('Accelerate up to pace');
     expect(body.questions.move.instructions).toContain('penalty caps gear at 1');
     expect(body.questions.move.instructions).toContain('hold is the next 3 turns');
     expect(body.questions.move.instructions).toContain('Grid is only the road ahead');
@@ -175,6 +175,29 @@ describe('laya scene', () => {
     expect(ahead).toContain('1');
     expect(ahead).toContain('2');
     expect(ahead).toContain('3');
+  });
+
+  it('carries speed on the Monza back straight and does not steer down before the right-hander', () => {
+    const monza = getTrackById('monza')!;
+    const straight = race();
+    straight.me.position = { x: 56, y: 20 };
+    straight.me.velocity = { x: -3, y: 0 };
+    const open = buildLayaScene(straight.me, straight.state, monza);
+    expect(open.state.bend).toBe('straight');
+    expect(open.state.pace).toBe(6);
+    const best = open.options.find((option) => option.detail.startsWith('best '));
+    expect(best?.velocity.y).toBeLessThan(0);
+    expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeGreaterThanOrEqual(3);
+    const held = open.options.find((option) => option.velocity.x === -3 && option.velocity.y === 0);
+    expect(held?.detail.startsWith('drift')).toBe(true);
+
+    const corner = race();
+    corner.me.position = { x: 60, y: 45 };
+    corner.me.velocity = { x: 4, y: 0 };
+    const scene = buildLayaScene(corner.me, corner.state, monza);
+    const brake = scene.options.find((option) => option.detail.startsWith('best '));
+    expect(brake?.velocity.y).toBeLessThanOrEqual(0);
+    expect(brake?.velocity.x).toBeLessThan(4);
   });
 });
 
@@ -289,6 +312,63 @@ describe('LayaBrain', () => {
     });
     const chosen = await local.pickMove(summary, moves);
     expect(chosen.velocity).toEqual(heuristic.velocity);
+  });
+
+  it('uses best when Laya sheds gear on an open straight', async () => {
+    const monza = getTrackById('monza')!;
+    const { me, state } = race();
+    me.position = { x: 50, y: 19 };
+    me.velocity = { x: -3, y: -1 };
+    const summary = buildBoardSummary(me, state, monza);
+    const moves = listAnnotatedMoves(me, state, monza);
+    const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
+    const slow = summary.scene.options.find(
+      (option) => option.velocity.x === -3 && option.velocity.y === -1
+    );
+    expect(best).toBeDefined();
+    expect(slow).toBeDefined();
+    expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeGreaterThan(3);
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ answers: { move: { choice: slow!.label } } }),
+    })) as unknown as typeof fetch;
+    const local = new LayaBrain({
+      endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
+      fetchImpl,
+      fallback: new HeuristicBrain('Bot Alfa'),
+      timeoutMs: 1000,
+    });
+    const chosen = await local.pickMove(summary, moves);
+    expect(chosen.velocity).toEqual(best!.velocity);
+  });
+
+  it('uses best when Laya drifts off the straight', async () => {
+    const monza = getTrackById('monza')!;
+    const { me, state } = race();
+    me.position = { x: 56, y: 20 };
+    me.velocity = { x: -3, y: 0 };
+    const summary = buildBoardSummary(me, state, monza);
+    const moves = listAnnotatedMoves(me, state, monza);
+    const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
+    const drift = summary.scene.options.find((option) => option.detail.startsWith('drift '));
+    expect(best).toBeDefined();
+    expect(drift).toBeDefined();
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ answers: { move: { choice: drift!.label } } }),
+    })) as unknown as typeof fetch;
+    const local = new LayaBrain({
+      endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
+      fetchImpl,
+      fallback: new HeuristicBrain('Bot Alfa'),
+      timeoutMs: 1000,
+    });
+    const chosen = await local.pickMove(summary, moves);
+    expect(chosen.velocity).toEqual(best!.velocity);
   });
 
   it('falls back when Laya cuts the grass and an asphalt option exists', async () => {
