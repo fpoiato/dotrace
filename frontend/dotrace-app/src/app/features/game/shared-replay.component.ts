@@ -18,7 +18,7 @@ import { ReplayViewerComponent } from './replay-viewer.component';
     LanguageToggleComponent,
   ],
   template: `
-    <div class="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 py-6">
+    <div class="mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col overflow-y-auto px-4 py-6">
       <div class="mb-4 flex items-center justify-between">
         <a routerLink="/" class="text-lg font-black tracking-tight text-orange-400">
           {{ 'app.title' | translate }}

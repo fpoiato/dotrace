@@ -22,10 +22,15 @@ const S = 4;
   standalone: true,
   template: `<canvas
     #canvas
-    class="mx-auto block w-48 rounded-lg border border-slate-700/70 opacity-95"
+    class="mx-auto block max-w-full rounded-lg border border-slate-700/70 opacity-95"
+    [class.w-full]="compact"
+    [class.w-48]="!compact"
   ></canvas>`,
   styles: [
     `
+      :host {
+        display: block;
+      }
       canvas {
         image-rendering: auto;
       }
@@ -35,6 +40,8 @@ const S = 4;
 export class MiniMapComponent implements OnChanges {
   @ViewChild('canvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
   @Input() state: GameState | null = null;
+  /** Scale to the parent width (used when the map floats over the track). */
+  @Input() compact = false;
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['state']) {
