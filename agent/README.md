@@ -4,7 +4,7 @@ An AI **network player** for Dot Race. It joins a room through the same
 protocol as any human (`JOIN_ROOM` → host approval → `RELAY` →
 `FORWARD_TO_HOST`/`SUBMIT_MOVE`), and picks moves with either:
 
-- **Bot / Laya** — the lobby Bot asks [Ollaya](https://ollaya.dev) (`laya`, Convai Innovations) to pick one of the nine gear changes from a track window, the other pilots, and a 3-round coast. The model runs on a `t4g.medium` that the `DotRaceOllayaPower` Lambda starts on the first connection and stops after the room has been empty for 3 minutes. If Ollaya is still booting or the call fails, the styled heuristic plays that turn.
+- **Bot / Laya** — the lobby Bot asks [Ollaya](https://ollaya.dev) (`laya`, Convai Innovations) to pick one of the nine gear changes from a small track window and a one-line criterion per change. `laya:en` has a 512-token context that includes the questions; a bigger packet is truncated and that turn is discarded. The model runs on a `t4g.medium` that the `DotRaceOllayaPower` Lambda starts on the first connection and stops after the room has been empty for 3 minutes. If Ollaya is still booting, the call fails, or the state is truncated, the styled heuristic plays that turn.
 - **IA / Bedrock** — Amazon Bedrock Converse (`amazon.nova-micro-v1:0`), IAM
   auth. Falls back to the styled heuristic on model failure. Small per-turn cost.
 

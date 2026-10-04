@@ -5,7 +5,7 @@
  */
 import { AiDifficulty, difficultyFromUnknown } from './difficulty';
 import { HeuristicBrain, MoveBrain } from './brain';
-import { LAYA_MOVE_INSTRUCTIONS, LayaScene, parseMoveLabel } from './laya-scene';
+import { layaDecideBody, LayaScene, parseMoveLabel } from './laya-scene';
 import type { AnnotatedMove, BoardSummary } from './tools';
 
 export interface LayaEndpoint {
@@ -107,18 +107,7 @@ export class LayaBrain implements MoveBrain {
     const response = await this.fetchImpl(`${target.url.replace(/\/$/, '')}/api/decide`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: this.model,
-        state: scene.state,
-        questions: {
-          move: {
-            type: 'choice',
-            instructions: LAYA_MOVE_INSTRUCTIONS,
-            criteria: Object.fromEntries(scene.options.map((option) => [option.label, option.detail])),
-          },
-        },
-        keep_alive: '-1',
-      }),
+      body: JSON.stringify(layaDecideBody(scene, this.model)),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) {

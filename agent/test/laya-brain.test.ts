@@ -2,7 +2,13 @@ import { createInitialState, createLobbyPlayer } from '../../shared/ws-types';
 import { getTrackById } from '../../shared/tracks';
 import { HeuristicBrain } from '../src/brain';
 import { LayaBrain } from '../src/laya-brain';
-import { buildLayaScene, moveLabel, parseMoveLabel } from '../src/laya-scene';
+import {
+  buildLayaScene,
+  LAYA_REQUEST_CHAR_BUDGET,
+  layaDecideBody,
+  moveLabel,
+  parseMoveLabel,
+} from '../src/laya-scene';
 import { buildBoardSummary, listAnnotatedMoves } from '../src/tools';
 
 const track = getTrackById('monza')!;
@@ -46,6 +52,36 @@ describe('laya scene', () => {
     expect(faster?.detail).toContain('illegal');
     expect(parseMoveLabel(moveLabel(-1, 1))).toEqual({ dx: -1, dy: 1 });
     expect(parseMoveLabel('nope')).toBeNull();
+    expect(faster?.detail).toBe('illegal gear');
+  });
+
+  it('fits the laya:en context, questions included', () => {
+    const scenes = [buildLayaScene(race().me, race().state, track)];
+    const monaco = getTrackById('monaco')!;
+    const { me, state } = race();
+    me.position = { x: 7, y: 46 };
+    me.velocity = { x: 0, y: 0 };
+    me.isOffTrack = true;
+    scenes.push(buildLayaScene(me, state, monaco));
+
+    for (const scene of scenes) {
+      const text = JSON.stringify(layaDecideBody(scene, 'laya'));
+      expect(text.length).toBeLessThan(LAYA_REQUEST_CHAR_BUDGET);
+    }
+  });
+
+  it('tells an off-track car which step is closer to the asphalt', () => {
+    const monaco = getTrackById('monaco')!;
+    const { me, state } = race();
+    me.position = { x: 7, y: 46 };
+    me.velocity = { x: 0, y: 0 };
+    me.isOffTrack = true;
+    const scene = buildLayaScene(me, state, monaco);
+    const toward = scene.options.find((option) => option.label === moveLabel(1, -1));
+    const away = scene.options.find((option) => option.label === moveLabel(0, 1));
+    const steps = (detail: string | undefined) => Number(/away (\d+)/.exec(detail ?? '')?.[1]);
+    expect(toward?.detail).toContain('away');
+    expect(steps(toward?.detail)).toBeLessThan(steps(away?.detail));
   });
 });
 
