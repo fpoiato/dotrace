@@ -202,6 +202,32 @@ describe('LayaBrain', () => {
     expect(truncated).toBe(heuristic);
   });
 
+  it('falls back when Laya stands still and the car can move', async () => {
+    const monza = getTrackById('monza')!;
+    const { me, state } = race();
+    me.position = { x: 47, y: 50 };
+    me.velocity = { x: 0, y: 0 };
+    const summary = buildBoardSummary(me, state, monza);
+    const moves = listAnnotatedMoves(me, state, monza);
+    const fallback = new HeuristicBrain({ styleOrSeed: 'Bot Alfa', difficulty: 'pro' });
+    const heuristic = await fallback.pickMove(summary, moves);
+    expect(heuristic.velocity).not.toEqual({ x: 0, y: 0 });
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ answers: { move: { choice: moveLabel(0, 0) } } }),
+    })) as unknown as typeof fetch;
+    const local = new LayaBrain({
+      endpoint: async () => ({ url: 'http://ollaya.test', apiKey: 'k' }),
+      fetchImpl,
+      fallback,
+      timeoutMs: 1000,
+    });
+    const chosen = await local.pickMove(summary, moves);
+    expect(chosen.velocity).toEqual(heuristic.velocity);
+  });
+
   it('falls back when no endpoint is published yet', async () => {
     const heuristic = await new HeuristicBrain('Bot Alfa').pickMove(summary, moves);
     const local = new LayaBrain({

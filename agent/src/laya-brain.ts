@@ -93,6 +93,12 @@ export class LayaBrain implements MoveBrain {
         console.warn(`[BRAIN] Laya picked ${choice} which is not a legal move — using heuristic`);
         return heuristic();
       }
+      const stationary = match.velocity.x === 0 && match.velocity.y === 0;
+      const hasMotion = moves.some((move) => move.velocity.x !== 0 || move.velocity.y !== 0);
+      if (stationary && hasMotion) {
+        console.warn('[BRAIN] Laya picked standstill — using heuristic');
+        return heuristic();
+      }
       return match;
     } catch (err) {
       console.warn('[BRAIN] Laya call failed — using heuristic:', errText(err));

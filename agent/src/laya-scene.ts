@@ -8,7 +8,7 @@
  *
  * The model matches short labels. It does not rank "+1.3" above "-1.0", so
  * every option says what it does in the race: `best`, `with race`, `brake`,
- * `too fast`, `wrong way`, `stop`, `grass`, `back`, or `illegal`. Gear,
+ * `too fast`, `wrong way`, `idle`, `grass`, `back`, or `illegal`. Gear,
  * runway, and the next bend are written beside those words.
  */
 import {
@@ -351,8 +351,8 @@ export function buildLayaScene(
       } else if (option.gear < currentGear) head = 'brake';
       const gate = option.gate ? ' gate' : '';
       detail = `${head}${gate} ${velocityText} g${option.gear} r${option.clearAhead}`;
-    } else if (option.bucket === 'wrong') detail = `wrong way ${velocityText}`;
-    else detail = `stop ${velocityText}`;
+    }     else if (option.bucket === 'wrong') detail = `wrong way ${velocityText}`;
+    else detail = `idle ${velocityText}`;
     return {
       label: option.label,
       dx: option.dx,
@@ -387,7 +387,7 @@ export function buildLayaScene(
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. aim is velocity vs dir. bend is the next turn. pace is the gear to hold. line is cells off the racing line. Option: velocity, g gear, r asphalt ahead. Pick best. with race follows. brake slows. too fast cannot stop. gate is checkpoint or finish. Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 coast. Never pick wrong way, stop, or illegal. Avoid grass. Off asphalt, pick back.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Shed one gear per turn; brake when bend is inside stopDist. y grows down. dir is the circuit direction. aim is velocity vs dir. bend is the next turn. pace is the gear to hold. line is cells off the racing line. Option: velocity, g gear, r asphalt ahead. Pick best. with race follows. brake slows. too fast cannot stop. gate is checkpoint or finish. Grid: . grass, # asphalt, F finish, C checkpoint, @ you, A other, 1/2/3 coast. Never pick wrong way, idle, or illegal. Avoid grass. Off asphalt, pick back.';
 
 /** JSON body posted to Ollaya `/api/decide`. */
 export function layaDecideBody(scene: LayaScene, model: string) {
