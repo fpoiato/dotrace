@@ -35,11 +35,9 @@ describe('laya scene', () => {
     const grid = String(scene.state.grid);
     expect(grid).toContain('@');
     expect(grid).toContain('A');
-    expect(scene.state.coast).toEqual([
-      expect.objectContaining({ k: 1, x: 18, y: 28 }),
-      expect.objectContaining({ k: 2, x: 24, y: 28 }),
-      expect.objectContaining({ k: 3, x: 30, y: 28 }),
-    ]);
+    expect(scene.state.coast).toContain('1 18,28 ');
+    expect(scene.state.coast).toContain('2 24,28 ');
+    expect(scene.state.coast).toContain('3 30,28 ');
   });
 
   it('offers all nine gear changes and marks gear 7 as illegal', () => {
@@ -54,7 +52,7 @@ describe('laya scene', () => {
     expect(parseMoveLabel('nope')).toBeNull();
     expect(faster?.detail).toBe('illegal gear');
     expect(scene.options.some((option) => option.detail.startsWith('back'))).toBe(false);
-    expect(scene.options.some((option) => option.detail === 'best')).toBe(true);
+    expect(scene.options.some((option) => option.detail.startsWith('best '))).toBe(true);
   });
 
   it('fits the laya:en context, questions included', () => {
@@ -70,6 +68,9 @@ describe('laya scene', () => {
     me.position = { x: 42, y: 6 };
     me.velocity = { x: 0, y: 0 };
     me.isOffTrack = false;
+    scenes.push(buildLayaScene(me, state, interlagos));
+    me.position = { x: 30, y: 8 };
+    me.velocity = { x: -5, y: 0 };
     scenes.push(buildLayaScene(me, state, interlagos));
 
     for (const scene of scenes) {
@@ -93,6 +94,7 @@ describe('laya scene', () => {
     const back = scene.options.filter((option) => option.detail.startsWith('back '));
     expect(back).toHaveLength(1);
     expect(steps(back[0]?.detail)).toBeLessThanOrEqual(steps(toward?.detail));
+    expect(back[0]?.detail).toMatch(/^back \d+ -?\d+,-?\d+$/);
   });
 
   it('names the circuit direction on the Interlagos grid', () => {
@@ -103,13 +105,21 @@ describe('laya scene', () => {
     const scene = buildLayaScene(me, state, interlagos);
     expect(scene.state.kind).toBe('vector race');
     expect(String(scene.state.dir).startsWith('-')).toBe(true);
-    const best = scene.options.find((option) => option.detail === 'best');
+    expect(scene.state.aim).toBe('stopped');
+    expect(scene.state.bend).toEqual(expect.any(String));
+    expect(scene.state.pace).toEqual(expect.any(Number));
+    expect(scene.state.line).toEqual(expect.any(Number));
+    expect(scene.state.stopDist).toBe(0);
+    const best = scene.options.find((option) => option.detail.startsWith('best '));
     expect(best?.velocity.x).toBeLessThan(0);
+    expect(best?.detail).toMatch(/^best( gate)? -?\d+,-?\d+ g\d+ r\d+$/);
     const right = scene.options.find((option) => option.label === moveLabel(1, 0));
-    expect(right?.detail).toBe('wrong way');
+    expect(right?.detail.startsWith('wrong way')).toBe(true);
     const body = layaDecideBody(scene, 'laya');
     expect(body.questions.move.instructions).toContain('Vector race');
     expect(body.questions.move.instructions).toContain('dir is the circuit direction');
+    expect(body.questions.move.instructions).toContain('stopDist');
+    expect(body.questions.move.instructions).toContain('Shed one gear per turn');
   });
 
   it('calls the step back to the asphalt when the car is stuck off Interlagos', () => {
@@ -126,6 +136,23 @@ describe('laya scene', () => {
     expect(back).toBeDefined();
     expect(stopped?.detail.startsWith('back')).toBe(false);
     expect(steps(back?.detail)).toBeLessThan(steps(stopped?.detail));
+    expect(stopped?.detail).toMatch(/^away \d+ 0,0$/);
+  });
+
+  it('brakes before the Interlagos left kink when gear cannot stop in time', () => {
+    const interlagos = getTrackById('interlagos')!;
+    const { me, state } = race();
+    me.position = { x: 30, y: 8 };
+    me.velocity = { x: -5, y: 0 };
+    const scene = buildLayaScene(me, state, interlagos);
+    const best = scene.options.find((option) => option.detail.startsWith('best '));
+    const held = scene.options.find((option) => option.label === moveLabel(0, 0));
+    expect(scene.state.stopDist).toBe(15);
+    expect(String(scene.state.bend)).not.toBe('straight');
+    expect(best).toBeDefined();
+    expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeLessThan(5);
+    expect(held?.detail.startsWith('best')).toBe(false);
+    expect(held?.detail.startsWith('too fast') || held?.detail.startsWith('with race')).toBe(true);
   });
 });
 

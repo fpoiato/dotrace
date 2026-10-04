@@ -151,6 +151,8 @@ export interface TrackSituation {
   tileUnderCar: string;
   /** How many densified cells until the line bends ≥ ~25°. */
   cellsToCorner: number | null;
+  /** Direction of that bend. Null on a straight. */
+  cornerTurn: 'left' | 'right' | 'hairpin' | null;
   /** Soft max gear from asphalt look-ahead along the race heading. */
   suggestedMaxGear: number;
   /** Upcoming racing-line samples ahead of the car. */
@@ -200,6 +202,7 @@ export function describeTrackSituation(
   if (!goals.length) cellsToGoal = 0;
 
   let cellsToCorner: number | null = null;
+  let cornerTurn: TrackSituation['cornerTurn'] = null;
   const ahead: TrackSituation['ahead'] = [];
   const sampleAt = [3, 6, 10, 16, 24];
   let prevHeading = raceHeading;
@@ -208,6 +211,7 @@ export function describeTrackSituation(
     const turn = turnLabel(prevHeading, h);
     if (cellsToCorner === null && turn !== 'straight') {
       cellsToCorner = step;
+      cornerTurn = turn;
     }
     prevHeading = h;
   }
@@ -259,6 +263,7 @@ export function describeTrackSituation(
     ),
     tileUnderCar: getTileAt(track, position.x, position.y) ?? 'void',
     cellsToCorner,
+    cornerTurn,
     suggestedMaxGear,
     ahead,
   };
