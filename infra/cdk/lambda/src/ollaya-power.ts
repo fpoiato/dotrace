@@ -2,6 +2,9 @@
  * Start the Ollaya EC2 when a room has players, and stop it after the room
  * has been empty for a few minutes. The public IP changes on every start, so
  * the current base URL is published to SSM for the AI player Lambda.
+ *
+ * Temporary copy. The shared controller lives in fpoiato/laya-host (`LayaPower`).
+ * This function remains until the pipeline detaches the host from this stack.
  */
 import {
   DescribeInstancesCommand,
