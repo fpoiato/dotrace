@@ -287,9 +287,8 @@ export class RoomService {
   }
 
   /**
-   * Ask the server to spawn an AI pilot into this room. The AI joins through
-   * the normal player flow and is auto-approved server-side, so it shows up
-   * via the usual PLAYER_APPROVED broadcast.
+   * Add an AI seat. The server approves it immediately and does not open a
+   * socket. The HTTP reply and the PLAYER_APPROVED push both land here.
    * @param brain 'laya' = Bot (Ollaya), 'heuristic' = local planner, 'bedrock' = IA (Nova Micro)
    * @param difficulty easy | medium | hard | pro
    */
@@ -300,7 +299,24 @@ export class RoomService {
   ): Promise<void> {
     const room = this.room;
     if (!room?.isHost) return;
-    await this.api.postAction('SPAWN_AI_PLAYER', { nickname, brain, difficulty }, room.roomCode);
+    const response = await this.api.postAction<Player>(
+      'SPAWN_AI_PLAYER',
+      { nickname, brain, difficulty },
+      room.roomCode
+    );
+    if (response.action !== 'PLAYER_APPROVED' || !response.payload?.connectionId) {
+      throw new Error('AI player was not added');
+    }
+    this.addApproved(response.payload);
+  }
+
+  private addApproved(player: Player): void {
+    this.playersSubject.next(
+      [
+        ...this.playersSubject.value.filter((existing) => existing.connectionId !== player.connectionId),
+        this.normalize(player),
+      ].sort((a, b) => a.joinOrder - b.joinOrder)
+    );
   }
 
   approvePlayer(connectionId: string): void {

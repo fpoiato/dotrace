@@ -201,7 +201,8 @@ export type ClientAction =
   | 'FORWARD_TO_HOST'
   | 'SUBMIT_RACE_STATS'
   | 'GET_TOP10'
-  | 'SPAWN_AI_PLAYER';
+  | 'SPAWN_AI_PLAYER'
+  | 'PLAY_AI_TURN';
 
 export type RelayEventType =
   | 'STATE_SYNC'
@@ -232,7 +233,8 @@ export type ServerEvent =
   | 'RACE_STATS_SAVED'
   | 'RELAY_ACK'
   | 'FORWARD_ACK'
-  | 'AI_PLAYER_SPAWNING';
+  | 'AI_PLAYER_SPAWNING'
+  | 'AI_MOVE';
 
 export interface WsEnvelope<T = unknown> {
   action: ClientAction | ServerEvent | 'message';
@@ -388,6 +390,18 @@ export function canPlayerMove(state: GameState, playerId: string, now = Date.now
     return !isPlayerStopped(player, now);
   }
   return state.turnOrder[state.currentTurnIndex] === playerId;
+}
+
+/**
+ * Idempotency key for one on-demand AI decision. A retry of the same board
+ * position reuses the saved vector; a rejected move appends ":2" on the client.
+ */
+export function aiTurnToken(state: GameState, player: Player): string {
+  if (isTimedMode(state)) {
+    const velocity = player.velocity;
+    return `${player.connectionId}:${player.lap}:${player.position.x},${player.position.y}:${velocity.x},${velocity.y}:${player.stopUntil ?? 0}`;
+  }
+  return `${state.round}:${state.currentTurnIndex}:${player.connectionId}`;
 }
 
 /** TIMED mode: player is serving a grass-cut stop penalty. */

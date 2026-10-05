@@ -138,10 +138,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
     this.aiError = false;
     try {
       await this.room.spawnAiPlayer(nickname, brain, this.selectedDifficulty);
-      // The AI joins and is auto-approved server-side; roster updates arrive
-      // via the PLAYER_APPROVED broadcast. Keep the button locked briefly so
-      // a double tap does not spawn two pilots with the same name.
-      setTimeout(() => (this.aiSpawning = false), 3000);
+      this.aiSpawning = false;
     } catch (err) {
       console.warn('AI spawn failed', err);
       this.aiError = true;

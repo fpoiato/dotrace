@@ -1,11 +1,13 @@
 /**
- * AI player runner — one invocation races one AI pilot in one room.
+ * AI player runner.
  *
- * Invoked asynchronously by SPAWN_AI_PLAYER (or by a planned self-handoff).
- * Holds the WebSocket for up to ~10 minutes, then rotates: write a handoff
- * marker, close the socket without PLAYER_LEFT, and async-invoke a successor
- * that REJOIN_ROOMs as the same seat. Keeps races under the 15 min Lambda cap
- * without dropping the car.
+ * New pilots are seats, not sockets. The host posts PLAY_AI_TURN and this
+ * function handles `action: PLAY_TURN`: read the seat, claim a short lease,
+ * run the existing brain, and return one velocity. A repeat of the same token
+ * returns the saved vector and does not call the model again.
+ *
+ * The socket race loop below stays for invocations that are already in flight
+ * (spawn marker + 10 min handoff). New SPAWN_AI_PLAYER calls do not start it.
  *
  * Env: WS_URL, API_URL, CONNECTIONS_TABLE, BEDROCK_MODEL_ID, BRAIN,
  * AI_HANDOFF_AFTER_MS, BEDROCK_TIMEOUT_MS, MOVE_DELAY_MS (optional override).
@@ -23,9 +25,21 @@ import {
   difficultyFromUnknown,
 } from '../../../../agent/src/difficulty';
 import { GameSession } from '../../../../agent/src/session';
+import { buildBoardSummary, listAnnotatedMoves } from '../../../../agent/src/tools';
 import { HttpClient } from '../../../../bot/src/http-client';
 import { WsClient } from '../../../../bot/src/ws-client';
-import { putAiHandoffMarker } from './lib/ddb';
+import { getTrackById } from '../../../../shared/tracks';
+import { GameState } from '../../../../shared/ws-types';
+import {
+  aiSeatId,
+  claimAiSeat,
+  classifySeatRead,
+  ConnectionRecord,
+  getConnection,
+  putAiHandoffMarker,
+  releaseSeat,
+  saveSeatMove,
+} from './lib/ddb';
 
 /** Planned rotation — well under the 15 min hard cap. */
 const DEFAULT_HANDOFF_AFTER_MS = 10 * 60 * 1000;
@@ -40,7 +54,18 @@ export interface SpawnAiPlayerEvent {
   /** Set on planned rotation so the successor rejoins the same seat. */
   previousConnectionId?: string;
   handoffGeneration?: number;
+  action?: undefined;
 }
+
+export interface PlayTurnEvent {
+  action: 'PLAY_TURN';
+  roomCode: string;
+  nickname: string;
+  token: string;
+  state: GameState;
+}
+
+const PLAY_TURN_POLL_MS = 12_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -184,7 +209,94 @@ async function performHandoff(event: SpawnAiPlayerEvent, session: GameSession): 
   });
 }
 
-export const handler = async (event: SpawnAiPlayerEvent): Promise<void> => {
+function cachedVelocity(seat: ConnectionRecord | undefined, token: string): { x: number; y: number } | null {
+  if (classifySeatRead(seat, token) !== 'cached' || !seat) return null;
+  return { x: seat.lastVx as number, y: seat.lastVy as number };
+}
+
+async function pollCachedMove(
+  connectionId: string,
+  token: string,
+  budgetMs: number
+): Promise<{ x: number; y: number } | null> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    await sleep(250);
+    const hit = cachedVelocity(await getConnection(connectionId), token);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function computeMove(
+  seat: ConnectionRecord,
+  state: GameState,
+  nickname: string
+): Promise<{ x: number; y: number }> {
+  const track = getTrackById(state.trackId);
+  if (!track) throw new Error(`Unknown track ${state.trackId}`);
+  const player = state.players.find(
+    (candidate) => candidate.nickname.trim().toLowerCase() === nickname.trim().toLowerCase()
+  );
+  if (!player) throw new Error('AI player missing from board');
+  const moves = listAnnotatedMoves(player, state, track);
+  if (moves.length === 0) throw new Error('No legal moves');
+  const difficulty = difficultyFromUnknown(seat.difficulty);
+  const brain = buildBrain(
+    { roomCode: seat.roomCode, nickname: seat.nickname, brain: seat.brain, difficulty },
+    difficulty
+  );
+  const chosen = await brain.pickMove(buildBoardSummary(player, state, track), moves);
+  return { x: chosen.velocity.x, y: chosen.velocity.y };
+}
+
+export async function playTurn(event: PlayTurnEvent): Promise<{ velocity: { x: number; y: number } }> {
+  if (!event?.roomCode || !event.nickname || !event.token || !event.state) {
+    throw new Error('roomCode, nickname, token, and state are required');
+  }
+  const id = aiSeatId(event.roomCode, event.nickname);
+  const seat = await getConnection(id);
+  if (!seat || seat.roomCode !== event.roomCode.toUpperCase()) {
+    throw new Error('Unknown AI seat');
+  }
+  const ready = cachedVelocity(seat, event.token);
+  if (ready) return { velocity: ready };
+
+  const claim = await claimAiSeat(id, event.token);
+  if (claim === 'cached') {
+    const again = cachedVelocity(await getConnection(id), event.token);
+    if (again) return { velocity: again };
+    throw new Error('AI seat cache missing');
+  }
+  if (claim === 'busy') {
+    const waited = await pollCachedMove(id, event.token, PLAY_TURN_POLL_MS);
+    if (waited) return { velocity: waited };
+    throw new Error('AI seat busy');
+  }
+
+  try {
+    const velocity = await computeMove(seat, event.state, event.nickname);
+    await saveSeatMove(id, event.token, velocity);
+    console.log(
+      `[AI] turn room=${seat.roomCode} nick=${seat.nickname} velocity=(${velocity.x},${velocity.y})`
+    );
+    return { velocity };
+  } catch (err) {
+    await releaseSeat(id, event.token);
+    throw err;
+  }
+}
+
+export const handler = async (
+  event: SpawnAiPlayerEvent | PlayTurnEvent
+): Promise<{ velocity: { x: number; y: number } } | void> => {
+  if (event && (event as PlayTurnEvent).action === 'PLAY_TURN') {
+    return playTurn(event as PlayTurnEvent);
+  }
+  return runSocketRace(event as SpawnAiPlayerEvent);
+};
+
+async function runSocketRace(event: SpawnAiPlayerEvent): Promise<void> {
   const wsUrl = process.env.WS_URL;
   const apiUrl = process.env.API_URL;
   if (!wsUrl || !apiUrl) {
