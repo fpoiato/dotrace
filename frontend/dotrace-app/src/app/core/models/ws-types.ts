@@ -934,6 +934,51 @@ export function buildSessionRanking(state: GameState): SessionPlayerStats[] {
   return rows;
 }
 
+/**
+ * Point every reference of `oldConnectionId` at `newConnectionId`.
+ * Used when a phone reconnects or an AI Lambda rotates mid-race.
+ */
+export function remapPlayerConnection(
+  state: GameState,
+  oldConnectionId: string,
+  newConnectionId: string
+): void {
+  if (!oldConnectionId || oldConnectionId === newConnectionId) return;
+  state.turnOrder = state.turnOrder.map((id) => (id === oldConnectionId ? newConnectionId : id));
+  if (state.diceRolls[oldConnectionId] !== undefined) {
+    state.diceRolls[newConnectionId] = state.diceRolls[oldConnectionId];
+    delete state.diceRolls[oldConnectionId];
+  }
+  state.podium = state.podium.map((entry) =>
+    entry.connectionId === oldConnectionId ? { ...entry, connectionId: newConnectionId } : entry
+  );
+  remapSessionStatsConnectionId(state, oldConnectionId, newConnectionId);
+  remapReplayLogConnectionId(state, oldConnectionId, newConnectionId);
+  if (state.hostId === oldConnectionId) state.hostId = newConnectionId;
+  for (const player of state.players) {
+    if (player.connectionId === oldConnectionId) player.connectionId = newConnectionId;
+  }
+}
+
+/**
+ * After an AI Lambda handoff the board can still name the old socket.
+ * If `newConnectionId` is unknown and `nickname` matches a car, retarget that car.
+ * Returns true when a retarget happened.
+ */
+export function adoptNicknameConnection(
+  state: GameState,
+  nickname: string,
+  newConnectionId: string
+): boolean {
+  const name = nickname.trim();
+  if (!name || !newConnectionId) return false;
+  if (state.players.some((player) => player.connectionId === newConnectionId)) return false;
+  const existing = state.players.find((player) => player.nickname === name);
+  if (!existing) return false;
+  remapPlayerConnection(state, existing.connectionId, newConnectionId);
+  return true;
+}
+
 /** Remap session-stat keys when a player reconnects with a new connection id. */
 export function remapSessionStatsConnectionId(
   state: GameState,

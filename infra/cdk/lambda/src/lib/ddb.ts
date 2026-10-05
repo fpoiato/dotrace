@@ -260,18 +260,24 @@ export async function sendToConnection(
   message: unknown
 ): Promise<boolean> {
   const client = getApiClient();
+  const data = Buffer.from(JSON.stringify(message));
   try {
     await client.send(
       new PostToConnectionCommand({
         ConnectionId: connectionId,
-        Data: Buffer.from(JSON.stringify(message)),
+        Data: data,
       })
     );
     return true;
   } catch (err: unknown) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 410) {
+    const status = (err as { statusCode?: number; name?: string }).statusCode;
+    const name = (err as { name?: string }).name;
+    if (status === 410 || name === 'GoneException') {
       await deleteConnection(connectionId);
+    } else {
+      console.warn(
+        `[WS] send failed connection=${connectionId} status=${status ?? '?'} name=${name ?? '?'} bytes=${data.length}`
+      );
     }
     return false;
   }
