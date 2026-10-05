@@ -1,5 +1,5 @@
-<div class="mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-y-auto px-4 py-6">
-  <div class="mb-6 flex items-center justify-between">
+<div class="mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden px-4 py-4">
+  <div class="mb-3 flex shrink-0 items-center justify-between">
     <div>
       <h1 class="text-3xl font-bold text-orange-400">{{ 'app.title' | translate }}</h1>
       <p class="mt-1 text-sm text-slate-400">{{ 'app.subtitle' | translate }}</p>
@@ -7,7 +7,7 @@
     <app-language-toggle />
   </div>
 
-  <div class="flex flex-1 flex-col justify-center gap-4">
+  <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
     <label class="block">
       <span class="mb-2 block text-sm font-medium text-slate-300">{{ 'landing.nickname' | translate }}</span>
       <input
@@ -76,8 +76,8 @@
     </button>
 
     <!-- Global Top 10 (nickname-based, persisted across sessions) -->
-    <section class="mt-6 rounded-2xl border border-slate-700 bg-slate-900/80">
-      <div class="border-b border-slate-700 px-4 py-3 text-center">
+    <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/80">
+      <div class="shrink-0 border-b border-slate-700 px-4 py-2 text-center">
         <h2 class="text-sm font-bold uppercase tracking-wide text-orange-300">
           {{ 'landing.top10' | translate }}
         </h2>
@@ -91,7 +91,7 @@
           @if (top10.length === 0) {
             <p class="px-4 py-6 text-center text-sm text-slate-500">{{ 'landing.top10Empty' | translate }}</p>
           } @else {
-            <div class="overflow-x-auto">
+            <div class="min-h-0 flex-1 overflow-auto">
               <table class="w-full text-sm">
                 <thead>
                   <tr class="border-b border-slate-800 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
