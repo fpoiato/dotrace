@@ -1,4 +1,13 @@
-import { handoffMarkerId, isAiMarker, isGhost, isHandoffMarker, isLiveSocket } from '../lambda/src/lib/ddb';
+import {
+  aiSeatId,
+  classifySeatRead,
+  handoffMarkerId,
+  isAiMarker,
+  isAiSeat,
+  isGhost,
+  isHandoffMarker,
+  isLiveSocket,
+} from '../lambda/src/lib/ddb';
 import { stopStillValid } from '../lambda/src/ollaya-power';
 
 describe('AI handoff markers', () => {
@@ -11,6 +20,24 @@ describe('AI handoff markers', () => {
   });
 });
 
+describe('AI seats', () => {
+  it('keys a seat by room and nickname without colliding with sockets', () => {
+    const id = aiSeatId('abcde', 'IA Nova · Pro');
+    expect(id).toBe('ai#ABCDE#ia nova · pro');
+    expect(id).toBe(aiSeatId('ABCDE', 'ia nova · pro'));
+    expect(isLiveSocket(id)).toBe(false);
+    expect(isGhost(id)).toBe(false);
+    expect(isAiMarker(id)).toBe(false);
+  });
+
+  it('treats a matching saved vector as cached and anything else as busy', () => {
+    expect(classifySeatRead({ lastToken: 'r1', lastVx: 1, lastVy: 0 }, 'r1')).toBe('cached');
+    expect(classifySeatRead({ lastToken: 'r1', lastVx: 1, lastVy: 0 }, 'r2')).toBe('busy');
+    expect(classifySeatRead({ lastToken: 'r1' }, 'r1')).toBe('busy');
+    expect(classifySeatRead(undefined, 'r1')).toBe('busy');
+  });
+});
+
 describe('Ollaya power policy', () => {
   it('counts only live sockets', () => {
     expect(isLiveSocket('conn-1')).toBe(true);
@@ -18,6 +45,9 @@ describe('Ollaya power policy', () => {
     expect(isLiveSocket('aimark#ABCDE#bot')).toBe(false);
     expect(isLiveSocket('aihand#ABCDE#bot')).toBe(false);
     expect(isLiveSocket('sys#ollaya')).toBe(false);
+    expect(isLiveSocket('ai#ABCDE#bot alfa')).toBe(false);
+    expect(isAiSeat('ai#ABCDE#bot alfa')).toBe(true);
+    expect(isAiSeat('aimark#ABCDE#bot')).toBe(false);
     expect(isGhost('ghost#x')).toBe(true);
     expect(isAiMarker('aimark#x')).toBe(true);
     expect(isHandoffMarker('aihand#x')).toBe(true);

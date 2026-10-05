@@ -23,6 +23,7 @@ import {
   pushReplayMove,
   pushTrail,
   adoptNicknameConnection,
+  aiTurnToken,
   isAiPilotNickname,
   remapPlayerConnection,
   rollDice,
@@ -51,9 +52,15 @@ export class GameEngineService implements OnDestroy {
   private messageSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Re-broadcast the board while an AI seat is the one who must move. */
+  /** Re-broadcast the board while an old socket AI is the one who must move. */
   private turnNudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly TURN_NUDGE_MS = 5_000;
+  /** On-demand AI seats already have an HTTP call in flight. */
+  private readonly aiInFlight = new Set<string>();
+  private readonly aiFollowUps = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly AI_TURN_TIMEOUT_MS = 28_000;
+  private static readonly AI_TIMED_GAP_MS = 400;
+  private static readonly AI_RETRY_MS = 1_800;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
 
@@ -242,17 +249,17 @@ export class GameEngineService implements OnDestroy {
     }
   }
 
-  private applyMove(senderId: string, vector: Vector2D): void {
+  private applyMove(senderId: string, vector: Vector2D): boolean {
     const state = this.state;
-    if (!state || state.phase !== 'GAME_ROUND') return;
+    if (!state || state.phase !== 'GAME_ROUND') return false;
 
-    if (!canPlayerMove(state, senderId)) return;
+    if (!canPlayerMove(state, senderId)) return false;
 
     const player = state.players.find((p) => p.connectionId === senderId);
-    if (!player || player.finishOrder !== undefined) return;
+    if (!player || player.finishOrder !== undefined) return false;
 
     const track = getTrackById(state.trackId);
-    if (!track) return;
+    if (!track) return false;
 
     // Strict validation: the submitted velocity must be one of the moves the
     // host itself considers legal (±1 gear rule, off-track cap, in-grid landing,
@@ -260,13 +267,13 @@ export class GameEngineService implements OnDestroy {
     const isLegal = getValidMoves(player, track, state.players, state.round).some(
       (m) => m.velocity.x === vector.x && m.velocity.y === vector.y
     );
-    if (!isLegal) return;
+    if (!isLegal) return false;
 
     const from = { ...player.position };
     const landing = landingPosition(player.position, vector);
 
     const tile = getTileAt(track, landing.x, landing.y);
-    if (tile === null) return;
+    if (tile === null) return false;
 
     const grassShortcut = isGrassShortcut(track, from, landing);
 
@@ -330,9 +337,10 @@ export class GameEngineService implements OnDestroy {
       lap: player.lap,
     });
 
-    if (this.tryEndRace(state)) return;
+    if (this.tryEndRace(state)) return true;
 
     this.afterMove(state);
+    return true;
   }
 
   private afterMove(state: GameState, meta?: Record<string, unknown>): void {
@@ -655,6 +663,7 @@ export class GameEngineService implements OnDestroy {
   private setStateAndRelay(type: RelayPayload['type'], state: GameState, meta?: Record<string, unknown>): void {
     this.emit(state);
     this.armTurnNudge(state);
+    this.maybeDriveAi(state);
     const room = this.roomService.room;
     if (!room?.isHost) return;
     const telemetry = buildRaceTelemetry(state);
@@ -677,7 +686,7 @@ export class GameEngineService implements OnDestroy {
     }
     if (!this.isHost || state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
     const seat = state.turnOrder[state.currentTurnIndex];
-    if (!seat || seat === this.myId) return;
+    if (!seat || seat === this.myId || seat.startsWith('ai#')) return;
     const current = state.players.find((player) => player.connectionId === seat);
     if (!current || !isAiPilotNickname(current.nickname)) return;
     const round = state.round;
@@ -716,6 +725,127 @@ export class GameEngineService implements OnDestroy {
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
     if (this.turnNudgeTimer) clearTimeout(this.turnNudgeTimer);
+    for (const timer of this.aiFollowUps.values()) clearTimeout(timer);
+    this.aiFollowUps.clear();
+  }
+
+  /**
+   * Ask each on-demand AI seat (`ai#…`) whose turn it is. Socket bots keep
+   * the old nudge path and are not driven from here.
+   */
+  private maybeDriveAi(state: GameState): void {
+    if (!this.isHost || state.phase !== 'GAME_ROUND') return;
+    if (isTimedMode(state)) {
+      for (const player of state.players) {
+        if (!player.connectionId.startsWith('ai#')) continue;
+        if (player.finishOrder !== undefined) continue;
+        if (canPlayerMove(state, player.connectionId)) {
+          this.requestAiMove(player);
+          continue;
+        }
+        if (player.stopUntil !== undefined && player.stopUntil > Date.now()) {
+          const wait = player.stopUntil - Date.now() + 40;
+          this.scheduleAi(player.connectionId, wait, () => {
+            const now = this.state;
+            if (now) this.maybeDriveAi(now);
+          });
+        }
+      }
+      return;
+    }
+    const seat = state.turnOrder[state.currentTurnIndex];
+    if (!seat?.startsWith('ai#')) return;
+    const player = state.players.find((candidate) => candidate.connectionId === seat);
+    if (player) this.requestAiMove(player);
+  }
+
+  private requestAiMove(player: Player, attempt = 1): void {
+    const seatId = player.connectionId;
+    if (this.aiInFlight.has(seatId)) return;
+    const state = this.state;
+    const room = this.roomService.room;
+    if (!state || !room || !canPlayerMove(state, seatId)) return;
+    const current = state.players.find((candidate) => candidate.connectionId === seatId);
+    if (!current) return;
+    const pending = this.aiFollowUps.get(seatId);
+    if (pending) {
+      clearTimeout(pending);
+      this.aiFollowUps.delete(seatId);
+    }
+    const base = aiTurnToken(state, current);
+    const token = attempt > 1 ? `${base}:2` : base;
+    this.aiInFlight.add(seatId);
+    void this.api
+      .postAction<{ velocity?: Vector2D }>(
+        'PLAY_AI_TURN',
+        { nickname: current.nickname, token, state: this.boardForAi(state) },
+        room.roomCode,
+        GameEngineService.AI_TURN_TIMEOUT_MS
+      )
+      .then((response) => {
+        this.finishAiMove(seatId, token, response.payload?.velocity, attempt);
+      })
+      .catch((err) => {
+        console.warn('AI turn failed', err);
+        this.scheduleAi(seatId, GameEngineService.AI_RETRY_MS, () => {
+          const again = this.state?.players.find((candidate) => candidate.connectionId === seatId);
+          if (again) this.requestAiMove(again, attempt);
+        });
+      })
+      .finally(() => {
+        this.aiInFlight.delete(seatId);
+      });
+  }
+
+  private finishAiMove(
+    seatId: string,
+    token: string,
+    velocity: Vector2D | undefined,
+    attempt: number
+  ): void {
+    const latest = this.state;
+    const player = latest?.players.find((candidate) => candidate.connectionId === seatId);
+    if (!latest || !player || !velocity) return;
+    if (!Number.isInteger(velocity.x) || !Number.isInteger(velocity.y)) return;
+    if (!canPlayerMove(latest, seatId)) return;
+    const expected = aiTurnToken(latest, player);
+    if (token !== expected && token !== `${expected}:2`) return;
+    const applied = this.applyMove(seatId, velocity);
+    if (!applied) {
+      if (attempt === 1) {
+        this.scheduleAi(seatId, 0, () => {
+          const again = this.state?.players.find((candidate) => candidate.connectionId === seatId);
+          if (again) this.requestAiMove(again, 2);
+        });
+      }
+      return;
+    }
+    if (isTimedMode(this.state ?? latest)) {
+      this.scheduleAi(seatId, GameEngineService.AI_TIMED_GAP_MS, () => {
+        const now = this.state;
+        if (now) this.maybeDriveAi(now);
+      });
+    }
+  }
+
+  private boardForAi(state: GameState): GameState {
+    const copy = structuredClone(state);
+    delete copy.replayLog;
+    delete copy.sessionStats;
+    for (const player of copy.players) {
+      player.trail = player.trail?.slice(-1) ?? [];
+    }
+    return copy;
+  }
+
+  private scheduleAi(connectionId: string, delayMs: number, run: () => void): void {
+    const existing = this.aiFollowUps.get(connectionId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.aiFollowUps.delete(connectionId);
+      run();
+    }, delayMs);
+    this.aiFollowUps.set(connectionId, timer);
   }
 
   reset(): void {

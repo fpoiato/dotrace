@@ -10,6 +10,7 @@ import {
   createLobbyPlayer,
   gearOf,
   getValidMoves,
+  aiTurnToken,
   canPlayerMove,
   isGameOver,
   isValidGearChange,
@@ -190,6 +191,20 @@ describe('turn order', () => {
     const state = makeState();
     state.currentTurnIndex = 2;
     expect(nextActiveTurnIndex(state)).toBe(0);
+  });
+
+  it('builds a stable AI turn token from the round and seat', () => {
+    const state = makeState();
+    state.round = 4;
+    state.currentTurnIndex = 1;
+    const seat = state.players[1];
+    expect(aiTurnToken(state, seat)).toBe('4:1:b');
+    state.gameMode = 'TIMED';
+    seat.lap = 2;
+    seat.position = { x: 3, y: 1 };
+    seat.velocity = { x: 2, y: 0 };
+    seat.stopUntil = 50;
+    expect(aiTurnToken(state, seat)).toBe('b:2:3,1:2,0:50');
   });
 });
 

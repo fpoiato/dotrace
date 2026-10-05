@@ -24,6 +24,16 @@ export interface ConnectionRecord {
   ttl: number;
   previousConnectionId?: string;
   wasHost?: boolean;
+  /** On-demand AI seat. Ignored on live sockets. */
+  brain?: 'bedrock' | 'heuristic' | 'laya';
+  difficulty?: 'easy' | 'medium' | 'hard' | 'pro';
+  /** Last accepted turn token and the vector it produced. */
+  lastToken?: string;
+  lastVx?: number;
+  lastVy?: number;
+  /** Epoch ms while a model call owns this seat. */
+  computingUntil?: number;
+  computingToken?: string;
 }
 
 const GHOST_PREFIX = 'ghost#';
@@ -37,6 +47,10 @@ const AI_MARKER_TTL_SECONDS = 300;
 const HANDOFF_PREFIX = 'aihand#';
 /** Planned Lambda rotation: skip PLAYER_LEFT until the successor rejoins. */
 const HANDOFF_TTL_SECONDS = 90;
+
+const AI_SEAT_PREFIX = 'ai#';
+/** How long a PLAY_TURN call may hold the seat before another caller may start. */
+export const AI_SEAT_LEASE_MS = 20_000;
 
 const PLAYER_COLORS = [
   '#EF4444',
@@ -65,16 +79,42 @@ export function isHandoffMarker(connectionId: string): boolean {
   return connectionId.startsWith(HANDOFF_PREFIX);
 }
 
+/** Seat row for an on-demand AI pilot. Not a WebSocket — never PostToConnection. */
+export function isAiSeat(connectionId: string): boolean {
+  return connectionId.startsWith(AI_SEAT_PREFIX);
+}
+
+export function aiSeatId(roomCode: string, nickname: string): string {
+  return `${AI_SEAT_PREFIX}${roomCode.toUpperCase()}#${nickname.trim().toLowerCase()}`;
+}
+
 const OLLAYA_CONTROL_ID = 'sys#ollaya';
 
-/** Websocket rows. Ghosts, AI markers, handoff markers, and the power record are not players. */
+/** Websocket rows. Ghosts, markers, AI seats, and the power record are not sockets. */
 export function isLiveSocket(connectionId: string): boolean {
   return (
     !isGhost(connectionId) &&
     !isAiMarker(connectionId) &&
     !isHandoffMarker(connectionId) &&
+    !isAiSeat(connectionId) &&
     !connectionId.startsWith('sys#')
   );
+}
+
+/** After a lost claim, the same token is a finished move; anything else is in flight. */
+export function classifySeatRead(
+  seat: Pick<ConnectionRecord, 'lastToken' | 'lastVx' | 'lastVy'> | undefined,
+  token: string
+): 'cached' | 'busy' {
+  if (
+    seat &&
+    seat.lastToken === token &&
+    typeof seat.lastVx === 'number' &&
+    typeof seat.lastVy === 'number'
+  ) {
+    return 'cached';
+  }
+  return 'busy';
 }
 
 export interface OllayaControl {
@@ -221,7 +261,7 @@ export async function deleteConnection(connectionId: string): Promise<void> {
   await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { connectionId } }));
 }
 
-export async function getRoomConnections(roomCode: string): Promise<ConnectionRecord[]> {
+async function queryRoomItems(roomCode: string): Promise<ConnectionRecord[]> {
   const result = await ddb.send(
     new QueryCommand({
       TableName: TABLE,
@@ -230,12 +270,113 @@ export async function getRoomConnections(roomCode: string): Promise<ConnectionRe
       ExpressionAttributeValues: { ':roomCode': roomCode },
     })
   );
-  return ((result.Items ?? []) as ConnectionRecord[]).filter(
-    (c) =>
-      !isGhost(c.connectionId) &&
-      !isAiMarker(c.connectionId) &&
-      !isHandoffMarker(c.connectionId)
+  return (result.Items ?? []) as ConnectionRecord[];
+}
+
+function isRoomBookkeeping(connectionId: string): boolean {
+  return isGhost(connectionId) || isAiMarker(connectionId) || isHandoffMarker(connectionId);
+}
+
+/** Live sockets in the room. AI seats are excluded so broadcasts never PostToConnection them. */
+export async function getRoomConnections(roomCode: string): Promise<ConnectionRecord[]> {
+  return (await queryRoomItems(roomCode)).filter(
+    (c) => !isRoomBookkeeping(c.connectionId) && !isAiSeat(c.connectionId)
   );
+}
+
+export async function listAiSeats(roomCode: string): Promise<ConnectionRecord[]> {
+  return (await queryRoomItems(roomCode)).filter((c) => isAiSeat(c.connectionId));
+}
+
+/** Approved sockets plus AI seats — the roster a client should display. */
+export async function listApprovedRoster(roomCode: string): Promise<ConnectionRecord[]> {
+  return (await queryRoomItems(roomCode)).filter(
+    (c) =>
+      c.status === 'approved' &&
+      !isRoomBookkeeping(c.connectionId) &&
+      (isAiSeat(c.connectionId) || isLiveSocket(c.connectionId))
+  );
+}
+
+/** Sockets (pending or approved) plus AI seats. Markers and ghosts do not take a slot. */
+export async function countRoomOccupants(roomCode: string): Promise<number> {
+  return (await queryRoomItems(roomCode)).filter(
+    (c) => !isRoomBookkeeping(c.connectionId) && !c.connectionId.startsWith('sys#')
+  ).length;
+}
+
+export type SeatClaim = 'claimed' | 'cached' | 'busy';
+
+function isConditionalCheckFailed(err: unknown): boolean {
+  return (err as { name?: string }).name === 'ConditionalCheckFailedException';
+}
+
+/**
+ * Take the seat for this token. A matching finished token is `cached`.
+ * An in-date lease held by anyone (including this same token) is `busy`.
+ */
+export async function claimAiSeat(
+  connectionId: string,
+  token: string,
+  now = Date.now()
+): Promise<SeatClaim> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { connectionId },
+        ConditionExpression:
+          '(attribute_not_exists(lastToken) OR lastToken <> :token) AND (attribute_not_exists(computingUntil) OR computingUntil < :now)',
+        UpdateExpression: 'SET computingUntil = :until, computingToken = :token',
+        ExpressionAttributeValues: {
+          ':token': token,
+          ':now': now,
+          ':until': now + AI_SEAT_LEASE_MS,
+        },
+      })
+    );
+    return 'claimed';
+  } catch (err) {
+    if (!isConditionalCheckFailed(err)) throw err;
+    return classifySeatRead(await getConnection(connectionId), token);
+  }
+}
+
+export async function saveSeatMove(
+  connectionId: string,
+  token: string,
+  velocity: { x: number; y: number }
+): Promise<void> {
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { connectionId },
+      ConditionExpression: 'computingToken = :token',
+      UpdateExpression:
+        'SET lastToken = :token, lastVx = :vx, lastVy = :vy REMOVE computingUntil, computingToken',
+      ExpressionAttributeValues: {
+        ':token': token,
+        ':vx': velocity.x,
+        ':vy': velocity.y,
+      },
+    })
+  );
+}
+
+export async function releaseSeat(connectionId: string, token: string): Promise<void> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { connectionId },
+        ConditionExpression: 'computingToken = :token',
+        UpdateExpression: 'REMOVE computingUntil, computingToken',
+        ExpressionAttributeValues: { ':token': token },
+      })
+    );
+  } catch (err) {
+    if (!isConditionalCheckFailed(err)) throw err;
+  }
 }
 
 export async function getApprovedConnections(roomCode: string): Promise<ConnectionRecord[]> {
@@ -363,19 +504,22 @@ export async function roomCodeExists(roomCode: string): Promise<boolean> {
 }
 
 export async function nicknameTaken(roomCode: string, nickname: string): Promise<boolean> {
-  const connections = await getRoomConnections(roomCode);
-  return connections.some(
-    (c) => c.nickname.toLowerCase() === nickname.toLowerCase()
+  const needle = nickname.toLowerCase();
+  const rows = await queryRoomItems(roomCode);
+  return rows.some(
+    (c) => !isRoomBookkeeping(c.connectionId) && c.nickname.toLowerCase() === needle
   );
 }
 
 export async function nextPlayerColor(roomCode: string): Promise<string> {
-  const connections = await getRoomConnections(roomCode);
-  const used = new Set(connections.map((c) => c.color));
+  const rows = (await queryRoomItems(roomCode)).filter(
+    (c) => !isRoomBookkeeping(c.connectionId) && !c.connectionId.startsWith('sys#')
+  );
+  const used = new Set(rows.map((c) => c.color));
   for (const color of PLAYER_COLORS) {
     if (!used.has(color)) return color;
   }
-  return PLAYER_COLORS[connections.length % PLAYER_COLORS.length];
+  return PLAYER_COLORS[rows.length % PLAYER_COLORS.length];
 }
 
 export async function saveGhost(record: ConnectionRecord): Promise<void> {

@@ -25,7 +25,8 @@ export class ApiService {
   async postAction<T = unknown>(
     action: ClientAction,
     payload: unknown,
-    roomCode?: string
+    roomCode?: string,
+    timeoutMs = 15_000
   ): Promise<WsEnvelope<T>> {
     await this.ws.ensureConnected();
     const connectionId = this.ws.connectionId;
@@ -34,9 +35,10 @@ export class ApiService {
     }
 
     try {
-      return await this.postRaw<T>(action, payload, roomCode, connectionId);
+      return await this.postRaw<T>(action, payload, roomCode, connectionId, timeoutMs);
     } catch (err) {
-      if (action === 'REJOIN_ROOM') throw err;
+      // A slow model is not a dead socket. The turn token makes a later retry safe.
+      if (action === 'REJOIN_ROOM' || action === 'PLAY_AI_TURN') throw err;
 
       await this.ws.forceReconnect();
       // RoomService listens to reconnected$ and rejoins; wait for that before retrying.
@@ -47,7 +49,7 @@ export class ApiService {
       }
       const freshId = this.ws.connectionId;
       if (!freshId) throw err;
-      return await this.postRaw<T>(action, payload, roomCode, freshId);
+      return await this.postRaw<T>(action, payload, roomCode, freshId, timeoutMs);
     }
   }
 
@@ -59,7 +61,8 @@ export class ApiService {
     action: ClientAction,
     payload: unknown,
     roomCode: string | undefined,
-    connectionId: string
+    connectionId: string,
+    timeoutMs = 15_000
   ): Promise<WsEnvelope<T>> {
     if (!this.baseUrl) {
       throw new Error('HTTP API URL not configured');
@@ -77,7 +80,7 @@ export class ApiService {
     const response = await firstValueFrom(
       this.http
         .post<WsEnvelope<T>>(`${this.baseUrl}/actions`, body, { headers })
-        .pipe(timeout(15_000))
+        .pipe(timeout(timeoutMs))
     );
     if (response?.action === 'ERROR') {
       const message =

@@ -1,20 +1,21 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import {
+  aiSeatId,
   broadcastToApproved,
   broadcastToRoom,
   consumeAiMarker,
+  countRoomOccupants,
   deleteConnection,
   deleteGhost,
   generateRoomCode,
-  getApprovedConnections,
   getConnection,
   getGhost,
   getHostConnection,
   getRoomConnections,
+  listApprovedRoster,
   MAX_PLAYERS,
   nextPlayerColor,
   nicknameTaken,
-  putAiMarker,
   putConnection,
   roomCodeExists,
   sendToConnection,
@@ -24,6 +25,7 @@ import {
 import { applyRaceStatDeltas, getTop10, RaceStatDelta } from './leaderboard';
 import { requestOllayaPower } from './ollaya-control';
 import { WsEnvelope } from './response';
+import { GameState } from '../../../../../shared/ws-types';
 
 const PLAYER_COLOR_HOST = '#EF4444';
 
@@ -40,9 +42,23 @@ async function isHost(connectionId: string): Promise<boolean> {
 }
 
 async function nextJoinOrder(roomCode: string): Promise<number> {
-  const approved = await getApprovedConnections(roomCode);
+  const approved = await listApprovedRoster(roomCode);
   if (approved.length === 0) return 0;
   return Math.max(...approved.map((c) => c.joinOrder)) + 1;
+}
+
+/** Drop the replay and long pen trails. The brain only needs the live board. */
+function boardForBrain(state: GameState): GameState {
+  const players = Array.isArray(state.players)
+    ? state.players.map((player) => ({
+        ...player,
+        trail: Array.isArray(player.trail) ? player.trail.slice(-1) : [],
+      }))
+    : [];
+  const copy: GameState = { ...state, players };
+  delete copy.replayLog;
+  delete copy.sessionStats;
+  return copy;
 }
 
 /** Deliver a reply to the acting connection over WebSocket (push channel). */
@@ -174,9 +190,7 @@ export async function handleClientAction(
         break;
       }
 
-      const approved = await getApprovedConnections(code);
-      const pending = (await getRoomConnections(code)).filter((c) => c.status === 'pending');
-      if (approved.length + pending.length >= MAX_PLAYERS) {
+      if ((await countRoomOccupants(code)) >= MAX_PLAYERS) {
         await replyToCaller(
           connectionId,
           { action: 'ERROR', payload: { message: 'Room is full' } },
@@ -213,7 +227,7 @@ export async function handleClientAction(
           ttl: ttl24h(),
         });
 
-        const roster = (await getApprovedConnections(code)).map(toPlayer);
+        const roster = (await listApprovedRoster(code)).map(toPlayer);
         const approvedEnvelope: WsEnvelope = {
           action: 'PLAYER_APPROVED',
           payload: {
@@ -358,7 +372,7 @@ export async function handleClientAction(
       await deleteGhost(code, nickname.trim());
       await requestOllayaPower('start');
 
-      const approved = await getApprovedConnections(code);
+      const approved = await listApprovedRoster(code);
       const pending = (await getRoomConnections(code)).filter((c) => c.status === 'pending');
 
       await replyToCaller(
@@ -446,7 +460,7 @@ export async function handleClientAction(
         ttl: ttl24h(),
       });
 
-      const roster = (await getApprovedConnections(hostConn.roomCode)).map(toPlayer);
+      const roster = (await listApprovedRoster(hostConn.roomCode)).map(toPlayer);
 
       const approvedPayload = {
         connectionId: target.connectionId,
@@ -682,9 +696,7 @@ export async function handleClientAction(
       }
 
       const code = hostConn.roomCode;
-      const approved = await getApprovedConnections(code);
-      const pending = (await getRoomConnections(code)).filter((c) => c.status === 'pending');
-      if (approved.length + pending.length >= MAX_PLAYERS) {
+      if ((await countRoomOccupants(code)) >= MAX_PLAYERS) {
         await replyToCaller(
           connectionId,
           { action: 'ERROR', payload: { message: 'Room is full' } },
@@ -704,20 +716,150 @@ export async function handleClientAction(
         break;
       }
 
-      await putAiMarker(code, name);
-      await lambdaClient.send(
+      const color = await nextPlayerColor(code);
+      const order = await nextJoinOrder(code);
+      const seatId = aiSeatId(code, name);
+      await putConnection({
+        connectionId: seatId,
+        roomCode: code,
+        nickname: name,
+        color,
+        isHost: false,
+        joinOrder: order,
+        status: 'approved',
+        ttl: ttl24h(),
+        brain,
+        difficulty,
+      });
+
+      if (brain === 'laya') {
+        await requestOllayaPower('start');
+      }
+
+      // No `players` array: a partial roster must not wipe humans already in the lobby.
+      const approvedEnvelope: WsEnvelope = {
+        action: 'PLAYER_APPROVED',
+        payload: {
+          connectionId: seatId,
+          nickname: name,
+          color,
+          joinOrder: order,
+          isHost: false,
+          status: 'approved' as const,
+        },
+        roomCode: code,
+      };
+      await replyToCaller(connectionId, approvedEnvelope, result, pushToCaller);
+      await broadcastToApproved(code, approvedEnvelope, connectionId);
+      break;
+    }
+
+    case 'PLAY_AI_TURN': {
+      if (!(await isHost(connectionId))) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'Only host can play an AI turn' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const hostConn = await getConnection(connectionId);
+      if (!hostConn) break;
+
+      const { nickname, token, state } = (payload ?? {}) as {
+        nickname?: string;
+        token?: string;
+        state?: GameState;
+      };
+      const name = nickname?.trim();
+      if (!name || !token?.trim() || !state?.trackId || !Array.isArray(state.players)) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'AI turn needs a nickname, token, and board' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const functionName = process.env.AI_PLAYER_FUNCTION_NAME;
+      if (!functionName) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'AI players not available' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const code = hostConn.roomCode;
+      const seat = await getConnection(aiSeatId(code, name));
+      if (!seat || seat.roomCode !== code) {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'Unknown AI seat' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      const out = await lambdaClient.send(
         new InvokeCommand({
           FunctionName: functionName,
-          InvocationType: 'Event',
-          Payload: Buffer.from(JSON.stringify({ roomCode: code, nickname: name, brain, difficulty })),
+          InvocationType: 'RequestResponse',
+          Payload: Buffer.from(
+            JSON.stringify({
+              action: 'PLAY_TURN',
+              roomCode: code,
+              nickname: seat.nickname,
+              token: token.trim(),
+              state: boardForBrain(state),
+            })
+          ),
         })
       );
+
+      const raw = out.Payload ? Buffer.from(out.Payload).toString('utf8') : '';
+      if (out.FunctionError) {
+        console.warn(`[AI] PLAY_TURN failed room=${code} nick=${name} ${raw || out.FunctionError}`);
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'AI move failed' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
+
+      let velocity: { x?: number; y?: number } | undefined;
+      try {
+        velocity = (JSON.parse(raw) as { velocity?: { x?: number; y?: number } }).velocity;
+      } catch {
+        velocity = undefined;
+      }
+      if (typeof velocity?.x !== 'number' || typeof velocity?.y !== 'number') {
+        await replyToCaller(
+          connectionId,
+          { action: 'ERROR', payload: { message: 'AI move failed' } },
+          result,
+          pushToCaller
+        );
+        break;
+      }
 
       await replyToCaller(
         connectionId,
         {
-          action: 'AI_PLAYER_SPAWNING',
-          payload: { roomCode: code, nickname: name, brain },
+          action: 'AI_MOVE',
+          payload: {
+            nickname: seat.nickname,
+            token: token.trim(),
+            velocity: { x: velocity.x, y: velocity.y },
+          },
           roomCode: code,
         },
         result,

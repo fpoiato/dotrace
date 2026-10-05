@@ -202,8 +202,8 @@ export class DotRaceWsStack extends Stack {
     // (AiPlayer → WS/HTTP APIs → those Lambdas → AiPlayer.functionName).
     const aiPlayerFunctionName = 'DotRaceAiPlayer';
 
-    // AI player runner — one async invocation per AI pilot. Rotates every
-    // ~10 min (self-invoke + REJOIN) so races outlive the 15 min Lambda cap.
+    // AI player. New seats are invoked once per move (PLAY_TURN). The long
+    // socket loop remains so an invocation already in a race can still hand off.
     const aiPlayerFn = new NodejsFunction(this, 'AiPlayerHandler', {
       entry: lambdaEntry('ai-player'),
       handler: 'handler',
