@@ -41,6 +41,8 @@ import {
   fewestRoundLapHolderIds,
   remapSessionStatsConnectionId,
   remapReplayLogConnectionId,
+  adoptNicknameConnection,
+  remapPlayerConnection,
   createInitialState,
   buildRaceStatDeltas,
 } from '../../../shared/ws-types';
@@ -798,6 +800,39 @@ describe('lap splits and session ranking', () => {
     ];
     remapSessionStatsConnectionId(state, 'old', 'new');
     expect(state.sessionStats![0].connectionId).toBe('new');
+  });
+
+  it('retargets a car to the new socket when an AI Lambda rotates', () => {
+    const host = racePlayer({ connectionId: 'host', nickname: 'Nilton', finishOrder: undefined });
+    const nova = racePlayer({
+      connectionId: 'old-nova',
+      nickname: 'IA Nova · Pro',
+      color: '#22C55E',
+      finishOrder: undefined,
+    });
+    const state = createInitialState([host, nova], 'host');
+    state.phase = 'GAME_ROUND';
+    state.turnOrder = ['host', 'old-nova'];
+    state.currentTurnIndex = 1;
+    state.replayLog = [
+      {
+        seq: 0,
+        round: 1,
+        connectionId: 'old-nova',
+        position: { x: 4, y: 4 },
+        velocity: { x: 1, y: 0 },
+        isOffTrack: false,
+        lap: 2,
+      },
+    ];
+
+    expect(adoptNicknameConnection(state, 'IA Nova · Pro', 'new-nova')).toBe(true);
+    expect(state.turnOrder).toEqual(['host', 'new-nova']);
+    expect(state.players.find((p) => p.nickname === 'IA Nova · Pro')?.connectionId).toBe('new-nova');
+    expect(state.replayLog![0].connectionId).toBe('new-nova');
+    expect(canPlayerMove(state, 'new-nova')).toBe(true);
+    expect(canPlayerMove(state, 'old-nova')).toBe(false);
+    expect(adoptNicknameConnection(state, 'IA Nova · Pro', 'new-nova')).toBe(false);
   });
 
   it('remaps replay log when a player reconnects (AI handoff)', () => {

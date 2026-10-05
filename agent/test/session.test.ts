@@ -248,6 +248,32 @@ describe('GameSession', () => {
     expect(session.getSnapshot().connectionId).toBe('conn-ai-2');
   });
 
+  it('treats a relay that still names the previous socket as our turn', async () => {
+    const { push, session } = setup();
+    await session.join();
+    push.emit({ action: 'PLAYER_APPROVED', payload: { connectionId: 'conn-ai' } });
+
+    const state = relayState();
+    state.players.find((p) => p.connectionId === 'conn-ai')!.nickname = 'AI Pilot';
+    state.players.find((p) => p.connectionId === 'conn-ai')!.connectionId = 'conn-old';
+    state.turnOrder = ['conn-host', 'conn-old'];
+    state.currentTurnIndex = 1;
+
+    push.emit({ action: 'RELAY', payload: { type: 'TURN_ADVANCED', state } });
+
+    expect(session.isMyTurn()).toBe(true);
+    expect(session.getMyPlayer()?.connectionId).toBe('conn-ai');
+    expect(session.getMyPlayer()?.nickname).toBe('AI Pilot');
+  });
+
+  it('asks the host to re-send the board', async () => {
+    const { http, session } = setup();
+    await session.join();
+    await session.requestRaceState();
+    const ask = http.calls.find((c) => c.action === 'FORWARD_TO_HOST');
+    expect(ask?.payload).toEqual({ action: 'REQUEST_RACE_STATE' });
+  });
+
   it('submits moves via FORWARD_TO_HOST', async () => {
     const { push, http, session } = setup();
     await session.join();

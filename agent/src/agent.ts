@@ -32,10 +32,12 @@ export interface RaceLoopOptions {
 async function waitSliced(
   wait: (timeoutMs: number) => Promise<boolean>,
   sliceMs: number,
-  shouldHandoff: () => boolean
+  shouldHandoff: () => boolean,
+  onSlice?: () => void
 ): Promise<boolean | 'handoff'> {
   for (;;) {
     if (shouldHandoff()) return 'handoff';
+    onSlice?.();
     try {
       return await wait(sliceMs);
     } catch (err) {
@@ -53,10 +55,24 @@ export async function raceLoop(
 ): Promise<RaceLoopResult> {
   const shouldHandoff = options?.shouldHandoff ?? (() => false);
   const waitSliceMs = options?.waitSliceMs ?? 20_000;
+  const askForState = () => {
+    const phase = session.getState()?.phase;
+    // A live board is refreshed by the host while an AI is on the clock.
+    // Ask only when this process has not seen the race yet (fresh handoff).
+    if (phase === 'GAME_ROUND' || phase === 'GAME_OVER' || phase === 'GRID_ORDER') return;
+    void session.requestRaceState();
+  };
 
   // Spawn happens in the lobby — wait through host setup / grid order without
   // burning the per-turn timeout (that used to drop AI pilots before the race).
-  const started = await waitSliced((ms) => session.waitUntilRacing(ms), waitSliceMs, shouldHandoff);
+  // Each slice also asks the host to re-send the board, so a handoff that
+  // missed STATE_SYNC does not sit in "before green flag" until the next rotation.
+  const started = await waitSliced(
+    (ms) => session.waitUntilRacing(ms),
+    waitSliceMs,
+    shouldHandoff,
+    askForState
+  );
   if (started === 'handoff') {
     console.log('[RACE] Handoff before green flag');
     return 'handoff';
@@ -74,7 +90,12 @@ export async function raceLoop(
     }
     let racing: boolean | 'handoff';
     try {
-      racing = await waitSliced((ms) => session.waitForTurn(ms), waitSliceMs, shouldHandoff);
+      racing = await waitSliced(
+        (ms) => session.waitForTurn(ms),
+        waitSliceMs,
+        shouldHandoff,
+        askForState
+      );
     } catch (err) {
       console.warn('[RACE] waitForTurn failed:', err instanceof Error ? err.message : err);
       return 'finished';

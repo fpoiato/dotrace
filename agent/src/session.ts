@@ -14,6 +14,7 @@ import {
   SubmitMoveAction,
   Vector2D,
   WsEnvelope,
+  adoptNicknameConnection,
   canPlayerMove,
 } from '../../shared/ws-types';
 import { extractConnectionId } from '../../bot/src/state-parser';
@@ -267,6 +268,28 @@ export class GameSession {
 
   // --------------------------------------------------------------- moves
 
+  /**
+   * Ask the host to broadcast the board again. Used when a relay was missed
+   * or this process just took over the seat and has no game state yet.
+   */
+  async requestRaceState(): Promise<void> {
+    const connectionId = this.ws.getConnectionId();
+    if (!connectionId) return;
+    try {
+      await this.http.postAction(
+        'FORWARD_TO_HOST',
+        { action: 'REQUEST_RACE_STATE' },
+        connectionId,
+        this.roomCode
+      );
+    } catch (err) {
+      console.warn(
+        '[RACE] state sync request failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
   /** Submit an absolute velocity vector. Host performs final validation. */
   async submitMove(vector: Vector2D): Promise<void> {
     const connectionId = this.ws.getConnectionId();
@@ -337,9 +360,7 @@ export class GameSession {
 
       case 'RELAY': {
         const payload = envelope.payload as RelayPayload;
-        if (payload?.state) {
-          this.lastState = payload.state;
-        }
+        if (payload?.state) this.rememberState(payload.state);
         break;
       }
       default:
@@ -350,5 +371,15 @@ export class GameSession {
     for (const listener of this.stateListeners) {
       listener(this.lastState as GameState);
     }
+  }
+
+  /**
+   * Keep our live socket id on the car. A handoff relay can still name the
+   * previous Lambda; without this retarget, isMyTurn stays false forever.
+   */
+  private rememberState(state: GameState): void {
+    const myId = this.connectionId ?? this.ws.getConnectionId();
+    if (myId) adoptNicknameConnection(state, this.nickname, myId);
+    this.lastState = state;
   }
 }

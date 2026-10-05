@@ -22,8 +22,9 @@ import {
   nextActiveTurnIndex,
   pushReplayMove,
   pushTrail,
-  remapReplayLogConnectionId,
-  remapSessionStatsConnectionId,
+  adoptNicknameConnection,
+  isAiPilotNickname,
+  remapPlayerConnection,
   rollDice,
   segmentCrossesFinish,
   segmentEntersRect,
@@ -50,6 +51,9 @@ export class GameEngineService implements OnDestroy {
   private messageSub: Subscription | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Re-broadcast the board while an AI seat is the one who must move. */
+  private turnNudgeTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly TURN_NUDGE_MS = 5_000;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
   private pendingHostRemovalId: string | null = null;
 
@@ -568,55 +572,43 @@ export class GameEngineService implements OnDestroy {
     if (!state || !this.isHost) return;
 
     const { oldConnectionId, newConnectionId, player } = payload;
-    state.turnOrder = state.turnOrder.map((id) => (id === oldConnectionId ? newConnectionId : id));
+    const existing = state.players.find((p) => p.connectionId === oldConnectionId);
+    remapPlayerConnection(state, oldConnectionId, newConnectionId);
 
-    if (state.diceRolls[oldConnectionId] !== undefined) {
-      state.diceRolls[newConnectionId] = state.diceRolls[oldConnectionId];
-      delete state.diceRolls[oldConnectionId];
-    }
-
-    state.podium = state.podium.map((e) =>
-      e.connectionId === oldConnectionId ? { ...e, connectionId: newConnectionId } : e
-    );
-    remapSessionStatsConnectionId(state, oldConnectionId, newConnectionId);
-    remapReplayLogConnectionId(state, oldConnectionId, newConnectionId);
-
-    const idx = state.players.findIndex((p) => p.connectionId === oldConnectionId);
     const merged: Player = {
       ...player,
       connectionId: newConnectionId,
-      position: player.position ?? { x: 0, y: 0 },
-      velocity: player.velocity ?? { x: 0, y: 0 },
-      isOffTrack: player.isOffTrack ?? false,
-      trail: player.trail ?? [],
-      lap: player.lap ?? 1,
+      position: existing?.position ?? player.position ?? { x: 0, y: 0 },
+      velocity: existing?.velocity ?? player.velocity ?? { x: 0, y: 0 },
+      isOffTrack: existing?.isOffTrack ?? player.isOffTrack ?? false,
+      trail: existing?.trail ?? player.trail ?? [],
+      lap: existing?.lap ?? player.lap ?? 1,
+      passedCheckpoint: existing?.passedCheckpoint ?? player.passedCheckpoint,
+      diceRoll: existing?.diceRoll ?? player.diceRoll,
+      finishOrder: existing?.finishOrder,
+      finishRound: existing?.finishRound,
+      finishedAt: existing?.finishedAt,
+      lapTimes: existing?.lapTimes,
+      lapRounds: existing?.lapRounds,
+      grassCuts: existing?.grassCuts,
+      gearPenaltyUntilRound: existing?.gearPenaltyUntilRound,
+      stopUntil: existing?.stopUntil,
     };
-    if (idx >= 0) {
-      merged.position = state.players[idx].position;
-      merged.velocity = state.players[idx].velocity;
-      merged.isOffTrack = state.players[idx].isOffTrack;
-      merged.trail = state.players[idx].trail ?? [];
-      merged.lap = state.players[idx].lap ?? 1;
-      merged.passedCheckpoint = state.players[idx].passedCheckpoint;
-      merged.diceRoll = state.players[idx].diceRoll;
-      merged.finishOrder = state.players[idx].finishOrder;
-      merged.finishRound = state.players[idx].finishRound;
-      merged.finishedAt = state.players[idx].finishedAt;
-      merged.lapTimes = state.players[idx].lapTimes;
-      merged.lapRounds = state.players[idx].lapRounds;
-      merged.grassCuts = state.players[idx].grassCuts;
-      merged.gearPenaltyUntilRound = state.players[idx].gearPenaltyUntilRound;
-      merged.stopUntil = state.players[idx].stopUntil;
-      state.players[idx] = merged;
-    } else {
-      state.players.push(merged);
-    }
-
-    if (state.hostId === oldConnectionId) {
-      state.hostId = newConnectionId;
-    }
+    const idx = state.players.findIndex((p) => p.connectionId === newConnectionId);
+    if (idx >= 0) state.players[idx] = merged;
+    else state.players.push(merged);
 
     this.setStateAndRelay('STATE_SYNC', state);
+  }
+
+  /**
+   * A rotated AI Lambda submits with a new socket id. Retarget the car that
+   * still carries that nickname so the move is not dropped as "not your turn".
+   */
+  private adoptRejoinedSeat(connectionId: string, nickname: string | undefined): boolean {
+    const state = this.state;
+    if (!state || !nickname) return false;
+    return adoptNicknameConnection(state, nickname, connectionId);
   }
 
   private applyRelay(relay: RelayPayload): void {
@@ -631,8 +623,19 @@ export class GameEngineService implements OnDestroy {
     const senderId = action['senderId'] as string;
     if (!senderId) return;
     switch (action['action']) {
+      case 'REQUEST_RACE_STATE': {
+        const nickname = action['senderNickname'] as string | undefined;
+        this.adoptRejoinedSeat(senderId, nickname);
+        const latest = this.state;
+        if (latest && latest.phase !== 'LOBBY') {
+          this.setStateAndRelay('STATE_SYNC', latest);
+        }
+        break;
+      }
       // Track selection is host-only; forwarded SELECT_TRACK actions are ignored.
       case 'SUBMIT_MOVE': {
+        const nickname = action['senderNickname'] as string | undefined;
+        this.adoptRejoinedSeat(senderId, nickname);
         const vector = action['vector'] as Vector2D;
         if (
           !vector ||
@@ -651,6 +654,7 @@ export class GameEngineService implements OnDestroy {
 
   private setStateAndRelay(type: RelayPayload['type'], state: GameState, meta?: Record<string, unknown>): void {
     this.emit(state);
+    this.armTurnNudge(state);
     const room = this.roomService.room;
     if (!room?.isHost) return;
     const telemetry = buildRaceTelemetry(state);
@@ -658,6 +662,33 @@ export class GameEngineService implements OnDestroy {
     void this.api
       .postAction('RELAY', { type, state, meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
+  }
+
+  /**
+   * If an AI seat stays on the clock, push the board again. A missed
+   * TURN_ADVANCED otherwise leaves the phone on "Aguardando …" while the
+   * Lambda waits for a turn it never heard about. A handoff replacement
+   * also needs this push: it joins with an empty board.
+   */
+  private armTurnNudge(state: GameState): void {
+    if (this.turnNudgeTimer) {
+      clearTimeout(this.turnNudgeTimer);
+      this.turnNudgeTimer = null;
+    }
+    if (!this.isHost || state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
+    const seat = state.turnOrder[state.currentTurnIndex];
+    if (!seat || seat === this.myId) return;
+    const current = state.players.find((player) => player.connectionId === seat);
+    if (!current || !isAiPilotNickname(current.nickname)) return;
+    const round = state.round;
+    this.turnNudgeTimer = setTimeout(() => {
+      this.turnNudgeTimer = null;
+      const latest = this.state;
+      if (!latest || latest.phase !== 'GAME_ROUND' || isTimedMode(latest)) return;
+      if (latest.round !== round) return;
+      if (latest.turnOrder[latest.currentTurnIndex] !== seat) return;
+      this.setStateAndRelay('STATE_SYNC', latest);
+    }, GameEngineService.TURN_NUDGE_MS);
   }
 
   currentPlayer(): Player | null {
@@ -684,10 +715,13 @@ export class GameEngineService implements OnDestroy {
     this.messageSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    if (this.turnNudgeTimer) clearTimeout(this.turnNudgeTimer);
   }
 
   reset(): void {
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
+    if (this.turnNudgeTimer) clearTimeout(this.turnNudgeTimer);
+    this.turnNudgeTimer = null;
     this.stateSubject.next(null);
   }
 }
