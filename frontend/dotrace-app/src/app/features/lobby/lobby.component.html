@@ -1,128 +1,141 @@
 @if (room$ | async; as room) {
-  <div class="mx-auto min-h-0 w-full max-w-md flex-1 overflow-y-auto px-4 py-6">
-    <div class="mb-2 flex items-center justify-between">
-      <h1 class="text-2xl font-bold text-orange-400">{{ 'lobby.title' | translate }}</h1>
+  <div class="mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden px-3 pb-2 pt-3">
+    <div class="mb-2 flex shrink-0 items-center gap-2">
+      <div class="min-w-0 flex-1">
+        <h1 class="text-xl font-bold leading-none text-orange-400">{{ 'lobby.title' | translate }}</h1>
+        <p class="mt-1 truncate text-sm text-slate-300">
+          <span class="font-mono tracking-widest text-white">{{ room.roomCode }}</span>
+          @if (room.isHost) {
+            <span class="ml-2 text-xs text-orange-300">{{ 'lobby.youAreHost' | translate }}</span>
+          }
+        </p>
+      </div>
       <button
         type="button"
         (click)="showHowTo = true"
         [attr.aria-label]="'howto.title' | translate"
-        class="min-h-11 min-w-11 rounded-full bg-slate-800 text-lg font-bold text-slate-300 hover:text-white"
+        class="h-10 w-10 shrink-0 rounded-full bg-slate-800 text-lg font-bold text-slate-300 hover:text-white"
       >
         ?
       </button>
     </div>
-    <p class="mb-1 text-sm font-medium text-slate-400">{{ 'lobby.roomCode' | translate }}</p>
-    <p class="mb-6 font-mono text-xl tracking-widest text-white">{{ room.roomCode }}</p>
 
     @if (room.isHost) {
-      <p class="mb-4 text-sm text-orange-300">{{ 'lobby.youAreHost' | translate }}</p>
+      <div class="shrink-0">
+        <app-track-picker
+          [tracks]="tracks"
+          [selectedTrackId]="selectedTrackId"
+          (trackSelected)="selectTrack($event)"
+        />
 
-      <app-track-picker
-        [tracks]="tracks"
-        [selectedTrackId]="selectedTrackId"
-        (trackSelected)="selectTrack($event)"
-      />
+        <div class="mb-2 grid grid-cols-2 gap-2">
+          <div>
+            <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.laps' | translate }}</p>
+            <div class="grid grid-cols-3 gap-1">
+              @for (n of lapOptions; track n) {
+                <button
+                  type="button"
+                  (click)="selectLaps(n)"
+                  class="min-h-10 rounded-lg border-2 text-base font-bold transition"
+                  [class]="selectedLaps === n ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+                >
+                  {{ n }}
+                </button>
+              }
+            </div>
+          </div>
+          <div>
+            <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.gameMode' | translate }}</p>
+            <div class="grid grid-cols-1 gap-1">
+              @for (mode of gameModes; track mode) {
+                <button
+                  type="button"
+                  (click)="selectGameMode(mode)"
+                  class="min-h-9 rounded-lg border-2 px-2 text-xs font-semibold leading-tight transition"
+                  [class]="selectedGameMode === mode ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+                >
+                  {{ 'lobby.mode.' + mode | translate }}
+                </button>
+              }
+            </div>
+          </div>
+        </div>
 
-      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.laps' | translate }}</h2>
-      <div class="mb-6 grid grid-cols-3 gap-3">
-        @for (n of lapOptions; track n) {
+        <div class="mb-2 flex gap-2">
           <button
             type="button"
-            (click)="selectLaps(n)"
-            class="min-h-12 rounded-xl border-2 text-lg font-bold transition"
-            [class]="selectedLaps === n ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+            (click)="copyInvite(room.roomCode)"
+            class="min-h-10 flex-1 rounded-lg bg-slate-700 px-2 text-xs font-medium"
           >
-            {{ n }}
+            {{ copied ? ('common.copied' | translate) : ('lobby.invite' | translate) }}
           </button>
-        }
-      </div>
-
-      <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.gameMode' | translate }}</h2>
-      <div class="mb-6 grid grid-cols-2 gap-3">
-        @for (mode of gameModes; track mode) {
           <button
             type="button"
-            (click)="selectGameMode(mode)"
-            class="min-h-12 rounded-xl border-2 px-3 text-sm font-semibold transition"
-            [class]="selectedGameMode === mode ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+            (click)="whatsApp(room.roomCode)"
+            class="min-h-10 flex-1 rounded-lg bg-green-700 px-2 text-xs font-medium"
           >
-            {{ 'lobby.mode.' + mode | translate }}
+            {{ 'lobby.whatsapp' | translate }}
           </button>
-        }
-      </div>
-
-      <div class="mb-4 flex gap-2">
-        <button
-          type="button"
-          (click)="copyInvite(room.roomCode)"
-          class="min-h-12 flex-1 rounded-xl bg-slate-700 text-sm font-medium"
-        >
-          {{ copied ? ('common.copied' | translate) : ('lobby.invite' | translate) }}
-        </button>
-        <button
-          type="button"
-          (click)="whatsApp(room.roomCode)"
-          class="min-h-12 flex-1 rounded-xl bg-green-700 text-sm font-medium"
-        >
-          {{ 'lobby.whatsapp' | translate }}
-        </button>
+        </div>
       </div>
     } @else {
-      <p class="mb-2 text-slate-400">{{ 'lobby.waitHost' | translate }}</p>
+      <p class="mb-2 shrink-0 text-sm text-slate-400">{{ 'lobby.waitHost' | translate }}</p>
       @if (selectedTrackId) {
-        <p class="mb-1 text-sm text-orange-300">
+        <p class="shrink-0 text-sm text-orange-300">
           {{ 'lobby.selectTrack' | translate }}: {{ trackName(selectedTrackId) | translate }}
         </p>
       }
-      <p class="mb-6 text-sm text-orange-300">{{ 'lobby.laps' | translate }}: {{ selectedLaps }}</p>
-      <p class="mb-6 text-sm text-orange-300">
+      <p class="shrink-0 text-sm text-orange-300">{{ 'lobby.laps' | translate }}: {{ selectedLaps }}</p>
+      <p class="mb-2 shrink-0 text-sm text-orange-300">
         {{ 'lobby.gameMode' | translate }}: {{ 'lobby.mode.' + selectedGameMode | translate }}
       </p>
     }
 
-    <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.players' | translate }}</h2>
-    <ul class="mb-4 space-y-2">
-      @for (p of players$ | async; track p.connectionId) {
-        <li class="flex min-h-12 items-center gap-3 rounded-xl bg-slate-800 px-4">
-          <span class="h-4 w-4 rounded-full" [style.background]="p.color"></span>
-          <span class="flex-1 font-medium">{{ p.nickname }}</span>
-          @if (p.isHost) {
-            <span class="text-xs text-orange-400">{{ 'common.host' | translate }}</span>
-          }
-        </li>
-      }
-    </ul>
+    <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <h2 class="mb-1 shrink-0 text-xs font-medium text-slate-400">{{ 'lobby.players' | translate }}</h2>
+      <ul class="mb-2 space-y-1">
+        @for (p of players$ | async; track p.connectionId) {
+          <li class="flex min-h-10 items-center gap-2 rounded-lg bg-slate-800 px-3">
+            <span class="h-3 w-3 shrink-0 rounded-full" [style.background]="p.color"></span>
+            <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ p.nickname }}</span>
+            @if (p.isHost) {
+              <span class="shrink-0 text-[11px] text-orange-400">{{ 'common.host' | translate }}</span>
+            }
+          </li>
+        }
+      </ul>
 
-    @if (pending$ | async; as pending) {
-      @if (pending.length > 0 && room.isHost) {
-        <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.pending' | translate }}</h2>
-        <ul class="mb-4 space-y-2">
-          @for (p of pending; track p.connectionId) {
-            <li class="flex min-h-14 items-center gap-2 rounded-xl bg-slate-800 px-4">
-              <span class="flex-1">{{ p.nickname }}</span>
-              <button type="button" (click)="approve(p.connectionId)" class="min-h-10 rounded-lg bg-green-600 px-4 text-sm">
-                {{ 'lobby.approve' | translate }}
-              </button>
-              <button type="button" (click)="reject(p.connectionId)" class="min-h-10 rounded-lg bg-red-700 px-4 text-sm">
-                {{ 'lobby.reject' | translate }}
-              </button>
-            </li>
-          }
-        </ul>
+      @if (pending$ | async; as pending) {
+        @if (pending.length > 0 && room.isHost) {
+          <h2 class="mb-1 shrink-0 text-xs font-medium text-slate-400">{{ 'lobby.pending' | translate }}</h2>
+          <ul class="mb-2 space-y-1">
+            @for (p of pending; track p.connectionId) {
+              <li class="flex min-h-11 items-center gap-2 rounded-lg bg-slate-800 px-3">
+                <span class="min-w-0 flex-1 truncate text-sm">{{ p.nickname }}</span>
+                <button type="button" (click)="approve(p.connectionId)" class="min-h-9 shrink-0 rounded-lg bg-green-600 px-3 text-xs">
+                  {{ 'lobby.approve' | translate }}
+                </button>
+                <button type="button" (click)="reject(p.connectionId)" class="min-h-9 shrink-0 rounded-lg bg-red-700 px-3 text-xs">
+                  {{ 'lobby.reject' | translate }}
+                </button>
+              </li>
+            }
+          </ul>
+        }
       }
-    }
+    </div>
 
     @if (room.isHost) {
       @if (players$ | async; as players) {
-        @if (canAddAi(players)) {
-          <div class="mb-2">
-            <p class="mb-1 text-xs font-medium text-slate-400">{{ 'lobby.difficultyLabel' | translate }}</p>
+        <div class="shrink-0 border-t border-slate-800 pt-2">
+          @if (canAddAi(players)) {
+            <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.difficultyLabel' | translate }}</p>
             <div class="mb-2 grid grid-cols-4 gap-1">
               @for (level of difficulties; track level) {
                 <button
                   type="button"
                   (click)="selectDifficulty(level)"
-                  class="min-h-10 rounded-lg px-1 text-xs font-semibold transition"
+                  class="min-h-9 rounded-lg px-1 text-[11px] font-semibold transition"
                   [class.bg-orange-500]="selectedDifficulty === level"
                   [class.text-white]="selectedDifficulty === level"
                   [class.bg-slate-800]="selectedDifficulty !== level"
@@ -132,41 +145,41 @@
                 </button>
               }
             </div>
-          </div>
-          <div class="mb-2 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              (click)="addBotPilot(players)"
-              [disabled]="aiSpawning"
-              class="min-h-12 rounded-xl border-2 border-dashed border-emerald-500 px-2 text-sm font-semibold text-emerald-300 disabled:opacity-40"
-            >
-              {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addBot') | translate }}
-            </button>
-            <button
-              type="button"
-              (click)="addIaPilot(players)"
-              [disabled]="aiSpawning"
-              class="min-h-12 rounded-xl border-2 border-dashed border-sky-500 px-2 text-sm font-semibold text-sky-300 disabled:opacity-40"
-            >
-              {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addIa') | translate }}
-            </button>
-          </div>
-          <p class="mb-4 text-center text-xs text-slate-500">{{ 'lobby.aiHint' | translate }}</p>
-          @if (aiError) {
-            <p class="mb-2 text-center text-sm text-red-400">{{ 'lobby.aiError' | translate }}</p>
+            <div class="mb-1 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                (click)="addBotPilot(players)"
+                [disabled]="aiSpawning"
+                class="min-h-10 rounded-lg border-2 border-dashed border-emerald-500 px-2 text-xs font-semibold text-emerald-300 disabled:opacity-40"
+              >
+                {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addBot') | translate }}
+              </button>
+              <button
+                type="button"
+                (click)="addIaPilot(players)"
+                [disabled]="aiSpawning"
+                class="min-h-10 rounded-lg border-2 border-dashed border-sky-500 px-2 text-xs font-semibold text-sky-300 disabled:opacity-40"
+              >
+                {{ (aiSpawning ? 'lobby.aiJoining' : 'lobby.addIa') | translate }}
+              </button>
+            </div>
+            <p class="mb-1 line-clamp-2 text-center text-[11px] leading-tight text-slate-500">{{ 'lobby.aiHint' | translate }}</p>
+            @if (aiError) {
+              <p class="mb-1 text-center text-xs text-red-400">{{ 'lobby.aiError' | translate }}</p>
+            }
           }
-        }
-        @if (isPractice(players.length)) {
-          <p class="mb-2 text-center text-sm text-sky-400">{{ practiceHintKey | translate }}</p>
-        }
-        <button
-          type="button"
-          (click)="startRace()"
-          [disabled]="!selectedTrackId"
-          class="min-h-14 w-full rounded-xl bg-orange-500 text-lg font-bold disabled:opacity-40"
-        >
-          {{ startLabelKey(players.length) | translate }}
-        </button>
+          @if (isPractice(players.length)) {
+            <p class="mb-1 text-center text-[11px] leading-tight text-sky-400">{{ practiceHintKey | translate }}</p>
+          }
+          <button
+            type="button"
+            (click)="startRace()"
+            [disabled]="!selectedTrackId"
+            class="min-h-12 w-full rounded-xl bg-orange-500 text-base font-bold disabled:opacity-40"
+          >
+            {{ startLabelKey(players.length) | translate }}
+          </button>
+        </div>
       }
     }
   </div>

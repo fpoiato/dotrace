@@ -1,9 +1,9 @@
 <div>
-  <h2 class="mb-2 text-sm font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
+  <h2 class="mb-1 text-xs font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
   <button
     type="button"
     (click)="openPicker()"
-    class="mb-6 flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border-2 px-4 text-left transition hover:border-slate-500"
+    class="mb-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border-2 px-3 text-left transition hover:border-slate-500"
     [class]="selectedTrackId ? 'border-orange-500 bg-orange-500/10' : 'border-slate-600'"
   >
     <span class="font-semibold" [class.text-slate-400]="!selectedTrackId">
