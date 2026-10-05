@@ -29,6 +29,7 @@ import {
   GRASS_PENALTY_TIMED_REPEAT_MS,
   isGearLimited,
   isGrassShortcut,
+  isKerbGrass,
   isPlayerStopped,
   segmentCrossesGrass,
   segmentCrossesRumble,
@@ -486,13 +487,46 @@ describe('race telemetry', () => {
 describe('grass shortcut penalties', () => {
   it('detects cutting through grass without landing on it', () => {
     const track = makeTrack();
-    // grass column at x=5; fly from x=3 to x=4 at y=1 — path crosses x=5? No.
-    // Move from (4,1) to (4,1) with step through grass at (5,1): from (3,1) to (4,1) doesn't cross.
-    // Jump from (4,1) to (4,1)... need a move that crosses grass.
-    expect(segmentCrossesGrass(track, { x: 4, y: 1 }, { x: 4, y: 1 })).toBe(false);
-    expect(segmentCrossesGrass(track, { x: 4, y: 1 }, { x: 5, y: 1 })).toBe(true);
-    expect(isGrassShortcut(track, { x: 4, y: 1 }, { x: 5, y: 1 })).toBe(true);
+    // x=5 is the zebra square beside the asphalt. Push a second grass cell
+    // past it so the infield is real grass, not the border.
+    track.grid[1][4] = 'grass';
+    expect(isKerbGrass(track, 4, 1)).toBe(true);
+    expect(isKerbGrass(track, 5, 1)).toBe(false);
+    expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 3, y: 1 })).toBe(false);
+    expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 4, y: 1 })).toBe(false);
+    expect(isGrassShortcut(track, { x: 3, y: 1 }, { x: 4, y: 1 })).toBe(false);
+    expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 5, y: 1 })).toBe(true);
+    expect(isGrassShortcut(track, { x: 3, y: 1 }, { x: 5, y: 1 })).toBe(true);
     expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(false);
+  });
+
+  it('does not penalize clipping the zebra on Monza', () => {
+    const monza = TRACKS.find((t) => t.id === 'monza')!;
+    // Race VVCTP: landed on the apex kerb, and later the line only nicked
+    // two border squares while finishing on the asphalt.
+    expect(isKerbGrass(monza, 77, 28)).toBe(true);
+    expect(isGrassShortcut(monza, { x: 78, y: 31 }, { x: 77, y: 28 })).toBe(false);
+    expect(isGrassShortcut(monza, { x: 10, y: 29 }, { x: 12, y: 34 })).toBe(false);
+    expect(segmentCrossesGrass(monza, { x: 10, y: 29 }, { x: 12, y: 34 })).toBe(false);
+  });
+
+  it('still penalizes infield grass on every circuit', () => {
+    for (const track of TRACKS) {
+      let found = false;
+      for (let y = 0; y < track.height && !found; y++) {
+        for (let x = 0; x < track.width && !found; x++) {
+          if (track.grid[y][x] !== 'track' && track.grid[y][x] !== 'finish') continue;
+          for (let vy = -6; vy <= 6 && !found; vy++) {
+            for (let vx = -6; vx <= 6 && !found; vx++) {
+              if (vx === 0 && vy === 0) continue;
+              const landing = { x: x + vx, y: y + vy };
+              if (isGrassShortcut(track, { x, y }, landing)) found = true;
+            }
+          }
+        }
+      }
+      expect(found).toBe(true);
+    }
   });
 
   it('does not count leaving grass as a shortcut', () => {

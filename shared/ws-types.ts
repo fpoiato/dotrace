@@ -486,8 +486,27 @@ export function gearOf(velocity: Vector2D): number {
 }
 
 /**
- * Whether the straight move from → to passes over a grass tile (excluding
- * the starting cell — already being on grass is not a shortcut).
+ * Grass square that shares a side with the asphalt. The red/white zebra is
+ * drawn on that edge, so clipping or landing here is the kerb, not a shortcut
+ * through the infield.
+ */
+export function isKerbGrass(track: TrackDefinition, x: number, y: number): boolean {
+  if (getTileAt(track, x, y) !== 'grass') return false;
+  const beside = (nx: number, ny: number) => {
+    const tile = getTileAt(track, nx, ny);
+    return tile === 'track' || tile === 'finish';
+  };
+  return beside(x - 1, y) || beside(x + 1, y) || beside(x, y - 1) || beside(x, y + 1);
+}
+
+/** Grass beyond the zebra square — a real shortcut, not the border kerb. */
+function isInfieldGrass(track: TrackDefinition, x: number, y: number): boolean {
+  return getTileAt(track, x, y) === 'grass' && !isKerbGrass(track, x, y);
+}
+
+/**
+ * Whether the straight move from → to passes over infield grass (excluding
+ * the starting cell, and excluding the zebra square beside the asphalt).
  */
 export function segmentCrossesGrass(
   track: TrackDefinition,
@@ -500,21 +519,36 @@ export function segmentCrossesGrass(
     const x = Math.round(from.x + (to.x - from.x) * t);
     const y = Math.round(from.y + (to.y - from.y) * t);
     if (x === from.x && y === from.y) continue;
-    if (getTileAt(track, x, y) === 'grass') return true;
+    if (isInfieldGrass(track, x, y)) return true;
   }
   return false;
 }
 
-/** Landing on grass or cutting through it on the way. */
+/** The move clips the zebra square beside the asphalt without entering the infield. */
+export function segmentTouchesKerb(
+  track: TrackDefinition,
+  from: Vector2D,
+  to: Vector2D
+): boolean {
+  if (isKerbGrass(track, to.x, to.y)) return true;
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  for (let i = 0; i <= Math.max(steps, 1); i++) {
+    const t = steps === 0 ? 1 : i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (x === from.x && y === from.y) continue;
+    if (isKerbGrass(track, x, y)) return true;
+  }
+  return false;
+}
+
+/** Landing in the infield, or cutting through it. The zebra square does not count. */
 export function isGrassShortcut(
   track: TrackDefinition,
   from: Vector2D,
   landing: Vector2D
 ): boolean {
-  return (
-    getTileAt(track, landing.x, landing.y) === 'grass' ||
-    segmentCrossesGrass(track, from, landing)
-  );
+  return isInfieldGrass(track, landing.x, landing.y) || segmentCrossesGrass(track, from, landing);
 }
 
 /**

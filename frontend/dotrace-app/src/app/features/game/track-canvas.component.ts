@@ -21,6 +21,8 @@ import {
   gearOf,
   getValidMoves,
   isGrassShortcut,
+  isKerbGrass,
+  segmentTouchesKerb,
   isTimedMode,
   getTileAt,
   segmentCrossesRumble,
@@ -872,7 +874,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
           this.haptic.grassHit();
         } else if (
           getTileAt(track, landing.x, landing.y) === 'rumble' ||
-          segmentCrossesRumble(track, me.position, landing)
+          isKerbGrass(track, landing.x, landing.y) ||
+          segmentCrossesRumble(track, me.position, landing) ||
+          segmentTouchesKerb(track, me.position, landing)
         ) {
           this.haptic.rumbleStrip();
         }
