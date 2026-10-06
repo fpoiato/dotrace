@@ -661,8 +661,8 @@ export function gearOf(velocity: Vector2D): number {
 
 /**
  * Grass square that shares a side with the asphalt. The red/white zebra is
- * drawn on that edge, so clipping or landing here is the kerb, not a shortcut
- * through the infield.
+ * drawn on that edge. Stepping on this square is the kerb; the shortcut rule
+ * only gives away the inner half of it.
  */
 export function isKerbGrass(track: TrackDefinition, x: number, y: number): boolean {
   if (getTileAt(track, x, y) !== 'grass') return false;
@@ -673,27 +673,72 @@ export function isKerbGrass(track: TrackDefinition, x: number, y: number): boole
   return beside(x - 1, y) || beside(x + 1, y) || beside(x, y - 1) || beside(x, y + 1);
 }
 
-/** Grass beyond the zebra square — a real shortcut, not the border kerb. */
-function isInfieldGrass(track: TrackDefinition, x: number, y: number): boolean {
-  return getTileAt(track, x, y) === 'grass' && !isKerbGrass(track, x, y);
+/**
+ * How far the pen may leave the asphalt before it is a shortcut, in cells.
+ * Half a zebra square: the inner half of the border square is still the kerb.
+ */
+const ZEBRA_ALLOWANCE = 0.5;
+
+function isAsphaltTile(track: TrackDefinition, x: number, y: number): boolean {
+  const tile = getTileAt(track, x, y);
+  return tile === 'track' || tile === 'finish';
 }
 
 /**
- * Whether the straight move from → to passes over infield grass (excluding
- * the starting cell, and excluding the zebra square beside the asphalt).
+ * Chebyshev distance from a point to the nearest asphalt square.
+ * Cell (i, j) covers [i, i+1] × [j, j+1]. The drawn line joins cell centers,
+ * so a car on cell (x, y) sits at (x+0.5, y+0.5).
+ */
+function asphaltClearance(track: TrackDefinition, px: number, py: number): number {
+  const i0 = Math.floor(px - ZEBRA_ALLOWANCE) - 1;
+  const i1 = Math.floor(px + ZEBRA_ALLOWANCE);
+  const j0 = Math.floor(py - ZEBRA_ALLOWANCE) - 1;
+  const j1 = Math.floor(py + ZEBRA_ALLOWANCE);
+  let best = Infinity;
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      if (!isAsphaltTile(track, i, j)) continue;
+      const dx = px < i ? i - px : px > i + 1 ? px - (i + 1) : 0;
+      const dy = py < j ? j - py : py > j + 1 ? py - (j + 1) : 0;
+      const clearance = Math.max(dx, dy);
+      if (clearance < best) best = clearance;
+    }
+  }
+  return best;
+}
+
+/** True when the point is more than half a zebra square off the asphalt. */
+function beyondHalfZebra(track: TrackDefinition, px: number, py: number): boolean {
+  return asphaltClearance(track, px, py) > ZEBRA_ALLOWANCE + 1e-9;
+}
+
+/**
+ * Whether the pen line from → to runs more than half a zebra square off the
+ * asphalt. Samples the segment drawn between cell centers. A car already past
+ * the allowance may return without a new cut; the penalty starts when the
+ * line leaves the allowance after it was inside. The starting cell itself
+ * does not count.
  */
 export function segmentCrossesGrass(
   track: TrackDefinition,
   from: Vector2D,
   to: Vector2D
 ): boolean {
-  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
-  for (let i = 0; i <= Math.max(steps, 1); i++) {
-    const t = steps === 0 ? 1 : i / steps;
-    const x = Math.round(from.x + (to.x - from.x) * t);
-    const y = Math.round(from.y + (to.y - from.y) * t);
-    if (x === from.x && y === from.y) continue;
-    if (isInfieldGrass(track, x, y)) return true;
+  const x0 = from.x + 0.5;
+  const y0 = from.y + 0.5;
+  const x1 = to.x + 0.5;
+  const y1 = to.y + 0.5;
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(1, Math.ceil(dist / 0.05));
+  let inside = !beyondHalfZebra(track, x0, y0);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const px = x0 + (x1 - x0) * t;
+    const py = y0 + (y1 - y0) * t;
+    if (Math.floor(px) === from.x && Math.floor(py) === from.y) continue;
+    const outside = beyondHalfZebra(track, px, py);
+    if (inside && outside) return true;
+    if (!outside) inside = true;
   }
   return false;
 }
@@ -716,13 +761,20 @@ export function segmentTouchesKerb(
   return false;
 }
 
-/** Landing in the infield, or cutting through it. The zebra square does not count. */
+/**
+ * Landing more than half a zebra square off the asphalt, or a pen line that
+ * crosses that line. The inner half of the border square (and a return from
+ * already being past it) does not count.
+ */
 export function isGrassShortcut(
   track: TrackDefinition,
   from: Vector2D,
   landing: Vector2D
 ): boolean {
-  return isInfieldGrass(track, landing.x, landing.y) || segmentCrossesGrass(track, from, landing);
+  const landedPast =
+    (landing.x !== from.x || landing.y !== from.y) &&
+    beyondHalfZebra(track, landing.x + 0.5, landing.y + 0.5);
+  return landedPast || segmentCrossesGrass(track, from, landing);
 }
 
 /**

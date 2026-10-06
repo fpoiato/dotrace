@@ -498,9 +498,9 @@ describe('race telemetry', () => {
 describe('grass shortcut penalties', () => {
   it('detects cutting through grass without landing on it', () => {
     const track = makeTrack();
-    // x=5 is the zebra square beside the asphalt. Push a second grass cell
-    // past it so the infield is real grass, not the border.
-    track.grid[1][4] = 'grass';
+    // Column 4 is the zebra square; column 5 is past half a square, and the
+    // whole column is grass so a diagonal neighbor cannot pull it back in.
+    for (let y = 0; y < track.height; y++) track.grid[y][4] = 'grass';
     expect(isKerbGrass(track, 4, 1)).toBe(true);
     expect(isKerbGrass(track, 5, 1)).toBe(false);
     expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 3, y: 1 })).toBe(false);
@@ -511,14 +511,78 @@ describe('grass shortcut penalties', () => {
     expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(false);
   });
 
-  it('does not penalize clipping the zebra on Monza', () => {
+  it('does not penalize clipping the inner half of the zebra on Monza', () => {
     const monza = TRACKS.find((t) => t.id === 'monza')!;
-    // Lesmo edge: landing on the zebra square, and a line that only nicks
-    // that border while finishing on the asphalt.
+    // Lesmo edge: landing on the zebra square is the center of that border
+    // cell — exactly half a square out, which stays legal.
     expect(isKerbGrass(monza, 36, 4)).toBe(true);
     expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 36, y: 4 })).toBe(false);
     expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 33, y: 6 })).toBe(false);
     expect(segmentCrossesGrass(monza, { x: 36, y: 5 }, { x: 33, y: 6 })).toBe(false);
+    // The reverse corner chord crosses the outer half of that same zebra.
+    expect(isGrassShortcut(monza, { x: 33, y: 6 }, { x: 36, y: 4 })).toBe(true);
+  });
+
+  it('penalizes a chord that leaves more than half a zebra square', () => {
+    // Inside of a corner. Landing on the border-cell center is exactly half
+    // a square and stays legal. A straight cut past that midline is not.
+    const grid = [
+      ['track', 'track', 'track', 'track'],
+      ['track', 'grass', 'grass', 'grass'],
+      ['track', 'grass', 'grass', 'grass'],
+      ['grass', 'grass', 'grass', 'grass'],
+    ] as TrackDefinition['grid'];
+    const track: TrackDefinition = {
+      id: 'corner',
+      nameKey: 'tracks.corner',
+      width: 4,
+      height: 4,
+      grid,
+      startLine: [{ x: 0, y: 0 }],
+      arrows: [],
+      centerline: [
+        { x: 0, y: 0 },
+        { x: 3, y: 0 },
+      ],
+    };
+
+    expect(isGrassShortcut(track, { x: 1, y: 0 }, { x: 1, y: 1 })).toBe(false);
+    expect(isGrassShortcut(track, { x: 3, y: 0 }, { x: 0, y: 2 })).toBe(true);
+    expect(segmentCrossesGrass(track, { x: 3, y: 0 }, { x: 0, y: 2 })).toBe(true);
+    expect(isGrassShortcut(track, { x: 3, y: 0 }, { x: 2, y: 0 })).toBe(false);
+  });
+
+  it('penalizes the outer half of a rumble kerb the same way', () => {
+    const grid = [
+      ['track', 'track', 'track', 'track', 'track', 'track'],
+      ['track', 'track', 'track', 'track', 'track', 'track'],
+      ['track', 'track', 'rumble', 'rumble', 'grass', 'grass'],
+      ['track', 'rumble', 'grass', 'grass', 'grass', 'grass'],
+      ['grass', 'grass', 'grass', 'grass', 'grass', 'grass'],
+    ] as TrackDefinition['grid'];
+    const track: TrackDefinition = {
+      id: 'rumble-corner',
+      nameKey: 'tracks.rumble',
+      width: 6,
+      height: 5,
+      grid,
+      startLine: [{ x: 0, y: 0 }],
+      arrows: [],
+      centerline: [
+        { x: 0, y: 0 },
+        { x: 5, y: 0 },
+      ],
+    };
+
+    expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 2, y: 2 })).toBe(false);
+    expect(isGrassShortcut(track, { x: 5, y: 1 }, { x: 1, y: 3 })).toBe(true);
+  });
+
+  it('does not penalize coming back from past the zebra', () => {
+    const track = makeTrack();
+    track.grid[1][4] = 'grass';
+    expect(isGrassShortcut(track, { x: 5, y: 1 }, { x: 3, y: 1 })).toBe(false);
+    expect(segmentCrossesGrass(track, { x: 5, y: 1 }, { x: 3, y: 1 })).toBe(false);
   });
 
   it('still penalizes infield grass on every circuit', () => {
