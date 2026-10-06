@@ -3,6 +3,7 @@ import {
   ElementRef,
   Input,
   OnChanges,
+  OnDestroy,
   SimpleChanges,
   ViewChild,
 } from '@angular/core';
@@ -37,16 +38,26 @@ const S = 4;
     `,
   ],
 })
-export class MiniMapComponent implements OnChanges {
+export class MiniMapComponent implements OnChanges, OnDestroy {
   @ViewChild('canvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
   @Input() state: GameState | null = null;
   /** Scale to the parent width (used when the map floats over the track). */
   @Input() compact = false;
 
+  /** Redraws while a blue boost ring is blinking. */
+  private pulsing = false;
+  private pulseFrame = 0;
+  private lastPulseDraw = 0;
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['state']) {
       requestAnimationFrame(() => this.draw());
     }
+  }
+
+  ngOnDestroy(): void {
+    this.pulsing = false;
+    cancelAnimationFrame(this.pulseFrame);
   }
 
   private draw(): void {
@@ -68,7 +79,34 @@ export class MiniMapComponent implements OnChanges {
 
     this.drawRibbon(ctx, track, s);
     this.drawTrails(ctx, state, s);
-    this.drawCars(ctx, state, s);
+    const boosted = this.drawCars(ctx, state, s);
+    this.syncBoostPulse(boosted);
+  }
+
+  private syncBoostPulse(active: boolean): void {
+    if (active && !this.pulsing) {
+      this.pulsing = true;
+      const loop = (now: number) => {
+        if (!this.pulsing) return;
+        this.pulseFrame = requestAnimationFrame(loop);
+        if (now - this.lastPulseDraw < 50) return;
+        this.lastPulseDraw = now;
+        this.draw();
+      };
+      this.pulseFrame = requestAnimationFrame(loop);
+    } else if (!active && this.pulsing) {
+      this.pulsing = false;
+      cancelAnimationFrame(this.pulseFrame);
+    }
+  }
+
+  /** Asphalt cell inside a DRS zone. Grass is never tinted. */
+  private inDrsZone(track: TrackDefinition, x: number, y: number): boolean {
+    const zones = track.drsZones ?? [];
+    for (const zone of zones) {
+      if (x >= zone.x0 && x <= zone.x1 && y >= zone.y0 && y <= zone.y1) return true;
+    }
+    return false;
   }
 
   private drawRibbon(ctx: CanvasRenderingContext2D, track: TrackDefinition, s: number): void {
@@ -76,7 +114,7 @@ export class MiniMapComponent implements OnChanges {
       for (let x = 0; x < track.width; x++) {
         const tile = track.grid[y][x];
         if (tile === 'track') {
-          ctx.fillStyle = '#cbd5e1';
+          ctx.fillStyle = this.inDrsZone(track, x, y) ? '#60a5fa' : '#cbd5e1';
           ctx.fillRect(x * s, y * s, s, s);
         } else if (tile === 'finish') {
           ctx.fillStyle = PAPER_COLORS.finish;
@@ -139,29 +177,42 @@ export class MiniMapComponent implements OnChanges {
     }
   }
 
-  private drawCars(ctx: CanvasRenderingContext2D, state: GameState, s: number): void {
+  private drawCars(ctx: CanvasRenderingContext2D, state: GameState, s: number): boolean {
     const activeId =
       state.phase === 'GAME_ROUND' ? state.turnOrder[state.currentTurnIndex] : null;
+    const alpha = performance.now() % 640 < 352 ? 0.95 : 0.18;
+    let anyBoost = false;
     for (const player of state.players) {
       if (player.finishOrder !== undefined && state.phase !== 'GAME_OVER') continue;
       const cx = player.position.x * s + s / 2;
       const cy = player.position.y * s + s / 2;
+      const boosted = !!player.drsActive || !!player.ersActive;
+      if (boosted) anyBoost = true;
+
+      if (boosted) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, s * 2.4, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(34, 211, 238, ${alpha})`;
+        ctx.lineWidth = Math.max(1.5, s / 2);
+        ctx.stroke();
+      }
 
       if (player.connectionId === activeId) {
         ctx.beginPath();
-        ctx.arc(cx, cy, s * 1.6, 0, Math.PI * 2);
+        ctx.arc(cx, cy, boosted ? s * 2 : s * 1.6, 0, Math.PI * 2);
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = Math.max(1, s / 3);
         ctx.stroke();
       }
 
       ctx.beginPath();
-      ctx.arc(cx, cy, s * 1.1, 0, Math.PI * 2);
+      ctx.arc(cx, cy, boosted ? s * 1.55 : s * 1.1, 0, Math.PI * 2);
       ctx.fillStyle = player.color;
       ctx.fill();
       ctx.strokeStyle = '#0b1220';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+    return anyBoost;
   }
 }

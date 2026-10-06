@@ -41,6 +41,10 @@ export interface ReplayPlayerState {
   finishRound?: number;
   passedCheckpoint?: boolean;
   diceRoll?: number;
+  /** DRS still open on this frame. */
+  drsActive?: boolean;
+  /** This car's latest move spent an ERS bar. */
+  ersActive?: boolean;
 }
 
 export interface ReplayFrame {
@@ -176,6 +180,8 @@ export function buildReplayFrames(
       finishOrder: info.finishOrder,
       finishedAt: info.finishedAt,
       finishRound: info.finishRound,
+      drsActive: !!rec?.drsActive,
+      ersActive: !!rec?.ersActive,
     });
   }
 
@@ -206,6 +212,8 @@ export function buildReplayFrames(
         trail: [{ ...rec.position }],
         lap: rec.lap,
         diceRoll: info.diceRoll,
+        drsActive: !!rec.drsActive,
+        ersActive: !!rec.ersActive,
       };
       currentState.set(rec.connectionId, ps);
     }
@@ -223,6 +231,8 @@ export function buildReplayFrames(
       finishOrder: info?.finishOrder,
       finishedAt: info?.finishedAt,
       finishRound: info?.finishRound,
+      drsActive: !!rec.drsActive,
+      ersActive: !!rec.ersActive,
     });
 
     frames.push({

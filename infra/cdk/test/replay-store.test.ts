@@ -58,6 +58,9 @@ describe('replay payload', () => {
     expect(normalizeReplayPayload({ ...sample(), m: 'ENDURANCE' })).toBeNull();
     expect(normalizeReplayPayload({ ...sample(), r: [] })).toBeNull();
     expect(normalizeReplayPayload({ ...sample(), r: [[9, 0, 0, 0, 0, 0, 0, 1]] })).toBeNull();
+    expect(normalizeReplayPayload({ ...sample(), r: [[0, 0, 0, 0, 0, 0, 0, 1, 4]] })).toBeNull();
+    const withBoost = normalizeReplayPayload({ ...sample(1), r: [[0, 1, 2, 3, 1, 0, 0, 1, 3]] });
+    expect(withBoost?.r[0]).toEqual([0, 1, 2, 3, 1, 0, 0, 1, 3]);
   });
 
   it('stamps a one-day ttl and a short id', () => {

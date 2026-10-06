@@ -279,6 +279,7 @@ export class GameEngineService implements OnDestroy {
       player.drsActive = false;
       player.drsZonesUsed = [];
       player.ersCharge = 0;
+      player.ersActive = false;
       player.trail = [{ ...start }];
       player.lap = 1;
     });
@@ -355,6 +356,7 @@ export class GameEngineService implements OnDestroy {
       player.isOffTrack = false;
     }
     settleBoostFromGears(player, previousGear, gearOf(player.velocity));
+    player.ersActive = limits.spendErs;
 
     if (grassShortcut) {
       applyGrassPenalty(player, state);
@@ -402,6 +404,8 @@ export class GameEngineService implements OnDestroy {
       velocity: { ...player.velocity },
       isOffTrack: player.isOffTrack,
       lap: player.lap,
+      drsActive: !!player.drsActive,
+      ersActive: !!player.ersActive,
     });
 
     if (this.tryEndRace(state)) return true;
