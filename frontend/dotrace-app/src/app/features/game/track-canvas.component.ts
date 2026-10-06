@@ -12,6 +12,7 @@ import {
 import { TranslateModule } from '@ngx-translate/core';
 import { PAPER_COLORS, getTrackById } from '../../core/models/tracks';
 import {
+  ERS_MAX_DELTA,
   GameState,
   MAX_GEAR,
   Player,
@@ -802,6 +803,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       drs: this.drsIntent,
       ers: this.ersIntent,
     });
+    const step = limits.spendErs ? ERS_MAX_DELTA : 1;
     this.validMoves = getValidMoves(
       active,
       track,
@@ -809,7 +811,16 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       state.round,
       limits.maxGear,
       limits.maxDelta
-    );
+    ).filter((m) => {
+      const dx = m.velocity.x - active.velocity.x;
+      const dy = m.velocity.y - active.velocity.y;
+      const onPad =
+        Math.abs(dx) <= step && Math.abs(dy) <= step && dx % step === 0 && dy % step === 0;
+      // Emergency stop from speed sits outside the pad step; the center button offers it.
+      const emergencyStop =
+        m.velocity.x === 0 && m.velocity.y === 0 && (Math.abs(dx) > step || Math.abs(dy) > step);
+      return onPad || emergencyStop;
+    });
     const color = active.color;
     for (const m of this.validMoves) {
       const px = m.landing.x * CELL;

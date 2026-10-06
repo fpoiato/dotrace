@@ -126,8 +126,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   showCelebration = false;
   showReplay = false;
   padOptions: PadOption[] = [];
-  /** Delta-2 landings the 3×3 pad cannot show. Only while ERS is selected. */
-  extendedOptions: PadOption[] = [];
   /** Next SUBMIT_MOVE asks the host to open DRS. Does not spend the turn. */
   drsIntent = false;
   /** Next SUBMIT_MOVE spends one ERS bar. */
@@ -191,9 +189,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * The 3×3 "gear shift" pad: each button adjusts velocity by ±1 on each
-   * axis (center = coast). Buttons are enabled only for moves the host
-   * would accept, and flagged when the landing square is gravel.
+   * The 3×3 gear pad. Each arrow is ±1 on an axis (center = coast).
+   * With ERS held, the same nine buttons are ±2. Buttons light up only for
+   * moves the host would accept, and turn amber off the asphalt.
    */
   private buildPadOptions(state: GameState | null): PadOption[] {
     const options: PadOption[] = [];
@@ -214,13 +212,15 @@ export class GameRoomComponent implements OnInit, OnDestroy {
           )
         : [];
 
+    const step = me && state && this.ersIntent && this.ersButtonEnabled(state, me) ? 2 : 1;
+
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         const key = `${dx},${dy}`;
         let velocity: Vector2D | null = null;
         let grass = false;
         if (me && track) {
-          const v = { x: me.velocity.x + dx, y: me.velocity.y + dy };
+          const v = { x: me.velocity.x + dx * step, y: me.velocity.y + dy * step };
           const match = valid.find((m) => m.velocity.x === v.x && m.velocity.y === v.y);
           if (match) {
             velocity = match.velocity;
@@ -233,36 +233,22 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     }
 
     // Boxed-in at speed: the only legal move is the emergency stop, which is
-    // not reachable via ±1 — surface it on the center button.
-    if (valid.length > 0 && options.every((o) => !o.enabled) && me && track) {
-      const stop = valid[0];
-      const centerIdx = options.findIndex((o) => o.key === '0,0');
-      const landing = landingPosition(me.position, stop.velocity);
-      options[centerIdx] = {
-        key: '0,0',
-        glyph: '■',
-        enabled: true,
-        velocity: stop.velocity,
-        grass: moveWarnsOffAsphalt(track, me.position, landing),
-      };
-    }
-
-    this.extendedOptions = [];
-    if (me && track) {
-      for (const move of valid) {
-        const dx = move.velocity.x - me.velocity.x;
-        const dy = move.velocity.y - me.velocity.y;
-        if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) continue;
-        const landing = landingPosition(me.position, move.velocity);
-        this.extendedOptions.push({
-          key: `${dx},${dy}`,
-          glyph: `${dx > 0 ? '+' : ''}${dx},${dy > 0 ? '+' : ''}${dy}`,
+    // outside the pad step (±1, or ±2 with ERS) — surface it on the center button.
+    if (options.every((o) => !o.enabled) && me && track) {
+      const stop = valid.find((m) => m.velocity.x === 0 && m.velocity.y === 0);
+      const dx = stop ? stop.velocity.x - me.velocity.x : 0;
+      const dy = stop ? stop.velocity.y - me.velocity.y : 0;
+      if (stop && (Math.abs(dx) > step || Math.abs(dy) > step)) {
+        const centerIdx = options.findIndex((o) => o.key === '0,0');
+        const landing = landingPosition(me.position, stop.velocity);
+        options[centerIdx] = {
+          key: '0,0',
+          glyph: '■',
           enabled: true,
-          velocity: move.velocity,
+          velocity: stop.velocity,
           grass: moveWarnsOffAsphalt(track, me.position, landing),
-        });
+        };
       }
-      this.extendedOptions.sort((a, b) => a.key.localeCompare(b.key));
     }
 
     return options;

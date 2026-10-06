@@ -149,26 +149,6 @@
             }
             </div>
           </div>
-          @if (extendedOptions.length > 0) {
-            <div class="mx-auto mt-1.5 flex max-w-sm flex-wrap justify-center gap-1">
-              @for (opt of extendedOptions; track opt.key) {
-                <button
-                  type="button"
-                  (click)="pad(opt)"
-                  class="h-10 min-w-12 rounded-lg border-2 px-2 font-mono text-xs font-bold active:scale-95"
-                  [class.border-amber-500]="opt.grass"
-                  [class.bg-amber-900]="opt.grass"
-                  [class.text-amber-300]="opt.grass"
-                  [class.border-cyan-500]="!opt.grass"
-                  [class.bg-slate-800]="!opt.grass"
-                  [class.text-cyan-100]="!opt.grass"
-                  [attr.aria-label]="'game.ersTarget' | translate: { move: opt.glyph }"
-                >
-                  {{ opt.glyph }}
-                </button>
-              }
-            </div>
-          }
           @if (game.isMyTurn()) {
             <p class="race-hint mt-1 text-center text-[11px] leading-tight text-slate-400">
               @if (state.gameMode === 'TIMED') {
