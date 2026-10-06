@@ -52,7 +52,7 @@ phases:
       - echo "Injecting production environment (WS URL + HTTP API + app URL + version)..."
       # Source arrives as an S3 zip, so the git sha comes from .git-sha (written by the workflow)
       - export SOURCE_REV=$(cat .git-sha 2>/dev/null || echo "${CODEBUILD_RESOLVED_SOURCE_VERSION:-local}")
-      - export APP_VERSION="1.11.23+$(echo "$SOURCE_REV" | cut -c1-7)"
+      - export APP_VERSION="1.11.24+$(echo "$SOURCE_REV" | cut -c1-7)"
       - |
         cat > frontend/dotrace-app/src/environments/environment.prod.ts <<EOF
         export const environment = {

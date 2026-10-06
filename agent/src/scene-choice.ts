@@ -14,7 +14,8 @@ export function applySceneChoice(
   scene: LayaScene,
   moves: AnnotatedMove[],
   choice: string | null,
-  heuristicPick: AnnotatedMove
+  heuristicPick: AnnotatedMove,
+  options?: { honorChoice?: boolean }
 ): AnnotatedMove {
   if (!choice || !parseMoveLabel(choice)) {
     console.warn(
@@ -41,7 +42,7 @@ export function applySceneChoice(
           move.velocity.x === bestOption.velocity.x && move.velocity.y === bestOption.velocity.y
       )
     : undefined;
-  if (bestMove) {
+  if (bestMove && !options?.honorChoice) {
     if (match.velocity.x !== bestMove.velocity.x || match.velocity.y !== bestMove.velocity.y) {
       console.warn(`[BRAIN] ${who} picked ${choice} — using best`);
     }
@@ -54,7 +55,7 @@ export function applySceneChoice(
           move.velocity.x === backOption.velocity.x && move.velocity.y === backOption.velocity.y
       )
     : undefined;
-  if (backMove) {
+  if (backMove && !options?.honorChoice) {
     if (match.velocity.x !== backMove.velocity.x || match.velocity.y !== backMove.velocity.y) {
       console.warn(`[BRAIN] ${who} picked ${choice} — using back`);
     }

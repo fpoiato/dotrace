@@ -183,7 +183,7 @@ describe('isDominatedByHeuristic', () => {
 });
 
 describe('BedrockBrain', () => {
-  const options = { modelId: 'amazon.nova-micro-v1:0', region: 'us-east-1' };
+  const options = { modelId: 'us.anthropic.claude-opus-4-7', region: 'us-east-1' };
 
   function bestMove(summary: BoardSummary, moves: AnnotatedMove[]): AnnotatedMove {
     const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
@@ -195,9 +195,17 @@ describe('BedrockBrain', () => {
     return match!;
   }
 
-  it('drives best without calling Bedrock', async () => {
+  it('asks the model and drives a legal choice that is not the labeled best', async () => {
     const { summary, moves } = fixtures();
     const best = bestMove(summary, moves);
+    const alt = moves.find(
+      (move) =>
+        (move.velocity.x !== best.velocity.x || move.velocity.y !== best.velocity.y) &&
+        (move.velocity.x !== 0 || move.velocity.y !== 0) &&
+        !move.grassShortcut &&
+        (move.landingTile === 'track' || move.landingTile === 'finish')
+    );
+    expect(alt).toBeDefined();
     let called = false;
     const brain = new BedrockBrain({
       ...options,
@@ -205,13 +213,15 @@ describe('BedrockBrain', () => {
       client: {
         send: () => {
           called = true;
-          return Promise.reject(new Error('should not call Bedrock'));
+          return Promise.resolve({
+            output: { message: { content: [{ text: labelOf(summary, alt!) }] } },
+          });
         },
       },
     });
     const chosen = await brain.pickMove(summary, moves);
-    expect(called).toBe(false);
-    expect(chosen.velocity).toEqual(best.velocity);
+    expect(called).toBe(true);
+    expect(chosen.velocity).toEqual(alt!.velocity);
   });
 
   it('sends the Laya decide packet when the scene has no labeled step', async () => {
@@ -308,22 +318,18 @@ describe('BedrockBrain', () => {
     expect(chosen).toBe(heuristic);
   });
 
-  it('plays best when a best step exists, even if the model would stand still', async () => {
+  it('ignores a standstill answer when a moving option exists', async () => {
     const { summary, moves } = fixtures();
-    const best = bestMove(summary, moves);
-    let called = false;
+    const still = summary.scene.options.find(
+      (option) => !option.illegal && option.velocity.x === 0 && option.velocity.y === 0
+    );
+    expect(still).toBeDefined();
     const brain = new BedrockBrain({
       ...options,
-      client: {
-        send: () => {
-          called = true;
-          return Promise.reject(new Error('should not call Bedrock'));
-        },
-      },
+      fallbackSeed: 'AI Pilot',
+      client: stubClient(still!.label),
     });
     const chosen = await brain.pickMove(summary, moves);
-    expect(called).toBe(false);
-    expect(chosen.velocity).toEqual(best.velocity);
     expect(chosen.velocity.x !== 0 || chosen.velocity.y !== 0).toBe(true);
   });
 
@@ -338,7 +344,7 @@ describe('BedrockBrain', () => {
     expect(chosen).toBe(single[0]);
   });
 
-  it('skips Bedrock while gear-limited and still drives best', async () => {
+  it('still asks the model while gear-limited', async () => {
     const { summary, moves } = fixtures();
     summary.gearLimited = true;
     const best = bestMove(summary, moves);
@@ -349,12 +355,14 @@ describe('BedrockBrain', () => {
       client: {
         send: () => {
           called = true;
-          return Promise.reject(new Error('should not call Bedrock'));
+          return Promise.resolve({
+            output: { message: { content: [{ text: labelOf(summary, best) }] } },
+          });
         },
       },
     });
     const chosen = await brain.pickMove(summary, moves);
-    expect(called).toBe(false);
+    expect(called).toBe(true);
     expect(chosen.velocity).toEqual(best.velocity);
   });
 

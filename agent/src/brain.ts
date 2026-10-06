@@ -3,10 +3,9 @@
  *
  * Every brain receives the annotated legal-move list and MUST return one of
  * those moves — illegal outputs are impossible by construction. The Bedrock
- * brain asks Nova with the same decide packet Laya is fine-tuned on. A legal
- * choice id is driven like Laya (the `best` asphalt step, or `back` off
- * track). On any failure it falls back to the heuristic so a race is never
- * stalled by the model.
+ * brain asks Claude Opus with the same decide packet Laya uses. A legal
+ * choice id is driven as Opus answered it. On any failure it falls back to
+ * the heuristic so a race is never stalled by the model.
  */
 import {
   BedrockRuntimeClient,
@@ -18,11 +17,7 @@ import {
   DifficultyTuning,
   difficultyFromUnknown,
 } from './difficulty';
-import {
-  BEDROCK_LAYA_SYSTEM,
-  layaPromptText,
-  supervisedChoice,
-} from './bedrock-dataset';
+import { BEDROCK_LAYA_SYSTEM, layaPromptText } from './bedrock-dataset';
 import { parseMoveLabel } from './laya-scene';
 import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
@@ -298,8 +293,9 @@ export class BedrockBrain implements MoveBrain {
         styleOrSeed: options.fallbackSeed ?? 'bedrock-fallback',
         difficulty: this.difficulty,
       });
-    this.maxTokens = options.maxTokens ?? 64;
-    this.timeoutMs = options.timeoutMs ?? 2_500;
+    this.maxTokens = options.maxTokens ?? 128;
+    // Opus 4.7 is slower than Nova Micro. Stay under the host's 28s turn wait.
+    this.timeoutMs = options.timeoutMs ?? 20_000;
   }
 
   get moveDelayMs(): number {
@@ -309,24 +305,11 @@ export class BedrockBrain implements MoveBrain {
   async pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove> {
     if (moves.length === 1) return moves[0];
 
-    // Always know the safe pick first — used as floor quality and as recovery path.
+    // Always know the safe pick first — recovery path when Opus fails.
     const heuristicPick = await this.fallback.pickMove(summary, moves);
 
     const scene = summary.scene;
     if (!scene) return heuristicPick;
-
-    // `best` / `back` is the move the fine-tune is taught to echo, and the
-    // same label we would play after the model answered. Skip the round trip.
-    const labeled = supervisedChoice(scene);
-    if (labeled) {
-      return applySceneChoice('Bedrock', scene, moves, labeled, heuristicPick);
-    }
-
-    // Gear-capped recovery with no labeled step must stay local. Nova is slow
-    // and a miss here freezes the turn.
-    if (summary.gearLimited) {
-      return heuristicPick;
-    }
 
     try {
       const command = new ConverseCommand({
@@ -338,13 +321,17 @@ export class BedrockBrain implements MoveBrain {
             content: [{ text: layaPromptText(scene) }],
           },
         ],
-        inferenceConfig: { maxTokens: this.maxTokens, temperature: 0 },
+        // Opus 4.7 rejects temperature, topP, and topK.
+        inferenceConfig: { maxTokens: this.maxTokens },
       });
 
       const response = await this.sendWithTimeout(command);
-      const text = response.output?.message?.content?.[0]?.text ?? '';
+      const text = (response.output?.message?.content ?? [])
+        .map((block) => block.text ?? '')
+        .filter((part) => part.length > 0)
+        .join('\n');
       const choice = this.parseChoice(text, scene, moves);
-      return applySceneChoice('Bedrock', scene, moves, choice, heuristicPick);
+      return applySceneChoice('Bedrock', scene, moves, choice, heuristicPick, { honorChoice: true });
     } catch (err) {
       console.warn('[BRAIN] Bedrock call failed — using heuristic:', err instanceof Error ? err.message : err);
     }
@@ -371,8 +358,8 @@ export class BedrockBrain implements MoveBrain {
   }
 
   /**
-   * The fine-tune answers with a bare choice id (`d0_p1`). A base Nova may
-   * still wrap that id in JSON, or answer with the old moveIndex.
+   * Opus should answer with a bare choice id (`d0_p1`). It may still wrap
+   * that id in JSON, or answer with the old moveIndex.
    */
   private parseChoice(text: string, scene: BoardSummary['scene'], moves: AnnotatedMove[]): string | null {
     const trimmed = text.trim();

@@ -5,13 +5,13 @@ protocol as any human (`JOIN_ROOM` → host approval → `RELAY` →
 `FORWARD_TO_HOST`/`SUBMIT_MOVE`), and picks moves with either:
 
 - **Bot / Laya** — the lobby Bot asks [Ollaya](https://ollaya.dev) (`laya:typed-decisions`, Convai Innovations) to pick one of the nine gear changes from the road ahead of the car. The packet says this is a vector race (gear carries; each option adds -1, 0, or +1 to vx and vy) and names the circuit direction on each option (`best`, `with race`, `brake`, `too fast`, `wrong way`, `back`), plus the next bend, the stopping distance, the pace of the stretch, where the current velocity lands for the next three turns if it stays unchanged, and that a grass cut caps gear at 1. Best aims a few cells along the racing line and keeps the gear up while the asphalt holds. The turn submits that step, so a sideways or slower label is not driven. Cells behind the car are left out of the map. That tag is the English typed-choice ModernBERT with a 1024-token context, questions included. The router name `laya` still sends English to `laya:en` (512) and is not what this bot requests. A truncated answer is discarded. The model runs on the shared `t4g.medium` in [fpoiato/laya-host](https://github.com/fpoiato/laya-host). Dot Race still starts it on the first connection and asks to stop after the room has been empty for 3 minutes; the host stays up if another project (Truco, for example) holds a lease. If Ollaya is still booting, the call fails, or the state is truncated, the styled heuristic plays that turn.
-- **IA / Bedrock** — Amazon Bedrock Converse (`amazon.nova-micro-v1:0`, or a
-  custom-model ARN after the fine-tune). The user turn is the same decide
-  packet the Bot posts to Laya: circuit state, `LAYA_MOVE_INSTRUCTIONS`, and
-  the nine gear-change criteria. The model answers with a choice id
-  (`d0_p1`). A legal id is driven like Laya (`best` on asphalt, `back` off
-  the track). Falls back to the styled heuristic on model failure. The
-  supervised set and the job command live in `finetune/`. Small per-turn cost.
+- **IA / Bedrock** — Amazon Bedrock Converse (`us.anthropic.claude-opus-4-7`,
+  Claude Opus 4.7). The user turn is the same decide packet the Bot posts to
+  Laya: circuit state, `LAYA_MOVE_INSTRUCTIONS`, and the nine gear-change
+  criteria. The model answers with a choice id (`d0_p1`). A legal id is
+  driven as answered. Opus 4.7 rejects `temperature`. Falls back to the
+  styled heuristic on model failure. The old Nova fine-tune set still lives
+  in `finetune/`.
 
 The lobby host picks Bot or IA when adding a pilot (`brain` on `SPAWN_AI_PLAYER`).
 
@@ -93,10 +93,9 @@ The lobby has a host-only **Add AI pilot** button:
 4. The AI's `JOIN_ROOM` consumes the marker and is auto-approved server-side —
    it never sits in the host's pending queue.
 
-The runner has `bedrock:InvokeModel` scoped to Amazon Nova foundation models,
-inference profiles, and this account's custom models (the Laya-packet
-fine-tune). If model access is not enabled in the region, the brain silently
-falls back to the heuristic and the race still works.
+The runner has `bedrock:InvokeModel` scoped to the US Opus 4.7 inference
+profile and that foundation model. If model access is not enabled in the
+region, the brain silently falls back to the heuristic and the race still works.
 
 ## AWS deployment notes
 

@@ -1,6 +1,12 @@
 /** Runtime configuration for the AI player, from env vars or CLI args. */
 import { AiDifficulty, DIFFICULTY_TUNING, difficultyFromUnknown } from './difficulty';
 
+/**
+ * Claude Opus 4.7 on Bedrock Converse. The base id has no on-demand throughput;
+ * the US geo profile keeps the call in us-east-1, us-east-2, and us-west-2.
+ */
+export const DEFAULT_BEDROCK_MODEL_ID = 'us.anthropic.claude-opus-4-7';
+
 export interface AgentConfig {
   /** WebSocket endpoint (push channel). */
   wsUrl: string;
@@ -14,7 +20,7 @@ export interface AgentConfig {
   modelId: string;
   /** AWS region for Bedrock. */
   region: string;
-  /** 'laya' asks Ollaya; 'bedrock' uses Nova; 'heuristic' is local. */
+  /** 'laya' asks Ollaya; 'bedrock' uses Opus; 'heuristic' is local. */
   brain: 'bedrock' | 'heuristic' | 'laya';
   /** easy | medium | hard | pro — tunes speed, mistakes, gear cap. */
   difficulty: AiDifficulty;
@@ -45,7 +51,7 @@ export function loadConfig(): AgentConfig {
     apiUrl: (process.env.API_URL ?? 'http://localhost:3001').replace(/\/$/, ''),
     roomCode,
     nickname,
-    modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
+    modelId: process.env.BEDROCK_MODEL_ID ?? DEFAULT_BEDROCK_MODEL_ID,
     region: process.env.AWS_REGION ?? 'us-east-1',
     brain,
     difficulty,

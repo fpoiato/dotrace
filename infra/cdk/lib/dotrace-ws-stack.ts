@@ -218,11 +218,11 @@ export class DotRaceWsStack extends Stack {
         WS_URL: stage.url,
         API_URL: httpApi.apiEndpoint,
         CONNECTIONS_TABLE: connectionsTable.tableName,
-        BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
+        BEDROCK_MODEL_ID: 'us.anthropic.claude-opus-4-7',
         // Fallback when spawn payload omits brain; host chooses per pilot in lobby.
         BRAIN: 'heuristic',
         AI_HANDOFF_AFTER_MS: String(10 * 60 * 1000),
-        BEDROCK_TIMEOUT_MS: '2500',
+        BEDROCK_TIMEOUT_MS: '20000',
         LAYA_TIMEOUT_MS: '2500',
       },
       logRetention: RetentionDays.TWO_WEEKS,
@@ -233,12 +233,17 @@ export class DotRaceWsStack extends Stack {
       new PolicyStatement({
         actions: ['bedrock:InvokeModel'],
         resources: [
-          'arn:aws:bedrock:*::foundation-model/amazon.nova-*',
-          `arn:aws:bedrock:*:${this.account}:inference-profile/*.amazon.nova-*`,
-          // Nova Micro fine-tune trained on the Laya decide packet.
-          `arn:aws:bedrock:*:${this.account}:custom-model/*`,
-          `arn:aws:bedrock:*:${this.account}:provisioned-model/*`,
+          // System profile plus the foundation model it may route to.
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/us.anthropic.claude-opus-4-7`,
+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-7',
         ],
+      })
+    );
+    // Opus 4.7 is billed through AWS Marketplace. First invoke subscribes the account.
+    aiPlayerFn.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['aws-marketplace:ViewSubscriptions', 'aws-marketplace:Subscribe'],
+        resources: ['*'],
       })
     );
 

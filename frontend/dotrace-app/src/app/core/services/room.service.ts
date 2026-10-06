@@ -289,7 +289,7 @@ export class RoomService {
   /**
    * Add an AI seat. The server approves it immediately and does not open a
    * socket. The HTTP reply and the PLAYER_APPROVED push both land here.
-   * @param brain 'laya' = Bot (Ollaya), 'heuristic' = local planner, 'bedrock' = IA (Nova Micro)
+   * @param brain 'laya' = Bot (Ollaya), 'heuristic' = local planner, 'bedrock' = IA (Opus)
    * @param difficulty easy | medium | hard | pro
    */
   async spawnAiPlayer(
