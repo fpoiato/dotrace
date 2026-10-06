@@ -16,6 +16,7 @@ import {
   canPlayerMove,
   formatRaceTime,
   getTileAt,
+  ersForwardDeltas,
   getValidMoves,
   isGearLimited,
   isGrassShortcut,
@@ -72,6 +73,17 @@ const PAD_GLYPHS: Record<string, string> = {
   '0,1': '↓',
   '1,1': '↘',
 };
+
+/** Arrow for one ERS step. Axis-aligned headings keep the steer visible; diagonals use the dominant axis. */
+function ersGlyph(velocity: Vector2D, delta: Vector2D): string {
+  const sx = Math.sign(delta.x);
+  const sy = Math.sign(delta.y);
+  if (Math.abs(velocity.x) === Math.abs(velocity.y)) {
+    if (Math.abs(delta.x) > Math.abs(delta.y)) return PAD_GLYPHS[`${sx},0`];
+    if (Math.abs(delta.y) > Math.abs(delta.x)) return PAD_GLYPHS[`0,${sy}`];
+  }
+  return PAD_GLYPHS[`${sx},${sy}`];
+}
 
 @Component({
   selector: 'app-game-room',
@@ -144,6 +156,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   showCelebration = false;
   showReplay = false;
   padOptions: PadOption[] = [];
+  /** ERS is held: the pad is the forward line only. */
+  ersPad = false;
   /** Next SUBMIT_MOVE asks the host to open DRS. Does not spend the turn. */
   drsIntent = false;
   /** Next SUBMIT_MOVE spends one ERS bar. */
@@ -215,8 +229,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   /**
    * The 3×3 gear pad. Each arrow is ±1 on an axis (center = coast).
-   * With ERS held, the same nine buttons are ±2. Buttons light up only for
-   * moves the host would accept, and turn amber off the asphalt.
+   * With ERS held, that grid is replaced by the forward line only.
+   * Buttons light up only for moves the host would accept, and turn amber off the asphalt.
    */
   private buildPadOptions(state: GameState | null): PadOption[] {
     const options: PadOption[] = [];
@@ -225,6 +239,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const me = state?.players.find((p) => p.connectionId === myId);
     const canMove =
       !!state && !!myId && canPlayerMove(state, myId) && me?.finishOrder === undefined;
+    const ersOn = !!(state && me && this.boostRequest(state, me).ers);
+    this.ersPad = ersOn;
 
     const valid =
       canMove && me && track
@@ -237,7 +253,20 @@ export class GameRoomComponent implements OnInit, OnDestroy {
           )
         : [];
 
-    const step = me && state && this.ersIntent && this.ersButtonEnabled(state, me) ? 2 : 1;
+    if (ersOn && me) {
+      return ersForwardDeltas(me.velocity).map((delta) => {
+        const next = { x: me.velocity.x + delta.x, y: me.velocity.y + delta.y };
+        const match = valid.find((m) => m.velocity.x === next.x && m.velocity.y === next.y);
+        const landing = match && track ? landingPosition(me.position, match.velocity) : null;
+        return {
+          key: `${delta.x},${delta.y}`,
+          glyph: ersGlyph(me.velocity, delta),
+          enabled: !!match,
+          velocity: match ? match.velocity : null,
+          grass: !!(match && track && landing && moveWarnsOffAsphalt(track, me.position, landing)),
+        };
+      });
+    }
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -245,7 +274,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         let velocity: Vector2D | null = null;
         let grass = false;
         if (me && track) {
-          const v = { x: me.velocity.x + dx * step, y: me.velocity.y + dy * step };
+          const v = { x: me.velocity.x + dx, y: me.velocity.y + dy };
           const match = valid.find((m) => m.velocity.x === v.x && m.velocity.y === v.y);
           if (match) {
             velocity = match.velocity;
@@ -258,12 +287,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     }
 
     // Boxed-in at speed: the only legal move is the emergency stop, which is
-    // outside the pad step (±1, or ±2 with ERS) — surface it on the center button.
+    // outside the ±1 pad — surface it on the center button.
     if (options.every((o) => !o.enabled) && me && track) {
       const stop = valid.find((m) => m.velocity.x === 0 && m.velocity.y === 0);
       const dx = stop ? stop.velocity.x - me.velocity.x : 0;
       const dy = stop ? stop.velocity.y - me.velocity.y : 0;
-      if (stop && (Math.abs(dx) > step || Math.abs(dy) > step)) {
+      if (stop && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
         const centerIdx = options.findIndex((o) => o.key === '0,0');
         const landing = landingPosition(me.position, stop.velocity);
         options[centerIdx] = {

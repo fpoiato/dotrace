@@ -460,7 +460,10 @@ export const MAX_GEAR = 6;
 /** Gear ceiling while DRS is open. Gear 8 is never legal. */
 export const DRS_MAX_GEAR = 7;
 
-/** Per-axis change while an ERS bar is spent on the move. */
+/**
+ * Extra step along the direction of travel while an ERS bar is spent.
+ * The other axis stays within ±1. There is no brake ERS.
+ */
 export const ERS_MAX_DELTA = 2;
 
 /** ERS battery cap, in quarter-bars. */
@@ -498,6 +501,41 @@ export const GRASS_PENALTY_TURNS_REPEAT = 5;
 export const GRASS_PENALTY_TIMED_FIRST_MS = 5000;
 export const GRASS_PENALTY_TIMED_REPEAT_MS = 10000;
 
+/**
+ * The three ERS steps, driver's left to right.
+ * Each one adds {@link ERS_MAX_DELTA} along the current direction of travel
+ * and at most 1 of steering. Stopped cars have no forward line.
+ * On a diagonal the straight step is +2 on both axes, with the two
+ * shallower neighbours beside it.
+ */
+export function ersForwardDeltas(velocity: Vector2D): Vector2D[] {
+  const ax = Math.abs(velocity.x);
+  const ay = Math.abs(velocity.y);
+  if (ax === 0 && ay === 0) return [];
+  const sx = Math.sign(velocity.x);
+  const sy = Math.sign(velocity.y);
+  const candidates: Vector2D[] =
+    ax === ay
+      ? [
+          { x: sx * ERS_MAX_DELTA, y: sy * MAX_GEAR_DELTA },
+          { x: sx * ERS_MAX_DELTA, y: sy * ERS_MAX_DELTA },
+          { x: sx * MAX_GEAR_DELTA, y: sy * ERS_MAX_DELTA },
+        ]
+      : ax > ay
+        ? [-1, 0, 1].map((lateral) => ({ x: sx * ERS_MAX_DELTA, y: lateral }))
+        : [-1, 0, 1].map((lateral) => ({ x: lateral, y: sy * ERS_MAX_DELTA }));
+  // Screen Y grows downward, so this cross product is the driver's left.
+  const leftRank = (delta: Vector2D) => sy * delta.x - sx * delta.y;
+  return candidates.sort((a, b) => leftRank(b) - leftRank(a));
+}
+
+/** True when `next` is one of the forward ERS steps from `current`. */
+export function isErsForwardDelta(current: Vector2D, next: Vector2D): boolean {
+  const dvx = next.x - current.x;
+  const dvy = next.y - current.y;
+  return ersForwardDeltas(current).some((delta) => delta.x === dvx && delta.y === dvy);
+}
+
 export function isValidGearChange(
   current: Vector2D,
   next: Vector2D,
@@ -516,6 +554,8 @@ export function isValidGearChange(
       OFF_TRACK_GEARS.includes(next.y as (typeof OFF_TRACK_GEARS)[number])
     );
   }
+  // Spending ERS only opens the forward line. A bigger brake is not a move.
+  if (delta > MAX_GEAR_DELTA && !isErsForwardDelta(current, next)) return false;
   return gearOf(next) <= maxGear;
 }
 
@@ -878,8 +918,9 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
  * Enumerate valid next velocities and landing squares.
  * Used both for UI highlighting and host-side move validation.
  * Cars may cross each other's paths, but cannot land on an occupied cell.
- * If every candidate lands outside the grid, an emergency stop
+ * If every normal candidate lands outside the grid, an emergency stop
  * (velocity {0,0}, stay in place) is offered so the game never soft-locks.
+ * An ERS request (maxDelta above 1) only returns the forward line.
  */
 export function getValidMoves(
   player: Player,
@@ -909,7 +950,9 @@ export function getValidMoves(
     }
   }
 
-  if (moves.length === 0) {
+  // ERS with nowhere to accelerate is not an emergency stop — the player
+  // turns it off and uses the normal pad. A stop here would spend the bar.
+  if (moves.length === 0 && delta <= MAX_GEAR_DELTA) {
     moves.push({ velocity: zeroVector(), landing: { ...position } });
   }
   return moves;

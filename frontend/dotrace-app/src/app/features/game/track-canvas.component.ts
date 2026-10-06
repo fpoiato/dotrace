@@ -175,7 +175,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   @Input() fill = false;
   /** Held on the DRS button; the next tap asks the host to open it. */
   @Input() drsIntent = false;
-  /** Held on the ERS button; legal landings include delta 2. */
+  /** Held on the ERS button; legal landings are the forward line only. */
   @Input() ersIntent = false;
   /**
    * Replay only. Keep the camera on the race leader. Zoom is independent;

@@ -156,6 +156,7 @@
                 type="button"
                 (click)="pad(opt)"
                 [disabled]="!opt.enabled"
+                [attr.aria-label]="ersPad ? ('game.ersTarget' | translate: { move: opt.glyph }) : null"
                 class="h-12 rounded-xl border-2 text-xl font-bold transition active:scale-95"
                 [class.border-slate-600]="!opt.grass"
                 [class.bg-slate-800]="opt.enabled && !opt.grass"
