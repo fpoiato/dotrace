@@ -19,6 +19,7 @@ import {
   ERS_MAX_DELTA,
   ERS_MAX_CHARGE,
   armDrsZones,
+  isStrictlyAhead,
   beginNextLap,
   boostLimits,
   engageRequestedDrs,
@@ -769,7 +770,7 @@ describe('live standings', () => {
     return track;
   }
 
-  it('ranks by lap, then checkpoint, then distance to goal, and keeps colors', () => {
+  it('ranks by lap, then checkpoint, then racing-line progress, and keeps colors', () => {
     const track = standingTrack();
     const leader = makePlayer({
       connectionId: 'a',
@@ -1281,7 +1282,7 @@ describe('DRS and ERS', () => {
       connectionId: 'rival',
       nickname: 'Bea',
       isHost: false,
-      position: { x: 8, y: 5 },
+      position: { x: 14, y: 5 },
       lap: 1,
     });
     const me = makePlayer({ position: from, lap: 1 });
@@ -1294,7 +1295,7 @@ describe('DRS and ERS', () => {
       connectionId: 'rival',
       nickname: 'Bea',
       isHost: false,
-      position: { x: 7, y: 5 },
+      position: { x: 15, y: 5 },
       lap: 1,
     });
     armDrsZones(tooFar, from, landing, [tooFar, aheadFar], track);
@@ -1306,11 +1307,98 @@ describe('DRS and ERS', () => {
       connectionId: 'rival',
       nickname: 'Bea',
       isHost: false,
-      position: { x: 14, y: 5 },
+      position: { x: 9, y: 5 },
       lap: 1,
     });
     armDrsZones(behindMe, from, landing, [behindMe, behind], track);
     expect(behindMe.drsArmed).toBeUndefined();
+  });
+
+  it('arms DRS on the first step into the blue zone when the rival is ahead along the racing line', () => {
+    const inRect = (
+      p: { x: number; y: number },
+      r: { x0: number; y0: number; x1: number; y1: number }
+    ) => p.x >= r.x0 && p.x <= r.x1 && p.y >= r.y0 && p.y <= r.y1;
+
+    for (const track of TRACKS) {
+      const line = track.centerline;
+      const samples: { x: number; y: number }[] = [];
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = line[i];
+        const b = line[i + 1];
+        const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
+        for (let s = 0; s < steps; s++) {
+          const t = s / steps;
+          samples.push({
+            x: Math.round(a.x + (b.x - a.x) * t),
+            y: Math.round(a.y + (b.y - a.y) * t),
+          });
+        }
+      }
+      const loop = samples.concat(samples);
+      let passed = false;
+      const inside = (track.drsZones ?? []).map(() => false);
+      const depth = (track.drsZones ?? []).map(() => 0);
+      const armed = (track.drsZones ?? []).map(() => false);
+
+      for (let i = 1; i < loop.length; i++) {
+        const p = loop[i];
+        if (track.checkpoint && inRect(p, track.checkpoint)) passed = true;
+        if (track.grid[p.y]?.[p.x] === 'finish' && passed) passed = false;
+
+        (track.drsZones ?? []).forEach((zone, zi) => {
+          const now = inRect(p, zone);
+          if (now && !inside[zi] && !armed[zi] && i >= samples.length) {
+            let rivalAt = i;
+            for (let k = i + 1; k < Math.min(loop.length, i + 8); k++) {
+              const gap = Math.max(Math.abs(loop[k].x - p.x), Math.abs(loop[k].y - p.y));
+              if (gap >= 1 && gap <= 3) {
+                rivalAt = k;
+                break;
+              }
+            }
+            const rivalPos = loop[rivalAt];
+            const me = makePlayer({ position: loop[i - 1], lap: 1, passedCheckpoint: passed });
+            const rival = makePlayer({
+              connectionId: 'rival',
+              nickname: 'Bea',
+              isHost: false,
+              position: rivalPos,
+              lap: 1,
+              passedCheckpoint: passed,
+            });
+            expect(isStrictlyAhead(rival, { ...me, position: { ...p } }, track)).toBe(true);
+            armDrsZones(me, loop[i - 1], p, [me, rival], track);
+            expect(me.drsArmed).toBe(true);
+            armed[zi] = true;
+          }
+          if (now && i >= samples.length) {
+            depth[zi] += 1;
+            if (depth[zi] === 24 && i >= 3) {
+              const back = loop[i - 3];
+              const gap = Math.max(Math.abs(back.x - p.x), Math.abs(back.y - p.y));
+              if (gap >= 1 && gap <= 3) {
+                const lead = makePlayer({ position: p, lap: 1, passedCheckpoint: passed });
+                const chase = makePlayer({
+                  connectionId: 'rival',
+                  nickname: 'Bea',
+                  isHost: false,
+                  position: back,
+                  lap: 1,
+                  passedCheckpoint: passed,
+                });
+                expect(isStrictlyAhead(lead, chase, track)).toBe(true);
+              }
+            }
+          } else {
+            depth[zi] = 0;
+          }
+          inside[zi] = now;
+        });
+      }
+
+      expect(armed.every(Boolean)).toBe(true);
+    }
   });
 
   it('spends a zone for the lap, arms the next one, and clears the list on the following lap', () => {
@@ -1319,7 +1407,7 @@ describe('DRS and ERS', () => {
       connectionId: 'rival',
       nickname: 'Bea',
       isHost: false,
-      position: { x: 8, y: 5 },
+      position: { x: 14, y: 5 },
       lap: 1,
     });
     const me = makePlayer({ position: { x: 8, y: 5 }, lap: 1 });
@@ -1331,7 +1419,7 @@ describe('DRS and ERS', () => {
     expect(me.drsArmed).toBe(false);
     expect(me.drsZonesUsed).toEqual([0]);
 
-    rival.position = { x: 20, y: 5 };
+    rival.position = { x: 26, y: 5 };
     armDrsZones(me, { x: 20, y: 5 }, { x: 23, y: 5 }, [me, rival], track);
     expect(me.drsArmed).toBe(true);
     expect(me.drsZonesUsed).toEqual([0, 1]);

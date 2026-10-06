@@ -621,6 +621,88 @@ export function settleBoostFromGears(player: Player, previousGear: number, nextG
   );
 }
 
+interface RacingGeom {
+  lap: number;
+  origin: number;
+  segs: { ax: number; ay: number; dx: number; dy: number; len: number; arc: number }[];
+}
+
+const racingGeomCache = new WeakMap<TrackDefinition, RacingGeom>();
+
+function projectArc(geom: RacingGeom, p: Vector2D): number {
+  let best = 0;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const s of geom.segs) {
+    const len2 = s.dx * s.dx + s.dy * s.dy;
+    let t = 0;
+    if (len2 > 0) {
+      t = ((p.x - s.ax) * s.dx + (p.y - s.ay) * s.dy) / len2;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+    }
+    const px = s.ax + s.dx * t;
+    const py = s.ay + s.dy * t;
+    const d = (p.x - px) * (p.x - px) + (p.y - py) * (p.y - py);
+    if (d < bestD) {
+      bestD = d;
+      best = s.arc + s.len * t;
+    }
+  }
+  return best;
+}
+
+function racingGeom(track: TrackDefinition): RacingGeom {
+  const cached = racingGeomCache.get(track);
+  if (cached) return cached;
+  const line = track.centerline ?? [];
+  const closed =
+    line.length > 1 &&
+    line[0].x === line[line.length - 1].x &&
+    line[0].y === line[line.length - 1].y;
+  const segCount = closed ? line.length - 1 : line.length;
+  const segs: RacingGeom['segs'] = [];
+  let arc = 0;
+  for (let i = 0; i < segCount; i++) {
+    const a = line[i];
+    const b = line[i + 1] ?? line[0];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    segs.push({ ax: a.x, ay: a.y, dx, dy, len, arc });
+    arc += len;
+  }
+  const geom: RacingGeom = { lap: arc || 1, origin: 0, segs };
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let y = 0; y < track.height; y++) {
+    const row = track.grid[y];
+    if (!row) continue;
+    for (let x = 0; x < track.width; x++) {
+      if (row[x] !== 'finish') continue;
+      sx += x;
+      sy += y;
+      n++;
+    }
+  }
+  if (n > 0) geom.origin = projectArc(geom, { x: sx / n, y: sy / n });
+  racingGeomCache.set(track, geom);
+  return geom;
+}
+
+/**
+ * How far `position` is into the current lap, in cells along the directed
+ * centerline, measured from the finish stripe. Higher means further ahead.
+ * Distance to the checkpoint or the stripe is not monotonic on a straight
+ * that bends away from that point, so it cannot order cars inside a DRS zone.
+ */
+export function racingProgress(position: Vector2D, track: TrackDefinition): number {
+  const geom = racingGeom(track);
+  if (geom.segs.length === 0) return 0;
+  const along = projectArc(geom, position);
+  return (along - geom.origin + geom.lap) % geom.lap;
+}
+
 /** True when `leader` is strictly ahead of `trailer` in live-standings order. */
 export function isStrictlyAhead(leader: Player, trailer: Player, track: TrackDefinition): boolean {
   if (leader.finishOrder !== undefined) return false;
@@ -628,7 +710,7 @@ export function isStrictlyAhead(leader: Player, trailer: Player, track: TrackDef
   const leaderCp = leader.passedCheckpoint ? 1 : 0;
   const trailerCp = trailer.passedCheckpoint ? 1 : 0;
   if (leaderCp !== trailerCp) return leaderCp > trailerCp;
-  return distanceToRaceGoal(leader, track) < distanceToRaceGoal(trailer, track);
+  return racingProgress(leader.position, track) > racingProgress(trailer.position, track);
 }
 
 /** Unfinished rival ahead, within Chebyshev `range` of `player.position`. */
@@ -1024,41 +1106,10 @@ export interface LiveStandingRow {
   passedCheckpoint: boolean;
 }
 
-function chebyshev(a: Vector2D, b: Vector2D): number {
-  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
-}
-
-function checkpointCenter(rect: CheckpointRect): Vector2D {
-  return {
-    x: (rect.x0 + rect.x1) / 2,
-    y: (rect.y0 + rect.y1) / 2,
-  };
-}
-
-function nearestFinishDistance(track: TrackDefinition, pos: Vector2D): number {
-  let best = Number.POSITIVE_INFINITY;
-  for (let y = 0; y < track.height; y++) {
-    for (let x = 0; x < track.width; x++) {
-      if (getTileAt(track, x, y) !== 'finish') continue;
-      const d = chebyshev(pos, { x, y });
-      if (d < best) best = d;
-    }
-  }
-  return Number.isFinite(best) ? best : 0;
-}
-
-/** Distance to the current lap goal (checkpoint, then finish stripe). */
-export function distanceToRaceGoal(player: Player, track: TrackDefinition): number {
-  if (track.checkpoint && !player.passedCheckpoint) {
-    return chebyshev(player.position, checkpointCenter(track.checkpoint));
-  }
-  return nearestFinishDistance(track, player.position);
-}
-
 /**
  * Live race order for the classification panel.
- * Finishers keep their finishOrder; everyone else is ranked by lap, checkpoint
- * progress, then distance to the current goal (closer = ahead).
+ * Finishers keep their finishOrder; everyone else is ranked by lap, checkpoint,
+ * then distance along the racing line (further = ahead).
  */
 export function buildLiveStandings(
   state: GameState,
@@ -1076,7 +1127,7 @@ export function buildLiveStandings(
       const bCp = b.passedCheckpoint ? 1 : 0;
       if (bCp !== aCp) return bCp - aCp;
       if (track) {
-        const d = distanceToRaceGoal(a, track) - distanceToRaceGoal(b, track);
+        const d = racingProgress(b.position, track) - racingProgress(a.position, track);
         if (d !== 0) return d;
       }
       return a.nickname.localeCompare(b.nickname);
