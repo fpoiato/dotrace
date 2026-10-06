@@ -14,6 +14,16 @@ import {
   canPlayerMove,
   isGameOver,
   isValidGearChange,
+  DRS_MAX_GEAR,
+  ERS_MAX_DELTA,
+  ERS_MAX_CHARGE,
+  armDrsZones,
+  beginNextLap,
+  boostLimits,
+  engageRequestedDrs,
+  revertDrsOpen,
+  settleBoostFromGears,
+  spendErsIfAccepted,
   nextActiveTurnIndex,
   rollDice,
   generateRoomCode,
@@ -1103,5 +1113,331 @@ describe('compareLeaderboardEntries', () => {
     ];
     rows.sort(compareLeaderboardEntries);
     expect(rows.map((r) => r.nickname)).toEqual(['timed-real', 'turns-junk']);
+  });
+});
+
+function rectsOverlap(
+  a: { x0: number; y0: number; x1: number; y1: number },
+  b: { x0: number; y0: number; x1: number; y1: number }
+): boolean {
+  return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
+}
+
+function makeDrsTrack(): TrackDefinition {
+  const grid = Array.from({ length: 20 }, () =>
+    Array.from({ length: 40 }, () => 'track' as const)
+  ) as TrackDefinition['grid'];
+  return {
+    id: 'drs-test',
+    nameKey: 'tracks.test',
+    width: 40,
+    height: 20,
+    grid,
+    startLine: [{ x: 1, y: 5 }],
+    arrows: [],
+    centerline: [
+      { x: 0, y: 5 },
+      { x: 39, y: 5 },
+      { x: 0, y: 5 },
+    ],
+    checkpoint: { x0: 0, y0: 0, x1: 0, y1: 0 },
+    drsZones: [
+      { x0: 10, y0: 4, x1: 12, y1: 6 },
+      { x0: 22, y0: 4, x1: 24, y1: 6 },
+    ],
+  };
+}
+
+describe('DRS and ERS', () => {
+  it('rejects gear 7 without DRS, allows it while DRS is open, and never allows gear 8', () => {
+    expect(isValidGearChange({ x: 6, y: 0 }, { x: 7, y: 0 }, false)).toBe(false);
+    expect(isValidGearChange({ x: 6, y: 0 }, { x: 7, y: 0 }, false, 1, DRS_MAX_GEAR)).toBe(true);
+    expect(isValidGearChange({ x: 7, y: 0 }, { x: 8, y: 0 }, false, 1, DRS_MAX_GEAR)).toBe(false);
+    expect(isValidGearChange({ x: 6, y: 0 }, { x: 8, y: 0 }, false, ERS_MAX_DELTA, DRS_MAX_GEAR)).toBe(
+      false
+    );
+
+    const track = makeDrsTrack();
+    const coasting = makePlayer({ position: { x: 10, y: 10 }, velocity: { x: 6, y: 0 } });
+    const plain = getValidMoves(coasting, track);
+    expect(plain.some((m) => m.velocity.x === 7 && m.velocity.y === 0)).toBe(false);
+
+    const open = makePlayer({
+      position: { x: 10, y: 10 },
+      velocity: { x: 6, y: 0 },
+      drsActive: true,
+    });
+    const limits = boostLimits(open, 1, {});
+    expect(limits.maxGear).toBe(DRS_MAX_GEAR);
+    const withDrs = getValidMoves(open, track, undefined, 1, limits.maxGear, limits.maxDelta);
+    expect(withDrs.some((m) => m.velocity.x === 7 && m.velocity.y === 0)).toBe(true);
+    expect(withDrs.some((m) => m.velocity.x === 8)).toBe(false);
+  });
+
+  it('arms a zone only for an unfinished rival ahead within Chebyshev 3', () => {
+    const track = makeDrsTrack();
+    const from = { x: 8, y: 5 };
+    const landing = { x: 11, y: 5 };
+
+    const aheadNear = makePlayer({
+      connectionId: 'rival',
+      nickname: 'Bea',
+      isHost: false,
+      position: { x: 8, y: 5 },
+      lap: 1,
+    });
+    const me = makePlayer({ position: from, lap: 1 });
+    armDrsZones(me, from, landing, [me, aheadNear], track);
+    expect(me.drsArmed).toBe(true);
+    expect(me.drsZonesUsed).toEqual([0]);
+
+    const tooFar = makePlayer({ position: from, lap: 1 });
+    const aheadFar = makePlayer({
+      connectionId: 'rival',
+      nickname: 'Bea',
+      isHost: false,
+      position: { x: 7, y: 5 },
+      lap: 1,
+    });
+    armDrsZones(tooFar, from, landing, [tooFar, aheadFar], track);
+    expect(tooFar.drsArmed).toBeUndefined();
+    expect(tooFar.drsZonesUsed).toBeUndefined();
+
+    const behindMe = makePlayer({ position: from, lap: 1 });
+    const behind = makePlayer({
+      connectionId: 'rival',
+      nickname: 'Bea',
+      isHost: false,
+      position: { x: 14, y: 5 },
+      lap: 1,
+    });
+    armDrsZones(behindMe, from, landing, [behindMe, behind], track);
+    expect(behindMe.drsArmed).toBeUndefined();
+  });
+
+  it('spends a zone for the lap, arms the next one, and clears the list on the following lap', () => {
+    const track = makeDrsTrack();
+    const rival = makePlayer({
+      connectionId: 'rival',
+      nickname: 'Bea',
+      isHost: false,
+      position: { x: 8, y: 5 },
+      lap: 1,
+    });
+    const me = makePlayer({ position: { x: 8, y: 5 }, lap: 1 });
+    armDrsZones(me, { x: 8, y: 5 }, { x: 11, y: 5 }, [me, rival], track);
+    expect(me.drsZonesUsed).toEqual([0]);
+
+    me.drsArmed = false;
+    armDrsZones(me, { x: 11, y: 5 }, { x: 11, y: 5 }, [me, rival], track);
+    expect(me.drsArmed).toBe(false);
+    expect(me.drsZonesUsed).toEqual([0]);
+
+    rival.position = { x: 20, y: 5 };
+    armDrsZones(me, { x: 20, y: 5 }, { x: 23, y: 5 }, [me, rival], track);
+    expect(me.drsArmed).toBe(true);
+    expect(me.drsZonesUsed).toEqual([0, 1]);
+
+    me.passedCheckpoint = true;
+    beginNextLap(me);
+    expect(me.passedCheckpoint).toBe(false);
+    expect(me.drsZonesUsed).toEqual([]);
+  });
+
+  it('keeps DRS open while the gear holds or rises, and closes it when the gear falls', () => {
+    const player = makePlayer({
+      velocity: { x: 4, y: 0 },
+      drsActive: true,
+      drsArmed: true,
+      ersCharge: 0,
+    });
+    settleBoostFromGears(player, 4, 4);
+    expect(player.drsActive).toBe(true);
+    expect(player.ersCharge).toBe(0);
+
+    settleBoostFromGears(player, 4, 6);
+    expect(player.drsActive).toBe(true);
+    expect(player.drsArmed).toBe(true);
+
+    settleBoostFromGears(player, 6, 5);
+    expect(player.drsActive).toBe(false);
+    expect(player.drsArmed).toBe(false);
+    expect(player.ersCharge).toBe(0.25);
+
+    const stopped = makePlayer({
+      velocity: { x: 4, y: 0 },
+      drsActive: true,
+      drsArmed: false,
+      ersCharge: 0,
+    });
+    settleBoostFromGears(stopped, 4, 0);
+    expect(stopped.drsActive).toBe(false);
+    expect(stopped.ersCharge).toBe(1);
+  });
+
+  it('recharges ERS only on a gear drop, in quarter bars, capped at 4', () => {
+    const one = makePlayer({ ersCharge: 0 });
+    settleBoostFromGears(one, 3, 2);
+    expect(one.ersCharge).toBe(0.25);
+
+    const four = makePlayer({ ersCharge: 0 });
+    settleBoostFromGears(four, 4, 0);
+    expect(four.ersCharge).toBe(1);
+
+    const steps = makePlayer({ ersCharge: 0 });
+    let gear = 4;
+    for (let i = 0; i < 4; i++) {
+      settleBoostFromGears(steps, gear, gear - 1);
+      gear -= 1;
+    }
+    expect(steps.ersCharge).toBe(1);
+
+    const held = makePlayer({ ersCharge: 1 });
+    settleBoostFromGears(held, 2, 3);
+    settleBoostFromGears(held, 3, 3);
+    expect(held.ersCharge).toBe(1);
+
+    const full = makePlayer({ ersCharge: 3.75 });
+    settleBoostFromGears(full, 4, 0);
+    expect(full.ersCharge).toBe(ERS_MAX_CHARGE);
+  });
+
+  it('allows a one-gear skip with ERS and spends exactly one bar', () => {
+    const track = makeDrsTrack();
+    const player = makePlayer({
+      position: { x: 10, y: 10 },
+      velocity: { x: 3, y: 0 },
+      ersCharge: 1.25,
+    });
+    const limits = boostLimits(player, 1, { ers: true });
+    expect(limits.maxDelta).toBe(ERS_MAX_DELTA);
+    expect(limits.spendErs).toBe(true);
+    expect(isValidGearChange(player.velocity, { x: 5, y: 0 }, false, limits.maxDelta, limits.maxGear)).toBe(
+      true
+    );
+    expect(
+      isValidGearChange(player.velocity, { x: 6, y: 0 }, false, limits.maxDelta, limits.maxGear)
+    ).toBe(false);
+
+    const moves = getValidMoves(player, track, undefined, 1, limits.maxGear, limits.maxDelta);
+    expect(moves.some((m) => m.velocity.x === 5 && m.velocity.y === 0)).toBe(true);
+    const plain = getValidMoves(player, track);
+    expect(plain.some((m) => m.velocity.x === 5 && m.velocity.y === 0)).toBe(false);
+
+    spendErsIfAccepted(player, limits);
+    expect(player.ersCharge).toBe(0.25);
+
+    const rejected = makePlayer({ ersCharge: 2 });
+    const refused = boostLimits(rejected, 1, { ers: true });
+    expect(
+      isValidGearChange(rejected.velocity, { x: 3, y: 0 }, false, refused.maxDelta, refused.maxGear)
+    ).toBe(false);
+    expect(rejected.ersCharge).toBe(2);
+  });
+
+  it('with DRS and ERS together reaches gear 7 from 5, and not 8', () => {
+    const player = makePlayer({
+      position: { x: 10, y: 10 },
+      velocity: { x: 5, y: 0 },
+      drsArmed: true,
+      ersCharge: 1,
+    });
+    const beforeActive = player.drsActive;
+    const beforeArmed = player.drsArmed;
+    const limits = engageRequestedDrs(player, 1, { drs: true, ers: true });
+    expect(player.drsActive).toBe(true);
+    expect(player.drsArmed).toBe(false);
+    expect(limits.maxGear).toBe(DRS_MAX_GEAR);
+    expect(limits.maxDelta).toBe(ERS_MAX_DELTA);
+    expect(isValidGearChange({ x: 5, y: 0 }, { x: 7, y: 0 }, false, limits.maxDelta, limits.maxGear)).toBe(
+      true
+    );
+    expect(isValidGearChange({ x: 5, y: 0 }, { x: 8, y: 0 }, false, limits.maxDelta, limits.maxGear)).toBe(
+      false
+    );
+
+    const track = makeDrsTrack();
+    const moves = getValidMoves(player, track, undefined, 1, limits.maxGear, limits.maxDelta);
+    expect(moves.some((m) => m.velocity.x === 7 && m.velocity.y === 0)).toBe(true);
+    expect(moves.some((m) => gearOf(m.velocity) === 8)).toBe(false);
+
+    revertDrsOpen(player, beforeActive, beforeArmed);
+    expect(player.drsActive).toBeUndefined();
+    expect(player.drsArmed).toBe(true);
+    expect(player.ersCharge).toBe(1);
+  });
+
+  it('does not let DRS or ERS raise the gear-1 cap', () => {
+    const track = makeDrsTrack();
+    const off = makePlayer({
+      position: { x: 10, y: 10 },
+      velocity: { x: 0, y: 0 },
+      isOffTrack: true,
+      drsArmed: true,
+      drsActive: true,
+      ersCharge: 4,
+    });
+    const offLimits = boostLimits(off, 1, { drs: true, ers: true });
+    expect(offLimits.maxGear).toBe(1);
+    expect(offLimits.maxDelta).toBe(1);
+    expect(offLimits.openDrs).toBe(false);
+    expect(offLimits.spendErs).toBe(false);
+    const offMoves = getValidMoves(off, track, undefined, 1, DRS_MAX_GEAR, ERS_MAX_DELTA);
+    expect(offMoves.every((m) => [-1, 0, 1].includes(m.velocity.x) && [-1, 0, 1].includes(m.velocity.y))).toBe(
+      true
+    );
+    expect(isValidGearChange({ x: 0, y: 0 }, { x: 2, y: 0 }, true, ERS_MAX_DELTA, DRS_MAX_GEAR)).toBe(false);
+    expect(isValidGearChange({ x: 0, y: 0 }, { x: 1, y: 1 }, true, ERS_MAX_DELTA, DRS_MAX_GEAR)).toBe(true);
+
+    const penalized = makePlayer({
+      position: { x: 10, y: 10 },
+      velocity: { x: 1, y: 0 },
+      gearPenaltyUntilRound: 4,
+      drsArmed: true,
+      ersCharge: 2,
+    });
+    const penLimits = boostLimits(penalized, 4, { drs: true, ers: true });
+    expect(penLimits.maxGear).toBe(1);
+    expect(penLimits.maxDelta).toBe(1);
+    const penMoves = getValidMoves(penalized, track, undefined, 4, DRS_MAX_GEAR, ERS_MAX_DELTA);
+    expect(penMoves.every((m) => [-1, 0, 1].includes(m.velocity.x) && [-1, 0, 1].includes(m.velocity.y))).toBe(
+      true
+    );
+    expect(penMoves.some((m) => m.velocity.x === 2)).toBe(false);
+  });
+
+  it('opens DRS before the gear check and closes it if that same move brakes', () => {
+    const player = makePlayer({ velocity: { x: 4, y: 0 }, drsArmed: true, ersCharge: 0 });
+    const limits = engageRequestedDrs(player, 1, { drs: true });
+    expect(limits.maxGear).toBe(DRS_MAX_GEAR);
+    expect(player.drsActive).toBe(true);
+    expect(
+      isValidGearChange(player.velocity, { x: 3, y: 0 }, false, limits.maxDelta, limits.maxGear)
+    ).toBe(true);
+    settleBoostFromGears(player, 4, 3);
+    expect(player.drsActive).toBe(false);
+    expect(player.drsArmed).toBe(false);
+    expect(player.ersCharge).toBe(0.25);
+  });
+
+  it('places one DRS zone on each circuit, off the stripe and off the lap checkpoint', () => {
+    for (const track of TRACKS) {
+      expect(track.drsZones).toHaveLength(1);
+      const zone = track.drsZones![0];
+      expect(track.checkpoint).toBeDefined();
+      expect(rectsOverlap(zone, track.checkpoint!)).toBe(false);
+
+      let coversFinish = false;
+      let coversAsphalt = false;
+      for (let y = zone.y0; y <= zone.y1; y++) {
+        for (let x = zone.x0; x <= zone.x1; x++) {
+          const tile = track.grid[y]?.[x];
+          if (tile === 'finish') coversFinish = true;
+          if (tile === 'track' || tile === 'finish') coversAsphalt = true;
+        }
+      }
+      expect(coversFinish).toBe(false);
+      expect(coversAsphalt).toBe(true);
+    }
   });
 });

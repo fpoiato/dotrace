@@ -17,6 +17,7 @@ import {
   Player,
   TrackDefinition,
   Vector2D,
+  boostLimits,
   canPlayerMove,
   gearOf,
   getValidMoves,
@@ -92,7 +93,7 @@ function buildGaugeSegments(): string[] {
               text-anchor="middle"
               font-size="26"
               font-weight="800"
-              [attr.fill]="me.isOffTrack ? '#FBBF24' : '#ffffff'"
+              [attr.fill]="me.isOffTrack ? '#FBBF24' : me.drsActive ? '#22D3EE' : '#ffffff'"
             >
               {{ gaugeGear(me) }}
             </text>
@@ -153,6 +154,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   @Input() state: GameState | null = null;
   /** Stretch the sheet to the parent instead of a fixed viewport slice. */
   @Input() fill = false;
+  /** Held on the DRS button; the next tap asks the host to open it. */
+  @Input() drsIntent = false;
+  /** Held on the ERS button; legal landings include delta 2. */
+  @Input() ersIntent = false;
 
   private readonly game = inject(GameEngineService);
   private readonly haptic = inject(HapticService);
@@ -218,17 +223,19 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['state']) {
-      const prev = changes['state'].previousValue as GameState | null | undefined;
-      const curr = changes['state'].currentValue as GameState | null | undefined;
-      // New track or green flag: re-enable auto-framing once.
-      if (
-        prev?.trackId !== curr?.trackId ||
-        (prev?.phase !== 'GAME_ROUND' && curr?.phase === 'GAME_ROUND')
-      ) {
-        this.manualCamera = false;
-        this.fitModeInitialized = false;
-        this.zoomFactor = 1;
+    if (changes['state'] || changes['drsIntent'] || changes['ersIntent']) {
+      if (changes['state']) {
+        const prev = changes['state'].previousValue as GameState | null | undefined;
+        const curr = changes['state'].currentValue as GameState | null | undefined;
+        // New track or green flag: re-enable auto-framing once.
+        if (
+          prev?.trackId !== curr?.trackId ||
+          (prev?.phase !== 'GAME_ROUND' && curr?.phase === 'GAME_ROUND')
+        ) {
+          this.manualCamera = false;
+          this.fitModeInitialized = false;
+          this.zoomFactor = 1;
+        }
       }
       requestAnimationFrame(() => this.draw());
     }
@@ -569,6 +576,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.drawPaper(ctx, track);
     this.drawGrass(ctx, track);
     this.drawFinishStripe(ctx, track);
+    this.drawDrsZones(ctx, track);
     this.drawTrackBorders(ctx, track);
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
@@ -616,6 +624,25 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
         }
       }
     }
+  }
+
+  /** Translucent DRS detection band so the pilot can see where the button arms. */
+  private drawDrsZones(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+    const zones = track.drsZones ?? [];
+    if (zones.length === 0) return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(34, 211, 238, 0.28)';
+    ctx.strokeStyle = 'rgba(8, 145, 178, 0.9)';
+    ctx.lineWidth = 2;
+    for (const zone of zones) {
+      const x = zone.x0 * CELL;
+      const y = zone.y0 * CELL;
+      const w = (zone.x1 - zone.x0 + 1) * CELL;
+      const h = (zone.y1 - zone.y0 + 1) * CELL;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    }
+    ctx.restore();
   }
 
   /** Off-track neighbor (grass, rumble, or outside the grid). */
@@ -771,7 +798,18 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     const active = isTimedMode(state) ? this.myPlayer(state) : this.activePlayer(state);
     if (!active || active.connectionId !== myId || active.finishOrder !== undefined) return;
 
-    this.validMoves = getValidMoves(active, track, state.players, state.round);
+    const limits = boostLimits(active, state.round, {
+      drs: this.drsIntent,
+      ers: this.ersIntent,
+    });
+    this.validMoves = getValidMoves(
+      active,
+      track,
+      state.players,
+      state.round,
+      limits.maxGear,
+      limits.maxDelta
+    );
     const color = active.color;
     for (const m of this.validMoves) {
       const px = m.landing.x * CELL;
@@ -881,7 +919,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
           this.haptic.rumbleStrip();
         }
       }
-      this.game.submitMove(best.velocity);
+      this.game.submitMove(best.velocity, { drs: this.drsIntent, ers: this.ersIntent });
     }
   }
 }
