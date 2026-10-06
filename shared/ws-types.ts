@@ -100,6 +100,8 @@ export interface Player {
   drsZonesUsed?: number[];
   /** ERS battery, 0–4 in steps of 0.25. One full bar spent opens delta 2. */
   ersCharge?: number;
+  /** Last accepted move spent an ERS bar. Cleared on this car's next move. */
+  ersActive?: boolean;
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
@@ -143,6 +145,10 @@ export interface MoveRecord {
   velocity: Vector2D;
   isOffTrack: boolean;
   lap: number;
+  /** DRS still open after this move. */
+  drsActive?: boolean;
+  /** This move spent an ERS bar. */
+  ersActive?: boolean;
 }
 
 /** Maximum number of move records stored in the replay log. */

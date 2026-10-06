@@ -124,3 +124,19 @@ assert(splitLast.position.x === 20 && splitLast.position.y === 16, 'stitched fin
 assert(splitLast.trail.length >= 4, 'stitched trail should include pre- and post-handoff points');
 
 console.log('replay unrepaired handoff stitch: ok');
+
+// DRS stays on until a later move of that car drops it. ERS marks the move
+// that spent the bar and clears on the next one.
+const boostLog: MoveRecord[] = [
+  { seq: 0, round: 0, connectionId: 'human-1', position: { x: 1, y: 1 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1 },
+  { seq: 1, round: 1, connectionId: 'human-1', position: { x: 3, y: 1 }, velocity: { x: 2, y: 0 }, isOffTrack: false, lap: 1, drsActive: true },
+  { seq: 2, round: 2, connectionId: 'human-1', position: { x: 6, y: 1 }, velocity: { x: 3, y: 0 }, isOffTrack: false, lap: 1, drsActive: true, ersActive: true },
+  { seq: 3, round: 3, connectionId: 'human-1', position: { x: 8, y: 1 }, velocity: { x: 2, y: 0 }, isOffTrack: false, lap: 1 },
+];
+const boostFrames = buildReplayFrames(boostLog, [human], []);
+assert(boostFrames[1]!.players[0]!.drsActive === true, 'DRS should be open on the move that armed it');
+assert(boostFrames[1]!.players[0]!.ersActive === false, 'ERS should be off before it is spent');
+assert(boostFrames[2]!.players[0]!.drsActive === true && boostFrames[2]!.players[0]!.ersActive === true, 'both boosts on the ERS move');
+assert(boostFrames[3]!.players[0]!.drsActive === false && boostFrames[3]!.players[0]!.ersActive === false, 'boosts clear when the next move omits them');
+
+console.log('replay boost flags: ok');

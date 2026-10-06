@@ -193,6 +193,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private resizeObserver: ResizeObserver | null = null;
   private lastCssW = 0;
   private lastCssH = 0;
+  /** Redraws while a blue boost ring is blinking. */
+  private pulsing = false;
+  private pulseFrame = 0;
+  private lastPulseDraw = 0;
 
   ngAfterViewInit(): void {
     const canvas = this.canvasRef.nativeElement;
@@ -217,6 +221,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   }
 
   ngOnDestroy(): void {
+    this.pulsing = false;
+    cancelAnimationFrame(this.pulseFrame);
     this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('mousemove', this.onMouseMoveBound);
@@ -582,7 +588,31 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
     this.drawValidTargets(ctx, state, track);
-    this.drawCars(ctx, state);
+    const boosted = this.drawCars(ctx, state);
+    this.syncBoostPulse(boosted);
+  }
+
+  /** Keep the boost ring blinking without redrawing the whole sheet every frame. */
+  private syncBoostPulse(active: boolean): void {
+    if (active && !this.pulsing) {
+      this.pulsing = true;
+      const loop = (now: number) => {
+        if (!this.pulsing) return;
+        this.pulseFrame = requestAnimationFrame(loop);
+        if (now - this.lastPulseDraw < 50) return;
+        this.lastPulseDraw = now;
+        this.draw();
+      };
+      this.pulseFrame = requestAnimationFrame(loop);
+    } else if (!active && this.pulsing) {
+      this.pulsing = false;
+      cancelAnimationFrame(this.pulseFrame);
+    }
+  }
+
+  /** 1 while the blue ring is lit, ~0.2 in the off half of the blink. */
+  private boostAlpha(now = performance.now()): number {
+    return now % 640 < 352 ? 0.95 : 0.18;
   }
 
   /** White sheet with light-gray grid lines. */
@@ -850,29 +880,42 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
-  private drawCars(ctx: CanvasRenderingContext2D, state: GameState): void {
+  private drawCars(ctx: CanvasRenderingContext2D, state: GameState): boolean {
     const active = this.activePlayer(state);
+    const alpha = this.boostAlpha();
+    let anyBoost = false;
     for (const player of state.players) {
       if (player.finishOrder !== undefined && state.phase !== 'GAME_OVER') continue;
       const [cx, cy] = this.center(player.position);
       const isActive = player.connectionId === active?.connectionId;
+      const boosted = !!player.drsActive || !!player.ersActive;
+      if (boosted) anyBoost = true;
+
+      if (boosted) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 13, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(34, 211, 238, ${alpha})`;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
 
       if (isActive) {
         ctx.beginPath();
-        ctx.arc(cx, cy, 8.5, 0, Math.PI * 2);
+        ctx.arc(cx, cy, boosted ? 10.5 : 8.5, 0, Math.PI * 2);
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2.5;
         ctx.stroke();
       }
 
       ctx.beginPath();
-      ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+      ctx.arc(cx, cy, boosted ? 8 : 5.5, 0, Math.PI * 2);
       ctx.fillStyle = player.color;
       ctx.fill();
       ctx.strokeStyle = PAPER_COLORS.ink;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+    return anyBoost;
   }
 
   /** Tap → nearest valid landing square within ~1 cell (generous on mobile). */
