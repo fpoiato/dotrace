@@ -34,7 +34,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedTrackId = '';
   selectedLaps = 1;
   selectedGameMode: GameMode = 'TURNS';
-  selectedDifficulty: AiDifficulty = 'medium';
+  selectedDifficulty: AiDifficulty = 'pro';
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
   readonly difficulties: AiDifficulty[] = ['easy', 'medium', 'hard', 'pro'];
