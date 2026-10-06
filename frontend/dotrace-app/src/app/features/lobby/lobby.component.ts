@@ -34,13 +34,12 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectedTrackId = '';
   selectedLaps = 1;
   selectedGameMode: GameMode = 'TURNS';
-  selectedDifficulty: AiDifficulty = 'medium';
+  selectedDifficulty: AiDifficulty = 'pro';
   readonly lapOptions = [1, 2, 3];
   readonly gameModes = GAME_MODES;
   readonly difficulties: AiDifficulty[] = ['easy', 'medium', 'hard', 'pro'];
   readonly practiceHintKey = 'lobby.practiceHint';
   readonly maxPlayers = MAX_PLAYERS;
-  copied = false;
   showHowTo = false;
   aiSpawning = false;
   aiError = false;
@@ -168,12 +167,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
   startRace(): void {
     this.game.startRace();
     void this.router.navigate(['/game']);
-  }
-
-  copyInvite(roomCode: string): void {
-    void navigator.clipboard.writeText(this.room.getInviteUrl(roomCode));
-    this.copied = true;
-    setTimeout(() => (this.copied = false), 2000);
   }
 
   whatsApp(roomCode: string): void {

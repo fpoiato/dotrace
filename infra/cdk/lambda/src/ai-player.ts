@@ -18,6 +18,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { raceLoop, RaceLoopResult } from '../../../../agent/src/agent';
 import { BedrockBrain, HeuristicBrain, MoveBrain } from '../../../../agent/src/brain';
 import { LayaBrain } from '../../../../agent/src/laya-brain';
+import { DEFAULT_BEDROCK_MODEL_ID } from '../../../../agent/src/config';
 import { LAYA_DECIDE_MODEL } from '../../../../agent/src/laya-scene';
 import {
   AiDifficulty,
@@ -116,11 +117,11 @@ function buildBrain(event: SpawnAiPlayerEvent, difficulty: AiDifficulty): MoveBr
   if (mode === 'bedrock') {
     console.log(`[AI] brain=bedrock nickname=${event.nickname} difficulty=${difficulty}`);
     return new BedrockBrain({
-      modelId: process.env.BEDROCK_MODEL_ID ?? 'amazon.nova-micro-v1:0',
+      modelId: process.env.BEDROCK_MODEL_ID ?? DEFAULT_BEDROCK_MODEL_ID,
       region: process.env.AWS_REGION ?? 'us-east-1',
       fallbackSeed: event.nickname,
       difficulty,
-      timeoutMs: Number(process.env.BEDROCK_TIMEOUT_MS ?? 2_500),
+      timeoutMs: Number(process.env.BEDROCK_TIMEOUT_MS ?? 20_000),
     });
   }
   console.log(`[AI] brain=heuristic nickname=${event.nickname} difficulty=${difficulty}`);
