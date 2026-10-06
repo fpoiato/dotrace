@@ -10,9 +10,14 @@ import {
   RelayPayload,
   Vector2D,
   applyGrassPenalty,
+  armDrsZones,
+  beginNextLap,
+  BoostRequest,
   canPlayerMove,
   createInitialState,
   createLobbyPlayer,
+  engageRequestedDrs,
+  gearOf,
   getTileAt,
   getValidMoves,
   isGameOver,
@@ -22,6 +27,9 @@ import {
   nextActiveTurnIndex,
   pushReplayMove,
   pushTrail,
+  revertDrsOpen,
+  settleBoostFromGears,
+  spendErsIfAccepted,
   adoptNicknameConnection,
   retargetLocalPlayer,
   aiTurnToken,
@@ -39,6 +47,12 @@ import { ApiService } from './api.service';
 import { RoomContext, RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
+
+/** Only the buttons the pilot actually pressed travel with the move. */
+function requestedBoost(boost?: BoostRequest): BoostRequest | undefined {
+  if (!boost?.drs && !boost?.ers) return undefined;
+  return { drs: !!boost.drs, ers: !!boost.ers };
+}
 
 @Injectable({ providedIn: 'root' })
 export class GameEngineService implements OnDestroy {
@@ -197,16 +211,21 @@ export class GameEngineService implements OnDestroy {
     this.gridOrderTimer = setTimeout(() => this.finalizeGridOrder(), 2500);
   }
 
-  submitMove(vector: Vector2D): void {
+  submitMove(vector: Vector2D, boost?: BoostRequest): void {
     const room = this.roomService.room;
     if (!room) return;
     this.retargetSelf(room);
 
+    const request = requestedBoost(boost);
     if (this.isHost) {
-      this.applyMove(room.connectionId, vector);
+      this.applyMove(room.connectionId, vector, request);
     } else {
       void this.api
-        .postAction('FORWARD_TO_HOST', { action: 'SUBMIT_MOVE', vector }, room.roomCode)
+        .postAction(
+          'FORWARD_TO_HOST',
+          { action: 'SUBMIT_MOVE', vector, ...request },
+          room.roomCode
+        )
         .catch((err) => console.warn('Move forward failed', err));
     }
   }
@@ -256,6 +275,10 @@ export class GameEngineService implements OnDestroy {
       player.gearPenaltyUntilRound = undefined;
       player.stopUntil = undefined;
       player.passedCheckpoint = false;
+      player.drsArmed = false;
+      player.drsActive = false;
+      player.drsZonesUsed = [];
+      player.ersCharge = 0;
       player.trail = [{ ...start }];
       player.lap = 1;
     });
@@ -273,7 +296,7 @@ export class GameEngineService implements OnDestroy {
     }
   }
 
-  private applyMove(senderId: string, vector: Vector2D): boolean {
+  private applyMove(senderId: string, vector: Vector2D, request?: BoostRequest): boolean {
     const state = this.state;
     if (!state || state.phase !== 'GAME_ROUND') return false;
 
@@ -285,19 +308,37 @@ export class GameEngineService implements OnDestroy {
     const track = getTrackById(state.trackId);
     if (!track) return false;
 
-    // Strict validation: the submitted velocity must be one of the moves the
-    // host itself considers legal (±1 gear rule, off-track cap, in-grid landing,
-    // including the emergency stop when no other move exists).
-    const isLegal = getValidMoves(player, track, state.players, state.round).some(
-      (m) => m.velocity.x === vector.x && m.velocity.y === vector.y
-    );
-    if (!isLegal) return false;
+    // DRS opens before the gear check so gear 7 is legal on this move only
+    // when the button was actually armed. A rejected vector rolls that back
+    // and does not spend ERS.
+    const armedBefore = player.drsArmed;
+    const activeBefore = player.drsActive;
+    const chargeBefore = player.ersCharge;
+    const limits = engageRequestedDrs(player, state.round, request);
+    const isLegal = getValidMoves(
+      player,
+      track,
+      state.players,
+      state.round,
+      limits.maxGear,
+      limits.maxDelta
+    ).some((m) => m.velocity.x === vector.x && m.velocity.y === vector.y);
+    if (!isLegal) {
+      revertDrsOpen(player, activeBefore, armedBefore);
+      return false;
+    }
+    spendErsIfAccepted(player, limits);
 
+    const previousGear = gearOf(player.velocity);
     const from = { ...player.position };
     const landing = landingPosition(player.position, vector);
 
     const tile = getTileAt(track, landing.x, landing.y);
-    if (tile === null) return false;
+    if (tile === null) {
+      revertDrsOpen(player, activeBefore, armedBefore);
+      player.ersCharge = chargeBefore;
+      return false;
+    }
 
     const grassShortcut = isGrassShortcut(track, from, landing);
 
@@ -313,6 +354,7 @@ export class GameEngineService implements OnDestroy {
       player.velocity = { ...vector };
       player.isOffTrack = false;
     }
+    settleBoostFromGears(player, previousGear, gearOf(player.velocity));
 
     if (grassShortcut) {
       applyGrassPenalty(player, state);
@@ -321,6 +363,7 @@ export class GameEngineService implements OnDestroy {
     if (track.checkpoint && !player.passedCheckpoint) {
       player.passedCheckpoint = segmentEntersRect(from, landing, track.checkpoint);
     }
+    armDrsZones(player, from, landing, state.players, track);
 
     // Crossing the stripe (even flying over it) closes the lap — but only
     // after the far-side checkpoint, so the line can't be gamed on turn one.
@@ -335,7 +378,7 @@ export class GameEngineService implements OnDestroy {
         // Lap done, more to go: rearm the checkpoint and erase the pen trail
         // so the sheet stays readable on the next tour.
         player.lap += 1;
-        player.passedCheckpoint = false;
+        beginNextLap(player);
         player.trail = [{ ...landing }];
       } else {
         const pos = state.podium.length + 1;
@@ -625,6 +668,10 @@ export class GameEngineService implements OnDestroy {
       grassCuts: existing?.grassCuts,
       gearPenaltyUntilRound: existing?.gearPenaltyUntilRound,
       stopUntil: existing?.stopUntil,
+      drsArmed: existing?.drsArmed ?? player.drsArmed,
+      drsActive: existing?.drsActive ?? player.drsActive,
+      drsZonesUsed: existing?.drsZonesUsed ?? player.drsZonesUsed,
+      ersCharge: existing?.ersCharge ?? player.ersCharge,
     };
     const idx = state.players.findIndex((p) => p.connectionId === newConnectionId);
     if (idx >= 0) state.players[idx] = merged;
@@ -678,7 +725,9 @@ export class GameEngineService implements OnDestroy {
         ) {
           return;
         }
-        this.applyMove(senderId, vector);
+        const drs = action['drs'] === true;
+        const ers = action['ers'] === true;
+        this.applyMove(senderId, vector, { drs, ers });
         break;
       }
     }
