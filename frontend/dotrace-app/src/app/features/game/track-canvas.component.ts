@@ -32,6 +32,7 @@ import {
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { HapticService } from '../../core/services/haptic.service';
 import { RoomService } from '../../core/services/room.service';
+import { applyMapZoom, focusLeaderCamera, isFollowingLeader } from './map-camera';
 import { leadingPlayerId } from './replay-leader';
 
 /** World pixels per grid cell (all drawing happens in world coordinates). */
@@ -65,7 +66,8 @@ function buildGaugeSegments(): string[] {
  * use the overlay buttons to zoom, tap a highlighted square to move. The
  * camera auto-frames your car on first load; pan/zoom hands control to the
  * user until they tap the fit toggle or a new race starts. Replay passes
- * `followLeader` so the default frame is the leader instead of the whole sheet.
+ * `followLeader` so the camera stays on the leader. Zoom only changes
+ * magnification; panning or the fit toggle is what releases that follow.
  */
 @Component({
   selector: 'app-track-canvas',
@@ -176,8 +178,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   /** Held on the ERS button; legal landings include delta 2. */
   @Input() ersIntent = false;
   /**
-   * Replay only. Frame the race leader until the user pans or zooms;
-   * {@link focusLeader} hands the camera back.
+   * Replay only. Keep the camera on the race leader. Zoom is independent;
+   * panning or the fit toggle releases the follow, and {@link focusLeader}
+   * turns it back on without changing zoom.
    */
   @Input() followLeader = false;
 
@@ -279,22 +282,30 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.zoomBy(1 / 1.3);
   }
 
+  private cameraState() {
+    return {
+      manualCamera: this.manualCamera,
+      fitMode: this.fitMode,
+      zoomFactor: this.zoomFactor,
+    };
+  }
+
   private zoomBy(factor: number): void {
     const canvas = this.canvasRef.nativeElement;
     const state = this.state;
     const track = state?.trackId ? getTrackById(state.trackId) : this.lastTrack;
     if (!track) return;
 
-    if (this.fitMode) {
-      this.zoomFactor = Math.min(3, Math.max(0.4, this.zoomFactor * factor));
-    } else if (!this.manualCamera) {
-      // Commit the current auto-frame, then keep scale under user control.
-      if (state) this.computeCamera(state, track);
-      this.manualCamera = true;
-      this.fitMode = false;
+    const next = applyMapZoom(this.cameraState(), this.followLeader, factor);
+    if (next.scaleManually) {
+      // Live race, or a replay the viewer already panned: commit the current
+      // auto-frame once, then keep scale under user control.
+      if (!this.manualCamera && state) this.computeCamera(state, track);
+      this.manualCamera = next.camera.manualCamera;
+      this.fitMode = next.camera.fitMode;
       this.scaleAround(canvas.width / 2, canvas.height / 2, factor);
     } else {
-      this.scaleAround(canvas.width / 2, canvas.height / 2, factor);
+      this.zoomFactor = next.camera.zoomFactor;
     }
     this.draw();
   }
@@ -306,17 +317,18 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.draw();
   }
 
-  /** Drop a free pan/zoom and sit on the leader again. */
+  /** Drop a free pan or the whole-sheet fit and sit on the leader again. */
   focusLeader(): void {
-    this.fitMode = false;
-    this.manualCamera = false;
-    this.zoomFactor = 1;
+    const next = focusLeaderCamera(this.cameraState());
+    this.manualCamera = next.manualCamera;
+    this.fitMode = next.fitMode;
+    this.zoomFactor = next.zoomFactor;
     this.draw();
   }
 
   /** True while replay is tracking the leader (button highlight). */
   get followingLeader(): boolean {
-    return this.followLeader && !this.manualCamera && !this.fitMode;
+    return isFollowingLeader(this.followLeader, this.cameraState());
   }
 
   private minScale(track: TrackDefinition): number {
@@ -454,9 +466,26 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     const boxW = maxX - minX + 1;
     const boxH = maxY - minY + 1;
-    let cellPx = Math.min(cw / boxW, ch / boxH) * this.zoomFactor;
     const dprScale = window.devicePixelRatio || 1;
-    cellPx = Math.max(MIN_CELL_PX * dprScale, Math.min(MAX_CELL_PX * dprScale, cellPx));
+    const base = Math.min(cw / boxW, ch / boxH);
+    let cellPx: number;
+    if (follow) {
+      // Default leader frame stays the tight one. Zoom multiplies it and uses
+      // the same limits as a free zoom, then sticks so the next click responds.
+      const framed = Math.max(MIN_CELL_PX * dprScale, Math.min(MAX_CELL_PX * dprScale, base));
+      const minCell = Math.min(framed, this.minScale(track) * CELL);
+      const maxCell = Math.max(framed, this.maxScale() * CELL);
+      cellPx = Math.max(minCell, Math.min(maxCell, framed * this.zoomFactor));
+      if (framed > 0) {
+        const effective = cellPx / framed;
+        if (Math.abs(effective - this.zoomFactor) > 1e-4) this.zoomFactor = effective;
+      }
+    } else {
+      cellPx = Math.max(
+        MIN_CELL_PX * dprScale,
+        Math.min(MAX_CELL_PX * dprScale, base * this.zoomFactor)
+      );
+    }
     const s = cellPx / CELL;
 
     let cxWorld = ((minX + maxX + 1) / 2) * CELL;
@@ -529,8 +558,11 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       e.preventDefault();
       this.pointerDown = true;
       this.gestureMoved = true;
-      this.manualCamera = true;
-      this.fitMode = false;
+      // Pinch is zoom. It must not drop leader follow; a one-finger drag does.
+      if (!this.followingLeader) {
+        this.manualCamera = true;
+        this.fitMode = false;
+      }
       this.pinchDist = this.touchDist(e);
       const [mx, my] = this.touchMid(e);
       this.lastX = mx;
@@ -561,6 +593,13 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       const canvas = this.canvasRef.nativeElement;
       const rect = canvas.getBoundingClientRect();
       const k = this.cssToDevice();
+      if (this.pinchDist > 0 && this.followingLeader) {
+        const next = applyMapZoom(this.cameraState(), this.followLeader, dist / this.pinchDist);
+        this.zoomFactor = next.camera.zoomFactor;
+        this.pinchDist = dist;
+        this.draw();
+        return;
+      }
       if (this.pinchDist > 0) {
         this.scaleAround((mx - rect.left) * k, (my - rect.top) * k, dist / this.pinchDist);
       }
