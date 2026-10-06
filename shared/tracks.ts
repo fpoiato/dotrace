@@ -274,8 +274,9 @@ const MONZA: CircuitSpec = {
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
-  // Pit straight, east of the stripe (race is left). Not the grid, not the line.
-  drsZones: [{ x0: 130, y0: 110, x1: 176, y1: 126 }],
+  // Main straight, from the cell after the stripe to the Parabolica entry.
+  // Race is left. Stays off the grid and off the finish line.
+  drsZones: [{ x0: 127, y0: 108, x1: 196, y1: 128 }],
 };
 
 /**
