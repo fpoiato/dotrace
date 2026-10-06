@@ -32,7 +32,10 @@ describe('DotRaceWsStack', () => {
       FunctionName: 'DotRaceAiPlayer',
       RecursiveLoop: 'Allow',
     });
-    expect(JSON.stringify(template.toJSON())).toContain('custom-model/*');
+    const json = JSON.stringify(template.toJSON());
+    expect(json).toContain('us.anthropic.claude-opus-4-7');
+    expect(json).toContain('anthropic.claude-opus-4-7');
+    expect(json).not.toContain('custom-model/*');
   });
 
   it('creates a stopped-by-default Ollaya host and its power lambda', () => {
