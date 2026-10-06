@@ -59,7 +59,7 @@
   "game.drsArmed": "DRS ready",
   "game.drsHint": "Open DRS on the next move (gear 7)",
   "game.ers": "ERS",
-  "game.ersHint": "Spend 1 ERS bar — accelerate 2 forward only",
+  "game.ersHint": "Spend 1 ERS bar — the 9 buttons step by 2, except the 3 backwards",
   "game.ersCharge": "ERS charge",
   "game.ersTarget": "ERS move {{move}}",
   "game.offTrack": "Off track — max gear 1",

@@ -59,7 +59,7 @@
   "game.drsArmed": "DRS armado",
   "game.drsHint": "Abrir o DRS no próximo movimento (marcha 7)",
   "game.ers": "ERS",
-  "game.ersHint": "Gastar 1 barra de ERS — acelera 2 só para a frente",
+  "game.ersHint": "Gastar 1 barra de ERS — os 9 botões dão passo 2, menos os 3 para trás",
   "game.ersCharge": "Carga do ERS",
   "game.ersTarget": "Movimento ERS {{move}}",
   "game.offTrack": "Fora da pista — marcha máx. 1",

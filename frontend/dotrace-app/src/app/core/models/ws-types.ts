@@ -460,10 +460,7 @@ export const MAX_GEAR = 6;
 /** Gear ceiling while DRS is open. Gear 8 is never legal. */
 export const DRS_MAX_GEAR = 7;
 
-/**
- * Extra step along the direction of travel while an ERS bar is spent.
- * The other axis stays within ±1. There is no brake ERS.
- */
+/** Per-axis step of the 3×3 pad while an ERS bar is spent. */
 export const ERS_MAX_DELTA = 2;
 
 /** ERS battery cap, in quarter-bars. */
@@ -471,9 +468,6 @@ export const ERS_MAX_CHARGE = 4;
 
 /** Charge gained per gear dropped. */
 export const ERS_CHARGE_PER_GEAR = 0.25;
-
-/** Chebyshev gap to a car ahead that lets a DRS zone arm the button. */
-export const DRS_RANGE = 3;
 
 /** Flags the client may set on SUBMIT_MOVE. The host decides if they apply. */
 export interface BoostRequest {
@@ -502,38 +496,31 @@ export const GRASS_PENALTY_TIMED_FIRST_MS = 5000;
 export const GRASS_PENALTY_TIMED_REPEAT_MS = 10000;
 
 /**
- * The three ERS steps, driver's left to right.
- * Each one adds {@link ERS_MAX_DELTA} along the current direction of travel
- * and at most 1 of steering. Stopped cars have no forward line.
- * On a diagonal the straight step is +2 on both axes, with the two
- * shallower neighbours beside it.
+ * True when a 3×3 step (each axis −2, 0 or +2) points only against travel.
+ * Stopped cars have no backwards. A step that still advances on one axis
+ * is a steer, not one of the three opposite commands.
  */
-export function ersForwardDeltas(velocity: Vector2D): Vector2D[] {
-  const ax = Math.abs(velocity.x);
-  const ay = Math.abs(velocity.y);
-  if (ax === 0 && ay === 0) return [];
+export function isErsOppositeStep(velocity: Vector2D, delta: Vector2D): boolean {
   const sx = Math.sign(velocity.x);
   const sy = Math.sign(velocity.y);
-  const candidates: Vector2D[] =
-    ax === ay
-      ? [
-          { x: sx * ERS_MAX_DELTA, y: sy * MAX_GEAR_DELTA },
-          { x: sx * ERS_MAX_DELTA, y: sy * ERS_MAX_DELTA },
-          { x: sx * MAX_GEAR_DELTA, y: sy * ERS_MAX_DELTA },
-        ]
-      : ax > ay
-        ? [-1, 0, 1].map((lateral) => ({ x: sx * ERS_MAX_DELTA, y: lateral }))
-        : [-1, 0, 1].map((lateral) => ({ x: lateral, y: sy * ERS_MAX_DELTA }));
-  // Screen Y grows downward, so this cross product is the driver's left.
-  const leftRank = (delta: Vector2D) => sy * delta.x - sx * delta.y;
-  return candidates.sort((a, b) => leftRank(b) - leftRank(a));
+  if (sx === 0 && sy === 0) return false;
+  const dx = Math.sign(delta.x);
+  const dy = Math.sign(delta.y);
+  if (dx === 0 && dy === 0) return false;
+  const alongX = sx === 0 ? 0 : dx * sx;
+  const alongY = sy === 0 ? 0 : dy * sy;
+  const forward = (alongX > 0 ? 1 : 0) + (alongY > 0 ? 1 : 0);
+  const back = (alongX < 0 ? 1 : 0) + (alongY < 0 ? 1 : 0);
+  return back > 0 && forward === 0;
 }
 
-/** True when `next` is one of the forward ERS steps from `current`. */
-export function isErsForwardDelta(current: Vector2D, next: Vector2D): boolean {
-  const dvx = next.x - current.x;
-  const dvy = next.y - current.y;
-  return ersForwardDeltas(current).some((delta) => delta.x === dvx && delta.y === dvy);
+/** True when `next` is one of the nine ERS pad steps, other than the opposite three. */
+export function isErsPadDelta(current: Vector2D, next: Vector2D): boolean {
+  const dx = next.x - current.x;
+  const dy = next.y - current.y;
+  if (Math.abs(dx) > ERS_MAX_DELTA || Math.abs(dy) > ERS_MAX_DELTA) return false;
+  if (dx % ERS_MAX_DELTA !== 0 || dy % ERS_MAX_DELTA !== 0) return false;
+  return !isErsOppositeStep(current, { x: dx, y: dy });
 }
 
 export function isValidGearChange(
@@ -554,8 +541,8 @@ export function isValidGearChange(
       OFF_TRACK_GEARS.includes(next.y as (typeof OFF_TRACK_GEARS)[number])
     );
   }
-  // Spending ERS only opens the forward line. A bigger brake is not a move.
-  if (delta > MAX_GEAR_DELTA && !isErsForwardDelta(current, next)) return false;
+  // ERS keeps the 3×3 pad at step 2 and rejects the three opposite steps.
+  if (delta > MAX_GEAR_DELTA && !isErsPadDelta(current, next)) return false;
   return gearOf(next) <= maxGear;
 }
 
@@ -713,29 +700,19 @@ export function isStrictlyAhead(leader: Player, trailer: Player, track: TrackDef
   return racingProgress(leader.position, track) > racingProgress(trailer.position, track);
 }
 
-/** Unfinished rival ahead, within Chebyshev `range` of `player.position`. */
-export function hasRivalAheadInRange(
-  player: Player,
-  others: Player[],
-  track: TrackDefinition,
-  range = DRS_RANGE
-): boolean {
+/** Unfinished rival strictly ahead on the racing line. Distance does not matter. */
+export function hasRivalAhead(player: Player, others: Player[], track: TrackDefinition): boolean {
   return others.some((opponent) => {
     if (opponent.connectionId === player.connectionId) return false;
     if (opponent.finishOrder !== undefined) return false;
-    if (!isStrictlyAhead(opponent, player, track)) return false;
-    const gap = Math.max(
-      Math.abs(opponent.position.x - player.position.x),
-      Math.abs(opponent.position.y - player.position.y)
-    );
-    return gap <= range;
+    return isStrictlyAhead(opponent, player, track);
   });
 }
 
 /**
- * Arm DRS when the move enters a still-unused zone with a rival ahead at the
- * landing. The zone index is spent immediately, so sitting inside it or
- * crossing it again this lap does not rearm.
+ * Arm DRS when the move is on a still-unused blue zone and a rival is ahead.
+ * Any cell of the zone counts, including the first step onto it. The zone is
+ * spent when it arms, so the rest of that visit does not arm it again.
  */
 export function armDrsZones(
   player: Player,
@@ -748,17 +725,25 @@ export function armDrsZones(
   if (zones.length === 0) return;
   const used = new Set(player.drsZonesUsed ?? []);
   const atLanding: Player = { ...player, position: { ...landing } };
+  if (!hasRivalAhead(atLanding, others, track)) return;
   let armed = false;
   for (let i = 0; i < zones.length; i++) {
     if (used.has(i)) continue;
     if (!segmentEntersRect(from, landing, zones[i])) continue;
-    if (!hasRivalAheadInRange(atLanding, others, track)) continue;
     used.add(i);
     armed = true;
   }
   if (!armed) return;
   player.drsArmed = true;
   player.drsZonesUsed = [...used].sort((a, b) => a - b);
+}
+
+/** Arm every car that is already standing on an unused blue zone. */
+export function syncDrsArms(players: Player[], track: TrackDefinition): void {
+  for (const player of players) {
+    if (player.finishOrder !== undefined) continue;
+    armDrsZones(player, player.position, player.position, players, track);
+  }
 }
 
 /** Same moment passedCheckpoint returns to false: the lap's DRS zones reset. */
@@ -1002,7 +987,7 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
  * Cars may cross each other's paths, but cannot land on an occupied cell.
  * If every normal candidate lands outside the grid, an emergency stop
  * (velocity {0,0}, stay in place) is offered so the game never soft-locks.
- * An ERS request (maxDelta above 1) only returns the forward line.
+ * An ERS request (maxDelta above 1) returns the 3×3 steps of 2, except the three opposite ones.
  */
 export function getValidMoves(
   player: Player,

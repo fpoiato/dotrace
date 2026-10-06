@@ -11,6 +11,7 @@ import {
   Vector2D,
   applyGrassPenalty,
   armDrsZones,
+  syncDrsArms,
   beginNextLap,
   BoostRequest,
   canPlayerMove,
@@ -395,6 +396,10 @@ export class GameEngineService implements OnDestroy {
         this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
       }
     }
+
+    // Anyone already standing on blue can arm now, including the car that
+    // just stepped onto the zone and a trailer who was overtaken there.
+    syncDrsArms(state.players, track);
 
     // Record this move for the post-race replay (after all state mutations).
     pushReplayMove(state, {
