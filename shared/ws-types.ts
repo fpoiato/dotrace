@@ -1027,6 +1027,35 @@ export function adoptNicknameConnection(
   return true;
 }
 
+/**
+ * Point this phone's car at its new socket id.
+ * A reconnect updates the room connection id but the race lives only on the
+ * host, so without this the turn stays on the old id and the pad never enables.
+ * Returns true when the board changed.
+ */
+export function retargetLocalPlayer(
+  state: GameState,
+  previousConnectionId: string | null,
+  nextConnectionId: string,
+  nickname: string
+): boolean {
+  if (!nextConnectionId || previousConnectionId === nextConnectionId) return false;
+  if (state.players.some((player) => player.connectionId === nextConnectionId)) return false;
+  const fromKnown =
+    previousConnectionId &&
+    state.players.some((player) => player.connectionId === previousConnectionId)
+      ? previousConnectionId
+      : undefined;
+  const fromNick = state.players.find((player) => player.nickname === nickname.trim())?.connectionId;
+  const fromId = fromKnown ?? fromNick;
+  if (!fromId || fromId === nextConnectionId) return false;
+  remapPlayerConnection(state, fromId, nextConnectionId);
+  for (const player of state.players) {
+    player.isHost = player.connectionId === state.hostId;
+  }
+  return true;
+}
+
 /** Remap session-stat keys when a player reconnects with a new connection id. */
 export function remapSessionStatsConnectionId(
   state: GameState,
