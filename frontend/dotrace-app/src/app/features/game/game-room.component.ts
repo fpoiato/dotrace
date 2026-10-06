@@ -6,6 +6,7 @@ import { Subscription } from 'rxjs';
 import { getTrackById } from '../../core/models/tracks';
 import {
   GameState,
+  TrackDefinition,
   LiveStandingRow,
   Player,
   Vector2D,
@@ -16,9 +17,10 @@ import {
   getValidMoves,
   isGearLimited,
   isGrassShortcut,
+  isKerbGrass,
+  segmentTouchesKerb,
   landingPosition,
   remainingStopMs,
-  segmentCrossesGrass,
   segmentCrossesRumble,
 } from '../../core/models/ws-types';
 import { AudioService } from '../../core/services/audio.service';
@@ -33,12 +35,26 @@ import { MiniMapComponent } from './mini-map.component';
 import { ReplayViewerComponent } from './replay-viewer.component';
 import { TrackCanvasComponent } from './track-canvas.component';
 
+/** Amber on the pad: a real grass cut, or a landing that leaves the asphalt. */
+function moveWarnsOffAsphalt(
+  track: TrackDefinition,
+  from: Vector2D,
+  landing: Vector2D
+): boolean {
+  const tile = getTileAt(track, landing.x, landing.y);
+  return (
+    isGrassShortcut(track, from, landing) ||
+    tile === 'rumble' ||
+    isKerbGrass(track, landing.x, landing.y)
+  );
+}
+
 interface PadOption {
   key: string;
   glyph: string;
   enabled: boolean;
   velocity: Vector2D | null;
-  /** The move is legal but lands in the gravel. */
+  /** Real grass cut, or a landing that leaves the asphalt. */
   grass: boolean;
 }
 
@@ -189,10 +205,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
           if (match) {
             velocity = match.velocity;
             const landing = landingPosition(me.position, match.velocity);
-            grass =
-              getTileAt(track, landing.x, landing.y) === 'grass' ||
-              getTileAt(track, landing.x, landing.y) === 'rumble' ||
-              segmentCrossesGrass(track, me.position, landing);
+            grass = moveWarnsOffAsphalt(track, me.position, landing);
           }
         }
         options.push({ key, glyph: PAD_GLYPHS[key], enabled: velocity !== null, velocity, grass });
@@ -210,10 +223,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         glyph: '■',
         enabled: true,
         velocity: stop.velocity,
-        grass:
-          getTileAt(track, landing.x, landing.y) === 'grass' ||
-          getTileAt(track, landing.x, landing.y) === 'rumble' ||
-          segmentCrossesGrass(track, me.position, landing),
+        grass: moveWarnsOffAsphalt(track, me.position, landing),
       };
     }
 
@@ -235,7 +245,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.haptic.grassHit();
       } else if (
         getTileAt(track, landing.x, landing.y) === 'rumble' ||
-        segmentCrossesRumble(track, me.position, landing)
+        isKerbGrass(track, landing.x, landing.y) ||
+        segmentCrossesRumble(track, me.position, landing) ||
+        segmentTouchesKerb(track, me.position, landing)
       ) {
         this.haptic.rumbleStrip();
       }
