@@ -502,12 +502,12 @@ describe('grass shortcut penalties', () => {
 
   it('does not penalize clipping the zebra on Monza', () => {
     const monza = TRACKS.find((t) => t.id === 'monza')!;
-    // Race VVCTP: landed on the apex kerb, and later the line only nicked
-    // two border squares while finishing on the asphalt.
-    expect(isKerbGrass(monza, 77, 28)).toBe(true);
-    expect(isGrassShortcut(monza, { x: 78, y: 31 }, { x: 77, y: 28 })).toBe(false);
-    expect(isGrassShortcut(monza, { x: 10, y: 29 }, { x: 12, y: 34 })).toBe(false);
-    expect(segmentCrossesGrass(monza, { x: 10, y: 29 }, { x: 12, y: 34 })).toBe(false);
+    // Lesmo edge: landing on the zebra square, and a line that only nicks
+    // that border while finishing on the asphalt.
+    expect(isKerbGrass(monza, 36, 4)).toBe(true);
+    expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 36, y: 4 })).toBe(false);
+    expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 33, y: 6 })).toBe(false);
+    expect(segmentCrossesGrass(monza, { x: 36, y: 5 }, { x: 33, y: 6 })).toBe(false);
   });
 
   it('still penalizes infield grass on every circuit', () => {

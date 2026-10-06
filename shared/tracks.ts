@@ -210,35 +210,67 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
 }
 
 /**
- * Monza — elongated clockwise ring: long bottom start straight, Parabolica
- * sweeping up on the right, back straight climbing to the top-left (Lesmo
- * side), tall left flank returning down to the line.
+ * Monza — enlarged clockwise GP outline. Long bottom straight (race left),
+ * Variante del Rettifilo and Curva Grande on the left, Roggia and the Lesmos
+ * across the top, Ascari chicane, then the Parabolica back onto the straight.
  */
 const MONZA: CircuitSpec = {
   id: 'monza',
   nameKey: 'tracks.monza',
+  width: 214,
+  height: 132,
   centerline: [
-    { x: 18, y: 48 },
-    { x: 66, y: 48 },
-    { x: 75, y: 44 },
-    { x: 78, y: 35 },
-    { x: 71, y: 26 },
-    { x: 51, y: 17 },
-    { x: 30, y: 9 },
-    { x: 17, y: 5 },
-    { x: 9, y: 9 },
-    { x: 9, y: 18 },
-    { x: 14, y: 30 },
-    { x: 17, y: 41 },
-    { x: 18, y: 48 },
+    // Pit straight — race left toward the Rettifilo
+    { x: 168, y: 118 },
+    { x: 138, y: 118 },
+    { x: 108, y: 118 },
+    { x: 86, y: 118 },
+    // Variante del Rettifilo — right, then left
+    { x: 74, y: 106 },
+    { x: 60, y: 116 },
+    { x: 48, y: 106 },
+    // Curva Grande
+    { x: 38, y: 96 },
+    { x: 30, y: 84 },
+    { x: 24, y: 68 },
+    { x: 20, y: 52 },
+    { x: 22, y: 40 },
+    // Variante della Roggia — left lane, then back right
+    { x: 22, y: 32 },
+    { x: 10, y: 26 },
+    { x: 10, y: 18 },
+    { x: 24, y: 12 },
+    // Lesmo 1 and Lesmo 2
+    { x: 38, y: 8 },
+    { x: 52, y: 10 },
+    { x: 62, y: 18 },
+    { x: 68, y: 28 },
+    // Serraglio
+    { x: 78, y: 42 },
+    { x: 92, y: 56 },
+    { x: 108, y: 70 },
+    // Variante Ascari — left, right, left, long enough to rotate
+    { x: 124, y: 82 },
+    { x: 144, y: 76 },
+    { x: 160, y: 88 },
+    { x: 176, y: 82 },
+    // Straight into the Parabolica
+    { x: 192, y: 90 },
+    { x: 202, y: 98 },
+    { x: 206, y: 108 },
+    { x: 204, y: 116 },
+    { x: 194, y: 122 },
+    { x: 180, y: 122 },
+    { x: 170, y: 118 },
+    { x: 168, y: 118 },
   ],
-  finish: { x0: 42, x1: 44, y0: 44, y1: 53 },
-  startLine: gridSlots(47, 3, [47, 50]),
+  finish: { x0: 124, x1: 126, y0: 112, y1: 125 },
+  startLine: gridSlots(120, -3, [116, 119]),
   arrows: [
-    { at: { x: 43, y: 41 }, dir: { x: 1, y: 0 } },
-    { at: { x: 43, y: 53 }, dir: { x: 1, y: 0 } },
+    { at: { x: 125, y: 110 }, dir: { x: -1, y: 0 } },
+    { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
-  checkpoint: { x0: 5, y0: 2, x1: 30, y1: 18 },
+  checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
 };
 
 /**

@@ -16,10 +16,10 @@ const track = getTrackById('monza')!;
 
 function race() {
   const me = createLobbyPlayer('ai-1', 'Bot Alfa', false, 1, '#3B82F6');
-  me.position = { x: 12, y: 28 };
+  me.position = { x: 112, y: 74 };
   me.velocity = { x: 6, y: 0 };
   const other = createLobbyPlayer('human', 'Ada', true, 0, '#EF4444');
-  other.position = { x: 14, y: 28 };
+  other.position = { x: 114, y: 74 };
   other.velocity = { x: 1, y: 0 };
   const state = createInitialState([other, me], 'human');
   state.phase = 'GAME_ROUND';
@@ -37,7 +37,7 @@ describe('laya scene', () => {
     expect(grid).toContain('@');
     expect(grid).toContain('A');
     expect(scene.state.hold).toBe(
-      'leaves grass on 1: 1 18,28 grass, 2 24,28 grass, 3 30,28 grass'
+      'leaves grass on 2: 1 118,74 asphalt, 2 124,74 grass, 3 130,74 grass'
     );
     const rows = grid.split('\n');
     const row = rows.find((line) => line.includes('@'));
@@ -178,46 +178,45 @@ describe('laya scene', () => {
     expect(ahead).toContain('3');
   });
 
-  it('carries speed on the Monza back straight and does not steer down before the right-hander', () => {
+  it('carries speed on the Monza straight and turns up into the Rettifilo', () => {
     const monza = getTrackById('monza')!;
     const straight = race();
-    straight.me.position = { x: 56, y: 20 };
+    straight.me.position = { x: 140, y: 118 };
     straight.me.velocity = { x: -3, y: 0 };
     const open = buildLayaScene(straight.me, straight.state, monza);
     expect(open.state.bend).toBe('straight');
     expect(open.state.pace).toBe(6);
     const best = open.options.find((option) => option.detail.startsWith('best '));
-    expect(best?.velocity.y).toBeLessThan(0);
+    expect(best?.velocity.y).toBe(0);
     expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeGreaterThanOrEqual(3);
-    const held = open.options.find((option) => option.velocity.x === -3 && option.velocity.y === 0);
-    expect(held?.detail.startsWith('drift')).toBe(true);
+    const sideways = open.options.find((option) => option.velocity.x === -2 && option.velocity.y === 1);
+    expect(sideways?.detail.startsWith('drift')).toBe(true);
 
     const corner = race();
-    corner.me.position = { x: 60, y: 45 };
-    corner.me.velocity = { x: 4, y: 0 };
+    corner.me.position = { x: 100, y: 118 };
+    corner.me.velocity = { x: -4, y: 0 };
     const scene = buildLayaScene(corner.me, corner.state, monza);
     const brake = scene.options.find((option) => option.detail.startsWith('best '));
-    expect(brake?.velocity.y).toBeLessThanOrEqual(0);
+    expect(brake?.velocity.y).toBeLessThan(0);
     expect(Math.max(Math.abs(brake!.velocity.x), Math.abs(brake!.velocity.y))).toBeGreaterThanOrEqual(4);
   });
 
-  it('keeps speed down the Monza return straight', () => {
+  it('keeps speed up Curva Grande', () => {
     const monza = getTrackById('monza')!;
     const { me, state } = race();
-    me.position = { x: 7, y: 19 };
-    me.velocity = { x: 1, y: 2 };
-    me.passedCheckpoint = true;
+    me.position = { x: 40, y: 100 };
+    me.velocity = { x: -3, y: -3 };
     const scene = buildLayaScene(me, state, monza);
     expect(scene.state.bend).toBe('straight');
     expect(scene.state.pace).toBe(6);
     const best = scene.options.find((option) => option.detail.startsWith('best '));
-    expect(best?.velocity.y).toBeGreaterThanOrEqual(2);
+    expect(best?.velocity.y).toBeLessThanOrEqual(-3);
     expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeGreaterThanOrEqual(3);
   });
 
   it('finishes a lap on Monza, Interlagos, and Monaco without leaving the asphalt', () => {
     const starts = [
-      ['monza', 47, 50, 50],
+      ['monza', 120, 116, 160],
       ['interlagos', 42, 6, 70],
       ['monaco', 42, 30, 55],
     ] as const;
@@ -359,25 +358,25 @@ describe('LayaBrain', () => {
   it('shows that holding course on the Monza straight leaves the grass', () => {
     const monza = getTrackById('monza')!;
     const { me, state } = race();
-    me.position = { x: 48, y: 47 };
-    me.velocity = { x: 1, y: -2 };
+    me.position = { x: 140, y: 116 };
+    me.velocity = { x: 2, y: -1 };
     const scene = buildLayaScene(me, state, monza);
     expect(scene.state.hold).toBe(
-      'leaves grass on 2: 1 49,45 asphalt, 2 50,43 grass, 3 51,41 grass'
+      'leaves grass on 2: 1 142,115 asphalt, 2 144,114 grass, 3 146,113 grass'
     );
     const rows = String(scene.state.grid).split('\n');
     expect(rows[rows.length - 1]?.startsWith('@')).toBe(true);
     expect(scene.state.grid).toContain('1');
     expect(scene.state.grid).toContain('2');
     expect(scene.state.grid).toContain('3');
-    const intoGrass = scene.options.find((option) => option.velocity.x === 1 && option.velocity.y === -3);
+    const intoGrass = scene.options.find((option) => option.velocity.x === 1 && option.velocity.y === -2);
     expect(intoGrass?.detail).toBe('penalty gear 1');
   });
 
   it('falls back when Laya stands still and the car can move', async () => {
     const monza = getTrackById('monza')!;
     const { me, state } = race();
-    me.position = { x: 47, y: 50 };
+    me.position = { x: 120, y: 116 };
     me.velocity = { x: 0, y: 0 };
     const summary = buildBoardSummary(me, state, monza);
     const moves = listAnnotatedMoves(me, state, monza);
@@ -398,14 +397,14 @@ describe('LayaBrain', () => {
     });
     const chosen = await local.pickMove(summary, moves);
     const best = summary.scene.options.find((option) => option.detail.startsWith('best '));
-    expect(best?.velocity).toEqual({ x: 1, y: 0 });
+    expect(best?.velocity).toEqual({ x: -1, y: 0 });
     expect(chosen.velocity).toEqual(best!.velocity);
   });
 
   it('uses best when Laya sheds gear on an open straight', async () => {
     const monza = getTrackById('monza')!;
     const { me, state } = race();
-    me.position = { x: 50, y: 19 };
+    me.position = { x: 140, y: 116 };
     me.velocity = { x: -3, y: -1 };
     const summary = buildBoardSummary(me, state, monza);
     const moves = listAnnotatedMoves(me, state, monza);
@@ -435,7 +434,7 @@ describe('LayaBrain', () => {
   it('uses best when Laya drifts off the straight', async () => {
     const monza = getTrackById('monza')!;
     const { me, state } = race();
-    me.position = { x: 56, y: 20 };
+    me.position = { x: 140, y: 118 };
     me.velocity = { x: -3, y: 0 };
     const summary = buildBoardSummary(me, state, monza);
     const moves = listAnnotatedMoves(me, state, monza);
