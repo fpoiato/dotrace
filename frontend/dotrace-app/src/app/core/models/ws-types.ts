@@ -48,8 +48,9 @@ export interface TrackDefinition {
    */
   checkpoint?: CheckpointRect;
   /**
-   * DRS detection strips, separate from the lap checkpoint. Crossing one can
-   * arm the DRS button once per lap when a rival is just ahead.
+   * Authoring boxes for the DRS strips, separate from the lap checkpoint.
+   * The blue area is the asphalt between the two cuts where the centerline
+   * enters and leaves the box. Each cut is perpendicular to the track sides.
    */
   drsZones?: CheckpointRect[];
 }
@@ -616,7 +617,7 @@ interface RacingGeom {
 
 const racingGeomCache = new WeakMap<TrackDefinition, RacingGeom>();
 
-function projectArc(geom: RacingGeom, p: Vector2D): number {
+function projectPoint(geom: RacingGeom, p: Vector2D): { arc: number; dist2: number } {
   let best = 0;
   let bestD = Number.POSITIVE_INFINITY;
   for (const s of geom.segs) {
@@ -635,7 +636,11 @@ function projectArc(geom: RacingGeom, p: Vector2D): number {
       best = s.arc + s.len * t;
     }
   }
-  return best;
+  return { arc: best, dist2: bestD };
+}
+
+function projectArc(geom: RacingGeom, p: Vector2D): number {
+  return projectPoint(geom, p).arc;
 }
 
 function racingGeom(track: TrackDefinition): RacingGeom {
@@ -675,6 +680,266 @@ function racingGeom(track: TrackDefinition): RacingGeom {
   if (n > 0) geom.origin = projectArc(geom, { x: sx / n, y: sy / n });
   racingGeomCache.set(track, geom);
   return geom;
+}
+
+/**
+ * Cells this far from the centerline still belong to that stretch of road.
+ * Matches the pen radius the circuits are stamped with.
+ */
+const DRS_CORRIDOR = 3.51;
+
+/** A straight cut across the road, perpendicular to the sides. */
+export interface DrsCut {
+  at: Vector2D;
+  /** Unit tangent along the racing direction. */
+  tangent: Vector2D;
+}
+
+/** Asphalt between two perpendicular cuts, resolved from an authoring box. */
+export interface ResolvedDrsZone {
+  cells: Vector2D[];
+  entry: DrsCut;
+  exit: DrsCut;
+}
+
+interface CachedDrsZone extends ResolvedDrsZone {
+  keys: Set<string>;
+}
+
+const drsZoneCache = new WeakMap<TrackDefinition, CachedDrsZone[]>();
+
+function arcInSpan(arc: number, from: number, to: number, lap: number): boolean {
+  const span = (to - from + lap) % lap;
+  const rel = (arc - from + lap) % lap;
+  return rel <= span + 1e-3;
+}
+
+function spanLength(from: number, to: number, lap: number): number {
+  return (to - from + lap) % lap;
+}
+
+function cutAt(geom: RacingGeom, arc: number): DrsCut {
+  const lap = geom.lap;
+  let a = ((arc % lap) + lap) % lap;
+  if (a >= lap - 1e-9) a = 0;
+  for (const s of geom.segs) {
+    if (a > s.arc + s.len + 1e-6) continue;
+    if (a < s.arc - 1e-6) continue;
+    const len = s.len || 1;
+    const t = Math.min(1, Math.max(0, (a - s.arc) / len));
+    return {
+      at: { x: s.ax + s.dx * t, y: s.ay + s.dy * t },
+      tangent: { x: s.dx / len, y: s.dy / len },
+    };
+  }
+  const s = geom.segs[0];
+  const len = s.len || 1;
+  return { at: { x: s.ax, y: s.ay }, tangent: { x: s.dx / len, y: s.dy / len } };
+}
+
+/** Contiguous centerline runs that sit inside the authoring box. */
+function spansInsideRect(
+  geom: RacingGeom,
+  rect: CheckpointRect
+): { from: number; to: number }[] {
+  const samples: { arc: number; inside: boolean }[] = [];
+  for (const s of geom.segs) {
+    const steps = Math.max(1, Math.ceil(s.len * 2));
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const x = s.ax + s.dx * t;
+      const y = s.ay + s.dy * t;
+      samples.push({
+        arc: s.arc + s.len * t,
+        inside: x >= rect.x0 && x <= rect.x1 && y >= rect.y0 && y <= rect.y1,
+      });
+    }
+  }
+  const n = samples.length;
+  if (n === 0) return [];
+  const outside = samples.findIndex((s) => !s.inside);
+  if (outside === -1) return [{ from: 0, to: geom.lap }];
+
+  const runs: { from: number; to: number }[] = [];
+  let idx = outside;
+  let seen = 0;
+  while (seen < n) {
+    if (!samples[idx].inside) {
+      idx = (idx + 1) % n;
+      seen++;
+      continue;
+    }
+    const start = idx;
+    let end = idx;
+    let count = 1;
+    while (count < n) {
+      const next = (end + 1) % n;
+      if (!samples[next].inside) break;
+      end = next;
+      count++;
+    }
+    const from = samples[start].arc;
+    const to = samples[end].arc;
+    if (spanLength(from, to, geom.lap) >= 1) runs.push({ from, to });
+    idx = (end + 1) % n;
+    seen += count;
+  }
+  return runs;
+}
+
+function segmentOverlapsSpan(
+  segFrom: number,
+  segTo: number,
+  from: number,
+  to: number,
+  lap: number
+): boolean {
+  const mid = (segFrom + segTo) / 2;
+  if (
+    arcInSpan(segFrom, from, to, lap) ||
+    arcInSpan(mid, from, to, lap) ||
+    arcInSpan(segTo, from, to, lap)
+  ) {
+    return true;
+  }
+  const insideSeg = (a: number) => a >= segFrom - 1e-6 && a <= segTo + 1e-6;
+  return insideSeg(from) || insideSeg(to);
+}
+
+/** Track cells whose projection lies on this centerline span, full width. */
+function cellsForSpan(track: TrackDefinition, geom: RacingGeom, from: number, to: number): Vector2D[] {
+  const r2 = DRS_CORRIDOR * DRS_CORRIDOR;
+  const reach = DRS_CORRIDOR + 0.75;
+  const reach2 = reach * reach;
+  const seen = new Set<string>();
+  for (const s of geom.segs) {
+    if (!segmentOverlapsSpan(s.arc, s.arc + s.len, from, to, geom.lap)) continue;
+    const steps = Math.max(1, Math.ceil(s.len * 2));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const arc = s.arc + s.len * t;
+      if (!arcInSpan(arc, from, to, geom.lap)) continue;
+      const cx = s.ax + s.dx * t;
+      const cy = s.ay + s.dy * t;
+      const minY = Math.max(0, Math.floor(cy - reach));
+      const maxY = Math.min(track.height - 1, Math.ceil(cy + reach));
+      const minX = Math.max(0, Math.floor(cx - reach));
+      const maxX = Math.min(track.width - 1, Math.ceil(cx + reach));
+      for (let y = minY; y <= maxY; y++) {
+        const row = track.grid[y];
+        if (!row) continue;
+        for (let x = minX; x <= maxX; x++) {
+          if (row[x] !== 'track') continue;
+          const dx = x - cx;
+          const dy = y - cy;
+          if (dx * dx + dy * dy > reach2) continue;
+          seen.add(`${x},${y}`);
+        }
+      }
+    }
+  }
+  const cells: Vector2D[] = [];
+  for (const key of seen) {
+    const comma = key.indexOf(',');
+    const x = Number(key.slice(0, comma));
+    const y = Number(key.slice(comma + 1));
+    const projected = projectPoint(geom, { x, y });
+    if (projected.dist2 > r2) continue;
+    if (!arcInSpan(projected.arc, from, to, geom.lap)) continue;
+    cells.push({ x, y });
+  }
+  return cells;
+}
+
+function scoreSpan(
+  track: TrackDefinition,
+  geom: RacingGeom,
+  rect: CheckpointRect,
+  from: number,
+  to: number
+): number {
+  const r2 = DRS_CORRIDOR * DRS_CORRIDOR;
+  const x0 = Math.max(0, Math.floor(rect.x0));
+  const x1 = Math.min(track.width - 1, Math.ceil(rect.x1));
+  const y0 = Math.max(0, Math.floor(rect.y0));
+  const y1 = Math.min(track.height - 1, Math.ceil(rect.y1));
+  let count = 0;
+  for (let y = y0; y <= y1; y++) {
+    const row = track.grid[y];
+    if (!row) continue;
+    for (let x = x0; x <= x1; x++) {
+      if (row[x] !== 'track') continue;
+      const projected = projectPoint(geom, { x, y });
+      if (projected.dist2 > r2) continue;
+      if (arcInSpan(projected.arc, from, to, geom.lap)) count++;
+    }
+  }
+  return count;
+}
+
+function resolveDrsZones(track: TrackDefinition): CachedDrsZone[] {
+  const cached = drsZoneCache.get(track);
+  if (cached) return cached;
+  const geom = racingGeom(track);
+  const resolved: CachedDrsZone[] = [];
+  for (const rect of track.drsZones ?? []) {
+    let best: { from: number; to: number; score: number; len: number } | null = null;
+    for (const run of spansInsideRect(geom, rect)) {
+      const score = scoreSpan(track, geom, rect, run.from, run.to);
+      const len = spanLength(run.from, run.to, geom.lap);
+      if (
+        !best ||
+        score > best.score ||
+        (score === best.score && len > best.len)
+      ) {
+        best = { from: run.from, to: run.to, score, len };
+      }
+    }
+    const cells = best && best.score > 0 ? cellsForSpan(track, geom, best.from, best.to) : [];
+    const entry = best ? cutAt(geom, best.from) : { at: { x: 0, y: 0 }, tangent: { x: 1, y: 0 } };
+    const exit = best ? cutAt(geom, best.to) : { at: { x: 0, y: 0 }, tangent: { x: 1, y: 0 } };
+    resolved.push({
+      cells,
+      entry,
+      exit,
+      keys: new Set(cells.map((c) => `${c.x},${c.y}`)),
+    });
+  }
+  drsZoneCache.set(track, resolved);
+  return resolved;
+}
+
+/** Blue DRS areas: full-width asphalt between perpendicular cuts. */
+export function resolvedDrsZones(track: TrackDefinition): ResolvedDrsZone[] {
+  return resolveDrsZones(track);
+}
+
+/** True when this asphalt cell sits in a blue DRS area. */
+export function isDrsAsphalt(track: TrackDefinition, x: number, y: number): boolean {
+  const key = `${x},${y}`;
+  for (const zone of resolveDrsZones(track)) {
+    if (zone.keys.has(key)) return true;
+  }
+  return false;
+}
+
+/** True when the straight move passes over one resolved DRS zone. */
+export function segmentEntersDrsZone(
+  from: Vector2D,
+  to: Vector2D,
+  track: TrackDefinition,
+  zoneIndex: number
+): boolean {
+  const zone = resolveDrsZones(track)[zoneIndex];
+  if (!zone || zone.keys.size === 0) return false;
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) * 4;
+  for (let i = 0; i <= Math.max(steps, 1); i++) {
+    const t = steps === 0 ? 1 : i / steps;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    if (zone.keys.has(`${x},${y}`)) return true;
+  }
+  return false;
 }
 
 /**
@@ -729,7 +994,7 @@ export function armDrsZones(
   let armed = false;
   for (let i = 0; i < zones.length; i++) {
     if (used.has(i)) continue;
-    if (!segmentEntersRect(from, landing, zones[i])) continue;
+    if (!segmentEntersDrsZone(from, landing, track, i)) continue;
     used.add(i);
     armed = true;
   }

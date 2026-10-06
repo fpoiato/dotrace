@@ -21,6 +21,8 @@ import {
   ERS_MAX_CHARGE,
   armDrsZones,
   syncDrsArms,
+  resolvedDrsZones,
+  isDrsAsphalt,
   isStrictlyAhead,
   beginNextLap,
   boostLimits,
@@ -1355,17 +1357,20 @@ describe('DRS and ERS', () => {
       }
       const loop = samples.concat(samples);
       let passed = false;
-      const inside = (track.drsZones ?? []).map(() => false);
-      const depth = (track.drsZones ?? []).map(() => 0);
-      const armed = (track.drsZones ?? []).map(() => false);
+      const zoneKeys = resolvedDrsZones(track).map(
+        (zone) => new Set(zone.cells.map((c) => `${c.x},${c.y}`))
+      );
+      const inside = zoneKeys.map(() => false);
+      const depth = zoneKeys.map(() => 0);
+      const armed = zoneKeys.map(() => false);
 
       for (let i = 1; i < loop.length; i++) {
         const p = loop[i];
         if (track.checkpoint && inRect(p, track.checkpoint)) passed = true;
         if (track.grid[p.y]?.[p.x] === 'finish' && passed) passed = false;
 
-        (track.drsZones ?? []).forEach((zone, zi) => {
-          const now = inRect(p, zone);
+        zoneKeys.forEach((keys, zi) => {
+          const now = keys.has(`${p.x},${p.y}`);
           if (now && !inside[zi] && !armed[zi] && i >= samples.length) {
             let rivalAt = i;
             for (let k = i + 1; k < Math.min(loop.length, i + 8); k++) {
@@ -1693,6 +1698,64 @@ describe('DRS and ERS', () => {
         }
         expect(coversFinish).toBe(false);
         expect(coversAsphalt).toBe(true);
+      }
+    }
+  });
+
+  it('starts and ends each DRS zone on a cut perpendicular to the track sides', () => {
+    const inCheckpoint = (
+      track: TrackDefinition,
+      x: number,
+      y: number
+    ): boolean => {
+      const cp = track.checkpoint;
+      if (!cp) return false;
+      return x >= cp.x0 && x <= cp.x1 && y >= cp.y0 && y <= cp.y1;
+    };
+
+    for (const track of TRACKS) {
+      const zones = resolvedDrsZones(track);
+      expect(zones).toHaveLength(track.drsZones?.length ?? 0);
+      const seen = new Set<string>();
+      for (const zone of zones) {
+        expect(zone.cells.length).toBeGreaterThan(10);
+        for (const cell of zone.cells) {
+          const key = `${cell.x},${cell.y}`;
+          expect(track.grid[cell.y][cell.x]).toBe('track');
+          expect(seen.has(key)).toBe(false);
+          expect(inCheckpoint(track, cell.x, cell.y)).toBe(false);
+          expect(isDrsAsphalt(track, cell.x, cell.y)).toBe(true);
+          seen.add(key);
+        }
+        for (const cut of [zone.entry, zone.exit]) {
+          const nx = -cut.tangent.y;
+          const ny = cut.tangent.x;
+          const alongOf = (c: { x: number; y: number }) =>
+            (c.x - cut.at.x) * cut.tangent.x + (c.y - cut.at.y) * cut.tangent.y;
+          const latOf = (c: { x: number; y: number }) => (c.x - cut.at.x) * nx + (c.y - cut.at.y) * ny;
+          const ends = zone.cells.filter((c) => Math.abs(alongOf(c)) <= 1.25);
+          expect(ends.length).toBeGreaterThan(2);
+          expect(Math.max(...ends.map((c) => Math.abs(alongOf(c))))).toBeLessThanOrEqual(1.25);
+          const lats = ends.map(latOf);
+          expect(Math.min(...lats)).toBeLessThanOrEqual(-2);
+          expect(Math.max(...lats)).toBeGreaterThanOrEqual(2);
+          for (const sign of [-1, 1] as const) {
+            const extreme = ends.reduce((best, cell) =>
+              latOf(cell) * sign > latOf(best) * sign ? cell : best
+            );
+            let reachedEdge = false;
+            for (let step = 1; step <= 3; step++) {
+              const x = Math.round(extreme.x + nx * sign * step);
+              const y = Math.round(extreme.y + ny * sign * step);
+              const tile = track.grid[y]?.[x];
+              if (tile !== 'track' && tile !== 'finish') {
+                reachedEdge = true;
+                break;
+              }
+            }
+            expect(reachedEdge).toBe(true);
+          }
+        }
       }
     }
   });
