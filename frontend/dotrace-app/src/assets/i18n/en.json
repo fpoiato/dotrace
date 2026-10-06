@@ -127,7 +127,7 @@
   "howto.4.title": "Gears",
   "howto.4.body": "Your speed is your gear (max 6) — the gauge on the map corner shows it. You can only change by 1 per turn, so brake before corners!",
   "howto.5.title": "Off track",
-  "howto.5.body": "Landed on the green? Your car stops (gear 0) and you can only move 1 square per turn until you're back on track. Cutting through grass costs extra: 3 rounds at max gear 1 the first time, 5 rounds after that. In timed mode: 5 seconds stopped, then 10 seconds and gear 0 on repeat cuts.",
+  "howto.5.body": "Landed on the green? Your car stops (gear 0) and you can only move 1 square per turn until you're back on track. The zebra allows half a square: past that midline, the line counts as a cut. Cutting through grass costs extra: 3 rounds at max gear 1 the first time, 5 rounds after that. In timed mode: 5 seconds stopped, then 10 seconds and gear 0 on repeat cuts.",
   "howto.6.title": "Rumble strips",
   "howto.6.body": "The whole track edge is a red/white zebra border. Clip the rumble strips at corners and your phone buzzes to warn you you're at the edge.",
   "howto.7.title": "Finish",

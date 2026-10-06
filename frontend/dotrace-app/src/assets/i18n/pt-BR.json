@@ -127,7 +127,7 @@
   "howto.4.title": "Marchas",
   "howto.4.body": "Sua velocidade é a sua marcha (máx. 6) — o medidor no canto do mapa mostra a atual. Só dá para mudar 1 por turno, então freie antes das curvas!",
   "howto.5.title": "Fora da pista",
-  "howto.5.body": "Caiu no verde? O carro para (marcha 0) e, até voltar à pista, você anda só 1 quadrado por turno. Atalhos na grama custam extra: 3 rodadas na marcha 1 na primeira vez, 5 depois. No modo cronometrado: 5 segundos parado, depois 10 segundos e marcha 0 nas reincidências.",
+  "howto.5.body": "Caiu no verde? O carro para (marcha 0) e, até voltar à pista, você anda só 1 quadrado por turno. A zebra deixa meio quadrado de folga: passou da metade, a linha conta como atalho. Atalhos na grama custam extra: 3 rodadas na marcha 1 na primeira vez, 5 depois. No modo cronometrado: 5 segundos parado, depois 10 segundos e marcha 0 nas reincidências.",
   "howto.6.title": "Rasgadores",
   "howto.6.body": "A borda inteira da pista é uma zebra vermelha e branca. Encoste nos rasgadores das curvas e o celular vibra avisando que você está na beira.",
   "howto.7.title": "Chegada",
