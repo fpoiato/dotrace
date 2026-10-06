@@ -23,6 +23,7 @@ import {
   pushReplayMove,
   pushTrail,
   adoptNicknameConnection,
+  retargetLocalPlayer,
   aiTurnToken,
   isAiPilotNickname,
   remapPlayerConnection,
@@ -35,7 +36,7 @@ import {
   buildRaceTelemetry,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
-import { RoomService } from './room.service';
+import { RoomContext, RoomService } from './room.service';
 import { SessionStorageService } from './session-storage.service';
 import { WebSocketService } from './websocket.service';
 
@@ -50,6 +51,9 @@ export class GameEngineService implements OnDestroy {
   readonly state$ = this.stateSubject.asObservable();
 
   private messageSub: Subscription | null = null;
+  private roomSub: Subscription | null = null;
+  /** Socket id this phone last used. A change means the car must be retargeted. */
+  private localConnectionId: string | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
   /** Re-broadcast the board while an old socket AI is the one who must move. */
@@ -86,9 +90,28 @@ export class GameEngineService implements OnDestroy {
     return this.roomService.room?.connectionId ?? this.ws.connectionId;
   }
 
+  /**
+   * The phone's socket id changes on every reconnect. The race board does not,
+   * so the car (and the turn) must follow the new id or the pad stays disabled
+   * on "Aguardando …" for the player who is holding the phone.
+   */
+  private retargetSelf(room: RoomContext | null): void {
+    if (!room) {
+      this.localConnectionId = null;
+      return;
+    }
+    const previous = this.localConnectionId;
+    this.localConnectionId = room.connectionId;
+    const state = this.state;
+    if (!state) return;
+    if (!retargetLocalPlayer(state, previous, room.connectionId, room.nickname)) return;
+    this.setStateAndRelay('STATE_SYNC', state);
+  }
+
   init(): void {
     if (this.messageSub) return;
     this.messageSub = this.ws.messages$.subscribe((msg) => this.handleMessage(msg.action, msg.payload));
+    this.roomSub = this.roomService.room$.subscribe((room) => this.retargetSelf(room));
   }
 
   selectTrack(trackId: string): void {
@@ -177,6 +200,7 @@ export class GameEngineService implements OnDestroy {
   submitMove(vector: Vector2D): void {
     const room = this.roomService.room;
     if (!room) return;
+    this.retargetSelf(room);
 
     if (this.isHost) {
       this.applyMove(room.connectionId, vector);
@@ -722,6 +746,7 @@ export class GameEngineService implements OnDestroy {
 
   ngOnDestroy(): void {
     this.messageSub?.unsubscribe();
+    this.roomSub?.unsubscribe();
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
     if (this.turnNudgeTimer) clearTimeout(this.turnNudgeTimer);
