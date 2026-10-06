@@ -66,17 +66,17 @@ describe('laya scene', () => {
     const scenes = [buildLayaScene(race().me, race().state, track)];
     const monaco = getTrackById('monaco')!;
     const { me, state } = race();
-    me.position = { x: 7, y: 46 };
+    me.position = { x: 63, y: 91 };
     me.velocity = { x: 0, y: 0 };
     me.isOffTrack = true;
     scenes.push(buildLayaScene(me, state, monaco));
 
     const interlagos = getTrackById('interlagos')!;
-    me.position = { x: 42, y: 6 };
+    me.position = { x: 56, y: 20 };
     me.velocity = { x: 0, y: 0 };
     me.isOffTrack = false;
     scenes.push(buildLayaScene(me, state, interlagos));
-    me.position = { x: 30, y: 8 };
+    me.position = { x: 95, y: 49 };
     me.velocity = { x: -5, y: 0 };
     scenes.push(buildLayaScene(me, state, interlagos));
     me.position = { x: 20, y: 30 };
@@ -92,7 +92,7 @@ describe('laya scene', () => {
   it('tells an off-track car which step is closer to the asphalt', () => {
     const monaco = getTrackById('monaco')!;
     const { me, state } = race();
-    me.position = { x: 7, y: 46 };
+    me.position = { x: 63, y: 91 };
     me.velocity = { x: 0, y: 0 };
     me.isOffTrack = true;
     const scene = buildLayaScene(me, state, monaco);
@@ -110,7 +110,7 @@ describe('laya scene', () => {
   it('names the circuit direction on the Interlagos grid', () => {
     const interlagos = getTrackById('interlagos')!;
     const { me, state } = race();
-    me.position = { x: 42, y: 6 };
+    me.position = { x: 56, y: 20 };
     me.velocity = { x: 0, y: 0 };
     const scene = buildLayaScene(me, state, interlagos);
     expect(scene.state.kind).toBe('vector race');
@@ -142,7 +142,7 @@ describe('laya scene', () => {
   it('calls the step back to the asphalt when the car is stuck off Interlagos', () => {
     const interlagos = getTrackById('interlagos')!;
     const { me, state } = race();
-    me.position = { x: 51, y: 2 };
+    me.position = { x: 63, y: 12 };
     me.velocity = { x: 0, y: 0 };
     me.isOffTrack = true;
     const scene = buildLayaScene(me, state, interlagos);
@@ -159,7 +159,7 @@ describe('laya scene', () => {
   it('turns into the Interlagos kink and keeps the gear', () => {
     const interlagos = getTrackById('interlagos')!;
     const { me, state } = race();
-    me.position = { x: 30, y: 8 };
+    me.position = { x: 95, y: 49 };
     me.velocity = { x: -5, y: 0 };
     const scene = buildLayaScene(me, state, interlagos);
     const best = scene.options.find((option) => option.detail.startsWith('best '));
@@ -214,11 +214,14 @@ describe('laya scene', () => {
     expect(Math.max(Math.abs(best!.velocity.x), Math.abs(best!.velocity.y))).toBeGreaterThanOrEqual(3);
   });
 
-  it('finishes a lap on Monza, Interlagos, and Monaco without leaving the asphalt', () => {
+  it('finishes a lap on every circuit without leaving the asphalt', () => {
     const starts = [
       ['monza', 120, 116, 160],
-      ['interlagos', 42, 6, 70],
-      ['monaco', 42, 30, 55],
+      ['interlagos', 56, 20, 160],
+      ['monaco', 42, 88, 160],
+      ['silverstone', 69, 19, 160],
+      ['spa', 56, 148, 160],
+      ['suzuka', 168, 92, 160],
     ] as const;
     for (const [id, x, y, limit] of starts) {
       const circuit = getTrackById(id)!;
