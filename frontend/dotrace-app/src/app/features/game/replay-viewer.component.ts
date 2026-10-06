@@ -50,7 +50,7 @@ type Speed = (typeof SPEEDS)[number];
       @if (frames.length === 0) {
         <p class="text-center text-sm text-slate-400">{{ 'game.replayNoData' | translate }}</p>
       } @else {
-        <app-track-canvas [state]="replayState" />
+        <app-track-canvas [state]="replayState" [followLeader]="true" />
 
         <!-- Progress info -->
         <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
