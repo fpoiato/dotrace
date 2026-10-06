@@ -8,6 +8,7 @@ export const routes: Routes = [
   { path: '', component: LandingComponent },
   { path: 'lobby', component: LobbyComponent },
   { path: 'game', component: GameRoomComponent },
+  { path: 'replay/:id', component: SharedReplayComponent },
   { path: 'replay', component: SharedReplayComponent },
   { path: '**', redirectTo: '' },
 ];

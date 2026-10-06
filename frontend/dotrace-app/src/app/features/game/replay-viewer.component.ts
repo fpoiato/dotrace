@@ -30,9 +30,9 @@ type Speed = (typeof SPEEDS)[number];
               type="button"
               (click)="share()"
               [disabled]="sharing"
-              class="rounded-lg bg-orange-500/20 px-3 py-1 text-sm font-medium text-orange-300 active:bg-orange-500/30 disabled:opacity-50"
+              class="rounded-lg bg-green-700 px-3 py-1 text-sm font-medium text-white active:bg-green-800 disabled:opacity-50"
             >
-              {{ shareCopied ? ('common.copied' | translate) : ('game.replayShare' | translate) }}
+              {{ sharing ? ('game.replaySharing' | translate) : ('game.replayShare' | translate) }}
             </button>
           }
           @if (!standalone) {
@@ -162,13 +162,11 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
   playbackSpeed: Speed = 2;
   replayState: GameState | null = null;
   sharing = false;
-  shareCopied = false;
   shareError = false;
 
   readonly speeds = SPEEDS;
 
   private playInterval: ReturnType<typeof setInterval> | null = null;
-  private shareCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 
   get currentFrame(): ReplayFrame | null {
     return this.frames[this.currentIndex] ?? null;
@@ -289,29 +287,28 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
     if (this.sharing || !this.state) return;
     this.sharing = true;
     this.shareError = false;
+    // Open before the save finishes so mobile still treats this as a tap.
+    const popup = window.open('', '_blank');
+    try {
+      if (popup) popup.opener = null;
+    } catch {
+      // Some browsers reject clearing opener; the tab can still navigate.
+    }
     try {
       const url = await this.shareService.buildShareUrl(this.state);
       if (!url) {
+        popup?.close();
         this.shareError = true;
         return;
       }
-      if (typeof navigator.share === 'function') {
-        try {
-          await navigator.share({ title: 'Dot Race Replay', url });
-          return;
-        } catch (err) {
-          // User cancelled or share unsupported for this payload — fall through to clipboard.
-          if (err instanceof DOMException && err.name === 'AbortError') return;
-        }
+      const whatsApp = this.shareService.getWhatsAppUrl(url);
+      if (popup) {
+        popup.location.href = whatsApp;
+        return;
       }
-      await navigator.clipboard.writeText(url);
-      this.shareCopied = true;
-      if (this.shareCopiedTimer) clearTimeout(this.shareCopiedTimer);
-      this.shareCopiedTimer = setTimeout(() => {
-        this.shareCopied = false;
-        this.shareCopiedTimer = null;
-      }, 2000);
+      window.location.assign(whatsApp);
     } catch {
+      popup?.close();
       this.shareError = true;
     } finally {
       this.sharing = false;
@@ -320,6 +317,5 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.pause();
-    if (this.shareCopiedTimer) clearTimeout(this.shareCopiedTimer);
   }
 }
