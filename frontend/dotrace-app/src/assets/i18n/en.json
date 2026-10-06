@@ -66,6 +66,7 @@
   "game.grassPenaltyTurns": "Grass cut — max gear 1 for the penalty",
   "game.grassPenaltyTimed": "Grass cut — stopped for {{sec}}s",
   "game.penaltyTitle": "Grass shortcut!",
+  "game.penaltyFlag": "Penalty for {{name}}",
   "game.penaltyBody": "Penalty — you can't move until the countdown reaches zero.",
   "game.map.zoomIn": "Zoom in",
   "game.map.zoomOut": "Zoom out",

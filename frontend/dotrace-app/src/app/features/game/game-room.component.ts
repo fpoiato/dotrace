@@ -35,6 +35,7 @@ import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component'
 import { LeaderboardComponent } from './leaderboard.component';
 import { MiniMapComponent } from './mini-map.component';
 import { ReplayViewerComponent } from './replay-viewer.component';
+import { newPenaltyFlags } from './penalty-flag';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 /** Amber on the pad: a real grass cut, or a landing that leaves the asphalt. */
@@ -106,6 +107,23 @@ const PAD_GLYPHS: Record<string, string> = {
           margin: 0;
         }
       }
+      .penalty-flag {
+        background: linear-gradient(135deg, #0a0a0a 50%, #f8fafc 50%);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+      }
+      .penalty-chip {
+        animation: penalty-chip-in 160ms ease-out;
+      }
+      @keyframes penalty-chip-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
     `,
   ],
 })
@@ -136,6 +154,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private boostStamp = '';
   /** Seconds left on a timed grass penalty (drives the popup countdown). */
   penaltyCountdownSec = 0;
+  /** Recent grass penalties, newest first. Shown to every client. */
+  penaltyFlags: { id: number; nickname: string; color: string }[] = [];
+  private penaltyCuts: Map<string, number> | null = null;
+  private penaltyFlagSeq = 0;
+  private readonly penaltyFlagTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private static readonly PENALTY_FLAG_MS = 4200;
   /** Tick every 250ms while a timed stop penalty is active. */
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
   /** One-shot so reconnect/replay emissions don't restart the anthem. */
@@ -159,6 +183,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.syncBoostIntents(state);
         this.rebuildPad(state);
         this.updatePenaltyCountdown(state);
+        this.syncPenaltyFlags(state);
         this.syncStopPenaltyTimer(state);
         this.maybePlayVictoryAnthem(state);
         if (state?.phase === 'GAME_OVER') {
@@ -366,6 +391,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.clearPenaltyFlags();
     this.clearStopPenaltyTimer();
     this.removeAudioUnlock?.();
     this.removeAudioUnlock = null;
@@ -408,6 +434,48 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   /** Seconds left on a timed stop penalty (0 if none). */
   stopPenaltySec(player: Player): number {
     return Math.ceil(remainingStopMs(player) / 1000);
+  }
+
+  /** Black-and-white flag when anyone's grass-cut count goes up. */
+  private syncPenaltyFlags(state: GameState | null): void {
+    if (!state || state.phase !== 'GAME_ROUND') {
+      this.clearPenaltyFlags();
+      return;
+    }
+    const { baseline, notices } = newPenaltyFlags(this.penaltyCuts, state.players);
+    this.penaltyCuts = baseline;
+    for (const notice of notices) this.pushPenaltyFlag(notice.nickname, notice.color);
+  }
+
+  private pushPenaltyFlag(nickname: string, color: string): void {
+    const id = ++this.penaltyFlagSeq;
+    const next = [{ id, nickname, color }, ...this.penaltyFlags].slice(0, 3);
+    const kept = new Set(next.map((flag) => flag.id));
+    for (const [flagId, timer] of this.penaltyFlagTimers) {
+      if (!kept.has(flagId)) {
+        clearTimeout(timer);
+        this.penaltyFlagTimers.delete(flagId);
+      }
+    }
+    this.penaltyFlags = next;
+    this.penaltyFlagTimers.set(
+      id,
+      setTimeout(() => this.dismissPenaltyFlag(id), GameRoomComponent.PENALTY_FLAG_MS)
+    );
+  }
+
+  private dismissPenaltyFlag(id: number): void {
+    const timer = this.penaltyFlagTimers.get(id);
+    if (timer) clearTimeout(timer);
+    this.penaltyFlagTimers.delete(id);
+    this.penaltyFlags = this.penaltyFlags.filter((flag) => flag.id !== id);
+  }
+
+  private clearPenaltyFlags(): void {
+    for (const timer of this.penaltyFlagTimers.values()) clearTimeout(timer);
+    this.penaltyFlagTimers.clear();
+    this.penaltyFlags = [];
+    this.penaltyCuts = null;
   }
 
   private updatePenaltyCountdown(state: GameState | null): void {
