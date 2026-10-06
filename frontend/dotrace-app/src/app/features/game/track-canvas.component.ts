@@ -32,6 +32,7 @@ import {
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { HapticService } from '../../core/services/haptic.service';
 import { RoomService } from '../../core/services/room.service';
+import { leadingPlayerId } from './replay-leader';
 
 /** World pixels per grid cell (all drawing happens in world coordinates). */
 const CELL = 16;
@@ -63,7 +64,8 @@ function buildGaugeSegments(): string[] {
  * "Pen and paper" renderer with a map-style camera: drag to pan, pinch or
  * use the overlay buttons to zoom, tap a highlighted square to move. The
  * camera auto-frames your car on first load; pan/zoom hands control to the
- * user until they tap the fit toggle or a new race starts.
+ * user until they tap the fit toggle or a new race starts. Replay passes
+ * `followLeader` so the default frame is the leader instead of the whole sheet.
  */
 @Component({
   selector: 'app-track-canvas',
@@ -101,7 +103,20 @@ function buildGaugeSegments(): string[] {
           </svg>
         </div>
       }
-      <div class="absolute bottom-2 right-2 flex flex-col gap-1">
+      <div class="absolute bottom-2 right-2 flex flex-col items-end gap-1">
+        @if (followLeader) {
+          <button
+            type="button"
+            (click)="focusLeader()"
+            [attr.aria-label]="'game.map.leader' | translate"
+            class="h-10 rounded-lg px-2 text-xs font-bold text-white active:bg-slate-700"
+            [attr.aria-pressed]="followingLeader"
+            [class.bg-orange-500]="followingLeader"
+            [class.bg-slate-900/80]="!followingLeader"
+          >
+            {{ 'game.map.leader' | translate }}
+          </button>
+        }
         <button
           type="button"
           [attr.aria-label]="'game.map.zoomIn' | translate"
@@ -159,6 +174,11 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   @Input() drsIntent = false;
   /** Held on the ERS button; legal landings include delta 2. */
   @Input() ersIntent = false;
+  /**
+   * Replay only. Frame the race leader until the user pans or zooms;
+   * {@link focusLeader} hands the camera back.
+   */
+  @Input() followLeader = false;
 
   private readonly game = inject(GameEngineService);
   private readonly haptic = inject(HapticService);
@@ -285,6 +305,19 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.draw();
   }
 
+  /** Drop a free pan/zoom and sit on the leader again. */
+  focusLeader(): void {
+    this.fitMode = false;
+    this.manualCamera = false;
+    this.zoomFactor = 1;
+    this.draw();
+  }
+
+  /** True while replay is tracking the leader (button highlight). */
+  get followingLeader(): boolean {
+    return this.followLeader && !this.manualCamera && !this.fitMode;
+  }
+
   private minScale(track: TrackDefinition): number {
     const canvas = this.canvasRef.nativeElement;
     return Math.min(canvas.width / (track.width * CELL), canvas.height / (track.height * CELL)) * 0.5;
@@ -339,6 +372,12 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     return player.isOffTrack ? '#FBBF24' : player.color;
   }
 
+  /** Car furthest through the race on this replay frame. */
+  private leaderPlayer(state: GameState, track: TrackDefinition): Player | undefined {
+    const id = leadingPlayerId(state.players, track, state.round);
+    return id ? state.players.find((p) => p.connectionId === id) : undefined;
+  }
+
   /** The player whose turn it is, derived from the rendered state itself. */
   private activePlayer(state: GameState): Player | undefined {
     if (state.phase !== 'GAME_ROUND') return undefined;
@@ -365,7 +404,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     if (!this.fitModeInitialized) {
       // Big screens start with the whole sheet; phones start zoomed on the action.
-      this.fitMode = canvas.clientWidth >= 640;
+      // Replay always starts on the leader — the enlarged circuits don't read zoomed out.
+      this.fitMode = this.followLeader ? false : canvas.clientWidth >= 640;
       this.fitModeInitialized = true;
     }
 
@@ -374,7 +414,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       return;
     }
 
-    if (this.fitMode || state.phase !== 'GAME_ROUND') {
+    const follow = this.followLeader && !this.fitMode;
+    if (this.fitMode || (state.phase !== 'GAME_ROUND' && !follow)) {
       const s = Math.min(cw / worldW, ch / worldH) * this.zoomFactor;
       this.scale = s;
       this.offsetX = (cw - worldW * s) / 2;
@@ -382,7 +423,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       return;
     }
 
-    const focus = this.myPlayer(state) ?? this.activePlayer(state);
+    const focus = follow
+      ? this.leaderPlayer(state, track)
+      : (this.myPlayer(state) ?? this.activePlayer(state));
     if (!focus) {
       const s = Math.min(cw / worldW, ch / worldH);
       this.scale = s;
@@ -393,7 +436,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     const pts: Vector2D[] = [focus.position];
     const myId = this.room.room?.connectionId;
-    if (focus.connectionId === myId && focus.finishOrder === undefined) {
+    if (!follow && focus.connectionId === myId && focus.finishOrder === undefined) {
       for (const m of getValidMoves(focus, track, state.players, state.round)) {
         pts.push(m.landing);
       }
