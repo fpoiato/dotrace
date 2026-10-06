@@ -32,6 +32,7 @@ import {
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { HapticService } from '../../core/services/haptic.service';
 import { RoomService } from '../../core/services/room.service';
+import { leadingPlayerId } from './replay-leader';
 
 /** World pixels per grid cell (all drawing happens in world coordinates). */
 const CELL = 16;
@@ -63,7 +64,8 @@ function buildGaugeSegments(): string[] {
  * "Pen and paper" renderer with a map-style camera: drag to pan, pinch or
  * use the overlay buttons to zoom, tap a highlighted square to move. The
  * camera auto-frames your car on first load; pan/zoom hands control to the
- * user until they tap the fit toggle or a new race starts.
+ * user until they tap the fit toggle or a new race starts. Replay passes
+ * `followLeader` so the default frame is the leader instead of the whole sheet.
  */
 @Component({
   selector: 'app-track-canvas',
@@ -101,7 +103,21 @@ function buildGaugeSegments(): string[] {
           </svg>
         </div>
       }
-      <div class="absolute bottom-2 right-2 flex flex-col gap-1">
+      <div class="absolute bottom-2 right-2 flex flex-col items-end gap-1">
+        @if (followLeader) {
+          <button
+            type="button"
+            (click)="focusLeader()"
+            [attr.aria-label]="'game.map.leader' | translate"
+            [attr.aria-pressed]="followingLeader"
+            [class]="
+              'h-10 rounded-lg px-2 text-xs font-bold text-white active:bg-slate-700 ' +
+              (followingLeader ? 'bg-orange-500' : 'bg-slate-900/80')
+            "
+          >
+            {{ 'game.map.leader' | translate }}
+          </button>
+        }
         <button
           type="button"
           [attr.aria-label]="'game.map.zoomIn' | translate"
@@ -159,6 +175,11 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   @Input() drsIntent = false;
   /** Held on the ERS button; legal landings include delta 2. */
   @Input() ersIntent = false;
+  /**
+   * Replay only. Frame the race leader until the user pans or zooms;
+   * {@link focusLeader} hands the camera back.
+   */
+  @Input() followLeader = false;
 
   private readonly game = inject(GameEngineService);
   private readonly haptic = inject(HapticService);
@@ -193,6 +214,10 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private resizeObserver: ResizeObserver | null = null;
   private lastCssW = 0;
   private lastCssH = 0;
+  /** Redraws while a blue boost ring is blinking. */
+  private pulsing = false;
+  private pulseFrame = 0;
+  private lastPulseDraw = 0;
 
   ngAfterViewInit(): void {
     const canvas = this.canvasRef.nativeElement;
@@ -217,6 +242,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   }
 
   ngOnDestroy(): void {
+    this.pulsing = false;
+    cancelAnimationFrame(this.pulseFrame);
     this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('mousemove', this.onMouseMoveBound);
@@ -279,6 +306,19 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.draw();
   }
 
+  /** Drop a free pan/zoom and sit on the leader again. */
+  focusLeader(): void {
+    this.fitMode = false;
+    this.manualCamera = false;
+    this.zoomFactor = 1;
+    this.draw();
+  }
+
+  /** True while replay is tracking the leader (button highlight). */
+  get followingLeader(): boolean {
+    return this.followLeader && !this.manualCamera && !this.fitMode;
+  }
+
   private minScale(track: TrackDefinition): number {
     const canvas = this.canvasRef.nativeElement;
     return Math.min(canvas.width / (track.width * CELL), canvas.height / (track.height * CELL)) * 0.5;
@@ -333,6 +373,12 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     return player.isOffTrack ? '#FBBF24' : player.color;
   }
 
+  /** Car furthest through the race on this replay frame. */
+  private leaderPlayer(state: GameState, track: TrackDefinition): Player | undefined {
+    const id = leadingPlayerId(state.players, track, state.round);
+    return id ? state.players.find((p) => p.connectionId === id) : undefined;
+  }
+
   /** The player whose turn it is, derived from the rendered state itself. */
   private activePlayer(state: GameState): Player | undefined {
     if (state.phase !== 'GAME_ROUND') return undefined;
@@ -359,7 +405,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     if (!this.fitModeInitialized) {
       // Big screens start with the whole sheet; phones start zoomed on the action.
-      this.fitMode = canvas.clientWidth >= 640;
+      // Replay always starts on the leader — the enlarged circuits don't read zoomed out.
+      this.fitMode = this.followLeader ? false : canvas.clientWidth >= 640;
       this.fitModeInitialized = true;
     }
 
@@ -368,7 +415,8 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       return;
     }
 
-    if (this.fitMode || state.phase !== 'GAME_ROUND') {
+    const follow = this.followLeader && !this.fitMode;
+    if (this.fitMode || (state.phase !== 'GAME_ROUND' && !follow)) {
       const s = Math.min(cw / worldW, ch / worldH) * this.zoomFactor;
       this.scale = s;
       this.offsetX = (cw - worldW * s) / 2;
@@ -376,7 +424,9 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       return;
     }
 
-    const focus = this.myPlayer(state) ?? this.activePlayer(state);
+    const focus = follow
+      ? this.leaderPlayer(state, track)
+      : (this.myPlayer(state) ?? this.activePlayer(state));
     if (!focus) {
       const s = Math.min(cw / worldW, ch / worldH);
       this.scale = s;
@@ -387,7 +437,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     const pts: Vector2D[] = [focus.position];
     const myId = this.room.room?.connectionId;
-    if (focus.connectionId === myId && focus.finishOrder === undefined) {
+    if (!follow && focus.connectionId === myId && focus.finishOrder === undefined) {
       for (const m of getValidMoves(focus, track, state.players, state.round)) {
         pts.push(m.landing);
       }
@@ -582,7 +632,31 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
     this.drawValidTargets(ctx, state, track);
-    this.drawCars(ctx, state);
+    const boosted = this.drawCars(ctx, state);
+    this.syncBoostPulse(boosted);
+  }
+
+  /** Keep the boost ring blinking without redrawing the whole sheet every frame. */
+  private syncBoostPulse(active: boolean): void {
+    if (active && !this.pulsing) {
+      this.pulsing = true;
+      const loop = (now: number) => {
+        if (!this.pulsing) return;
+        this.pulseFrame = requestAnimationFrame(loop);
+        if (now - this.lastPulseDraw < 50) return;
+        this.lastPulseDraw = now;
+        this.draw();
+      };
+      this.pulseFrame = requestAnimationFrame(loop);
+    } else if (!active && this.pulsing) {
+      this.pulsing = false;
+      cancelAnimationFrame(this.pulseFrame);
+    }
+  }
+
+  /** 1 while the blue ring is lit, ~0.2 in the off half of the blink. */
+  private boostAlpha(now = performance.now()): number {
+    return now % 640 < 352 ? 0.95 : 0.18;
   }
 
   /** White sheet with light-gray grid lines. */
@@ -850,29 +924,42 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
-  private drawCars(ctx: CanvasRenderingContext2D, state: GameState): void {
+  private drawCars(ctx: CanvasRenderingContext2D, state: GameState): boolean {
     const active = this.activePlayer(state);
+    const alpha = this.boostAlpha();
+    let anyBoost = false;
     for (const player of state.players) {
       if (player.finishOrder !== undefined && state.phase !== 'GAME_OVER') continue;
       const [cx, cy] = this.center(player.position);
       const isActive = player.connectionId === active?.connectionId;
+      const boosted = !!player.drsActive || !!player.ersActive;
+      if (boosted) anyBoost = true;
+
+      if (boosted) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 13, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(34, 211, 238, ${alpha})`;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
 
       if (isActive) {
         ctx.beginPath();
-        ctx.arc(cx, cy, 8.5, 0, Math.PI * 2);
+        ctx.arc(cx, cy, boosted ? 10.5 : 8.5, 0, Math.PI * 2);
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2.5;
         ctx.stroke();
       }
 
       ctx.beginPath();
-      ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+      ctx.arc(cx, cy, boosted ? 8 : 5.5, 0, Math.PI * 2);
       ctx.fillStyle = player.color;
       ctx.fill();
       ctx.strokeStyle = PAPER_COLORS.ink;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+    return anyBoost;
   }
 
   /** Tap → nearest valid landing square within ~1 cell (generous on mobile). */

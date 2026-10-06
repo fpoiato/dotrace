@@ -23,9 +23,10 @@ interface SharedReplayPlayer {
 
 /**
  * Compact move row:
- * [playerIdx, round, x, y, vx, vy, offTrack(0|1), lap]
+ * [playerIdx, round, x, y, vx, vy, offTrack(0|1), lap, flags?]
+ * flags bit 0 = DRS open, bit 1 = ERS spent on this move. Omitted when 0.
  */
-type SharedMoveRow = [number, number, number, number, number, number, 0 | 1, number];
+type SharedMoveRow = [number, number, number, number, number, number, 0 | 1, number, number?];
 
 export interface SharedReplayPayload {
   v: 1;
@@ -102,7 +103,7 @@ export function buildSharedReplayPayload(state: GameState): SharedReplayPayload 
     .sort((a, b) => a.seq - b.seq)
     .map((rec) => {
       const pi = idMap.get(rec.connectionId) ?? 0;
-      return [
+      const row: SharedMoveRow = [
         pi,
         rec.round,
         rec.position.x,
@@ -112,6 +113,9 @@ export function buildSharedReplayPayload(state: GameState): SharedReplayPayload 
         rec.isOffTrack ? 1 : 0,
         rec.lap,
       ];
+      const flags = (rec.drsActive ? 1 : 0) | (rec.ersActive ? 2 : 0);
+      if (flags) row[8] = flags;
+      return row;
     });
 
   return {
@@ -146,6 +150,7 @@ export function sharedPayloadToGameState(payload: SharedReplayPayload): GameStat
 
   const replayLog: MoveRecord[] = payload.r.map((row, seq) => {
     const [pi, round, x, y, vx, vy, off, lap] = row;
+    const flags = row[8] ?? 0;
     const player = players[pi] ?? players[0];
     return {
       seq,
@@ -155,6 +160,8 @@ export function sharedPayloadToGameState(payload: SharedReplayPayload): GameStat
       velocity: { x: vx, y: vy },
       isOffTrack: off === 1,
       lap,
+      drsActive: (flags & 1) !== 0,
+      ersActive: (flags & 2) !== 0,
     };
   });
 
