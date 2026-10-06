@@ -84,7 +84,10 @@ interface CircuitSpec {
   startLine: Vector2D[];
   arrows: TrackArrow[];
   checkpoint: { x0: number; y0: number; x1: number; y1: number };
-  /** DRS detection strips. Separate from the lap checkpoint and the finish. */
+  /**
+   * Authoring boxes for DRS. The blue area is the asphalt between the
+   * perpendicular cuts where the centerline enters and leaves each box.
+   */
   drsZones?: { x0: number; y0: number; x1: number; y1: number }[];
   /** Optional per-circuit grid size (defaults to GRID_W × GRID_H). */
   width?: number;

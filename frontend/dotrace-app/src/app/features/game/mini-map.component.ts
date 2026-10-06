@@ -8,7 +8,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { PAPER_COLORS, getTrackById } from '../../core/models/tracks';
-import { GameState, TrackDefinition } from '../../core/models/ws-types';
+import { GameState, TrackDefinition, isDrsAsphalt } from '../../core/models/ws-types';
 
 /** Internal pixels per cell for the minimap raster. */
 const S = 4;
@@ -102,11 +102,7 @@ export class MiniMapComponent implements OnChanges, OnDestroy {
 
   /** Asphalt cell inside a DRS zone. Grass is never tinted. */
   private inDrsZone(track: TrackDefinition, x: number, y: number): boolean {
-    const zones = track.drsZones ?? [];
-    for (const zone of zones) {
-      if (x >= zone.x0 && x <= zone.x1 && y >= zone.y0 && y <= zone.y1) return true;
-    }
-    return false;
+    return isDrsAsphalt(track, x, y);
   }
 
   private drawRibbon(ctx: CanvasRenderingContext2D, track: TrackDefinition, s: number): void {

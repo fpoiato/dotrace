@@ -27,6 +27,7 @@ import {
   segmentTouchesKerb,
   isTimedMode,
   getTileAt,
+  resolvedDrsZones,
   segmentCrossesRumble,
 } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
@@ -741,24 +742,17 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   }
 
   /**
-   * DRS asphalt only: a blue tint on track cells inside the zone.
-   * Grass and the rectangle outline stay unmarked.
+   * DRS asphalt only: a blue tint between the two cuts across the road.
+   * Grass and the authoring box stay unmarked.
    */
   private drawDrsZones(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
-    const zones = track.drsZones ?? [];
+    const zones = resolvedDrsZones(track);
     if (zones.length === 0) return;
     ctx.save();
     ctx.fillStyle = 'rgba(37, 99, 235, 0.45)';
     for (const zone of zones) {
-      const y1 = Math.min(zone.y1, track.height - 1);
-      const x1 = Math.min(zone.x1, track.width - 1);
-      for (let y = Math.max(0, zone.y0); y <= y1; y++) {
-        const row = track.grid[y];
-        if (!row) continue;
-        for (let x = Math.max(0, zone.x0); x <= x1; x++) {
-          if (row[x] !== 'track') continue;
-          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
-        }
+      for (const cell of zone.cells) {
+        ctx.fillRect(cell.x * CELL, cell.y * CELL, CELL, CELL);
       }
     }
     ctx.restore();
