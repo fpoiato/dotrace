@@ -19,18 +19,18 @@ describe('track path field', () => {
     expect(goals.length).toBeGreaterThan(0);
 
     const field = buildDistanceField(track, goals);
-    const onStraight = pathDistance(field, { x: 50, y: 48 });
-    const furtherRight = pathDistance(field, { x: 60, y: 48 });
-    // Going the correct way (right along the bottom) reduces remaining distance.
-    expect(furtherRight).toBeLessThan(onStraight);
+    const onStraight = pathDistance(field, { x: 150, y: 118 });
+    const furtherAlong = pathDistance(field, { x: 130, y: 118 });
+    // Going the correct way (left along the bottom straight) reduces remaining distance.
+    expect(furtherAlong).toBeLessThan(onStraight);
     // Grass next to the track is unreachable in the asphalt field.
-    expect(pathDistance(field, { x: 50, y: 40 })).toBe(Number.POSITIVE_INFINITY);
+    expect(pathDistance(field, { x: 150, y: 108 })).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('lookahead is long on the bottom straight and short into Parabolica', () => {
-    expect(isAsphalt(track, { x: 50, y: 48 })).toBe(true);
-    const straight = asphaltLookahead(track, { x: 50, y: 48 }, { x: 3, y: 0 });
-    const intoCorner = asphaltLookahead(track, { x: 70, y: 48 }, { x: 3, y: 0 });
+    expect(isAsphalt(track, { x: 150, y: 118 })).toBe(true);
+    const straight = asphaltLookahead(track, { x: 150, y: 118 }, { x: -3, y: 0 });
+    const intoCorner = asphaltLookahead(track, { x: 86, y: 118 }, { x: -3, y: 0 });
     expect(straight).toBeGreaterThanOrEqual(4);
     expect(intoCorner).toBeLessThan(straight);
   });
@@ -38,8 +38,8 @@ describe('track path field', () => {
   it('describes where the car is on the directed racing line', () => {
     const onStraight = describeTrackSituation(
       track,
-      { x: 50, y: 48 },
-      { x: 2, y: 0 },
+      { x: 150, y: 118 },
+      { x: -2, y: 0 },
       false
     );
     expect(onStraight.trackId).toBe('monza');
@@ -51,8 +51,8 @@ describe('track path field', () => {
 
     const wrongWay = describeTrackSituation(
       track,
-      { x: 50, y: 48 },
-      { x: -2, y: 0 },
+      { x: 150, y: 118 },
+      { x: 2, y: 0 },
       false
     );
     expect(wrongWay.alignment).toBe('against');
@@ -62,8 +62,8 @@ describe('track path field', () => {
 describe('HeuristicBrain track awareness', () => {
   it('accelerates on a clear straight when gear is low', async () => {
     const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
-    me.position = { x: 50, y: 48 };
-    me.velocity = { x: 1, y: 0 };
+    me.position = { x: 150, y: 118 };
+    me.velocity = { x: -1, y: 0 };
     me.passedCheckpoint = false;
 
     const state = createInitialState([me], 'ai-1');
@@ -84,9 +84,9 @@ describe('HeuristicBrain track awareness', () => {
 
   it('prefers braking (or not accelerating) when high gear meets a short runway', async () => {
     const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
-    // Near the end of the bottom straight, heading into the right-hand sweep.
-    me.position = { x: 68, y: 48 };
-    me.velocity = { x: 4, y: 0 };
+    // Near the end of the bottom straight, heading into the Rettifilo.
+    me.position = { x: 96, y: 118 };
+    me.velocity = { x: -4, y: 0 };
     me.passedCheckpoint = false;
 
     const state = createInitialState([me], 'ai-1');
@@ -114,8 +114,8 @@ describe('HeuristicBrain track awareness', () => {
 
   it('makes path progress along the corridor, not Euclidean grass cuts', async () => {
     const me = createLobbyPlayer('ai-1', 'AI Pilot', false, 1, '#3B82F6');
-    me.position = { x: 18, y: 48 };
-    me.velocity = { x: 2, y: 0 };
+    me.position = { x: 150, y: 118 };
+    me.velocity = { x: -2, y: 0 };
     me.passedCheckpoint = false;
 
     const state = createInitialState([me], 'ai-1');
@@ -132,6 +132,6 @@ describe('HeuristicBrain track awareness', () => {
     expect(chosen.grassShortcut).toBe(false);
     expect(Number.isFinite(chosen.pathDistance)).toBe(true);
     expect(chosen.pathProgress).toBeGreaterThan(0);
-    expect(chosen.velocity.x).toBeGreaterThan(0);
+    expect(chosen.velocity.x).toBeLessThan(0);
   });
 });

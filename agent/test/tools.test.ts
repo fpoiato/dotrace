@@ -60,8 +60,8 @@ describe('listAnnotatedMoves', () => {
 
   it('reports finite pathDistance for asphalt landings toward the checkpoint', () => {
     const { state, me } = raceState();
-    me.position = { x: 50, y: 48 };
-    me.velocity = { x: 1, y: 0 };
+    me.position = { x: 150, y: 118 };
+    me.velocity = { x: -1, y: 0 };
     const moves = listAnnotatedMoves(me, state, track);
     const onAsphalt = moves.filter((m) => m.landingTile === 'track' || m.landingTile === 'finish');
     expect(onAsphalt.length).toBeGreaterThan(0);
@@ -97,8 +97,8 @@ describe('goalPoint', () => {
 describe('buildBoardSummary', () => {
   it('summarizes my car and opponents without leaking my own record', () => {
     const { state, me } = raceState();
-    me.velocity = { x: 2, y: 0 };
-    me.position = { x: 50, y: 48 };
+    me.velocity = { x: -2, y: 0 };
+    me.position = { x: 150, y: 118 };
     const summary = buildBoardSummary(me, state, track);
 
     expect(summary.position).toEqual(me.position);
