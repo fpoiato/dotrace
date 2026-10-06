@@ -19,7 +19,8 @@ export interface SharedReplayPlayer {
 }
 
 /** [playerIdx, round, x, y, vx, vy, offTrack(0|1), lap] */
-export type SharedMoveRow = [number, number, number, number, number, number, 0 | 1, number];
+/** Optional 9th entry: bit 0 = DRS open, bit 1 = ERS spent. Omitted when 0. */
+export type SharedMoveRow = [number, number, number, number, number, number, 0 | 1, number, number?];
 
 export interface SharedReplayPayload {
   v: 1;
@@ -104,14 +105,20 @@ function normalizePlayer(value: unknown): SharedReplayPlayer | null {
 }
 
 function normalizeMove(value: unknown, playerCount: number): SharedMoveRow | null {
-  if (!Array.isArray(value) || value.length !== 8) return null;
+  if (!Array.isArray(value) || (value.length !== 8 && value.length !== 9)) return null;
   const [pi, round, x, y, vx, vy, off, lap] = value;
   if (typeof pi !== 'number' || !Number.isInteger(pi) || pi < 0 || pi >= playerCount) return null;
   if (typeof round !== 'number' || !Number.isInteger(round) || round < 0 || round > 100_000) return null;
   if (!isCoord(x) || !isCoord(y) || !isCoord(vx) || !isCoord(vy)) return null;
   if (off !== 0 && off !== 1) return null;
   if (typeof lap !== 'number' || !Number.isInteger(lap) || lap < 0 || lap > 10) return null;
-  return [pi, round, x, y, vx, vy, off, lap];
+  const row: SharedMoveRow = [pi, round, x, y, vx, vy, off, lap];
+  if (value.length === 9) {
+    const flags = value[8];
+    if (flags !== 0 && flags !== 1 && flags !== 2 && flags !== 3) return null;
+    if (flags) row[8] = flags;
+  }
+  return row;
 }
 
 /** Drop unknown fields and reject anything that is not a finished-race replay. */
