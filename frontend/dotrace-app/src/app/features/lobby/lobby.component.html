@@ -28,7 +28,7 @@
           (trackSelected)="selectTrack($event)"
         />
 
-        <div class="mb-2 grid grid-cols-2 gap-2">
+        <div class="mb-2 grid grid-cols-[6.75rem_minmax(0,1fr)] items-end gap-2">
           <div>
             <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.laps' | translate }}</p>
             <div class="grid grid-cols-3 gap-1">
@@ -46,12 +46,12 @@
           </div>
           <div>
             <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.gameMode' | translate }}</p>
-            <div class="grid grid-cols-1 gap-1">
+            <div class="grid grid-cols-2 gap-1">
               @for (mode of gameModes; track mode) {
                 <button
                   type="button"
                   (click)="selectGameMode(mode)"
-                  class="min-h-9 rounded-lg border-2 px-2 text-xs font-semibold leading-tight transition"
+                  class="min-h-10 whitespace-nowrap rounded-lg border-2 px-1 text-[11px] font-semibold leading-tight transition"
                   [class]="selectedGameMode === mode ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
                 >
                   {{ 'lobby.mode.' + mode | translate }}
@@ -61,18 +61,11 @@
           </div>
         </div>
 
-        <div class="mb-2 flex gap-2">
-          <button
-            type="button"
-            (click)="copyInvite(room.roomCode)"
-            class="min-h-10 flex-1 rounded-lg bg-slate-700 px-2 text-xs font-medium"
-          >
-            {{ copied ? ('common.copied' | translate) : ('lobby.invite' | translate) }}
-          </button>
+        <div class="mb-2">
           <button
             type="button"
             (click)="whatsApp(room.roomCode)"
-            class="min-h-10 flex-1 rounded-lg bg-green-700 px-2 text-xs font-medium"
+            class="min-h-10 w-full rounded-lg bg-green-700 px-2 text-xs font-medium"
           >
             {{ 'lobby.whatsapp' | translate }}
           </button>
