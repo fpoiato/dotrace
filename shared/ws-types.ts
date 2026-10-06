@@ -47,6 +47,11 @@ export interface TrackDefinition {
    * "finishing" by reversing over the line on turn one.
    */
   checkpoint?: CheckpointRect;
+  /**
+   * DRS detection strips, separate from the lap checkpoint. Crossing one can
+   * arm the DRS button once per lap when a rival is just ahead.
+   */
+  drsZones?: CheckpointRect[];
 }
 
 export interface Player {
@@ -87,6 +92,14 @@ export interface Player {
   gearPenaltyUntilRound?: number;
   /** TIMED mode: epoch ms before the player may move again. */
   stopUntil?: number;
+  /** DRS button may be pressed (armed by a detection zone this lap). */
+  drsArmed?: boolean;
+  /** DRS is open: this move's gear ceiling is 7 until the gear falls. */
+  drsActive?: boolean;
+  /** Indexes into the track's drsZones already spent this lap. */
+  drsZonesUsed?: number[];
+  /** ERS battery, 0–4 in steps of 0.25. One full bar spent opens delta 2. */
+  ersCharge?: number;
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
@@ -291,6 +304,10 @@ export interface HostStateResponsePayload {
 export interface SubmitMoveAction {
   action: 'SUBMIT_MOVE';
   vector: Vector2D;
+  /** Ask to open DRS for this move. Host ignores it unless drsArmed. */
+  drs?: boolean;
+  /** Ask to spend one ERS bar so each axis may change by 2. */
+  ers?: boolean;
 }
 
 export interface SelectTrackAction {
@@ -434,6 +451,36 @@ export const MAX_GEAR_DELTA = 1;
 /** Top speed: velocity magnitude (Chebyshev) can never exceed this. */
 export const MAX_GEAR = 6;
 
+/** Gear ceiling while DRS is open. Gear 8 is never legal. */
+export const DRS_MAX_GEAR = 7;
+
+/** Per-axis change while an ERS bar is spent on the move. */
+export const ERS_MAX_DELTA = 2;
+
+/** ERS battery cap, in quarter-bars. */
+export const ERS_MAX_CHARGE = 4;
+
+/** Charge gained per gear dropped. */
+export const ERS_CHARGE_PER_GEAR = 0.25;
+
+/** Chebyshev gap to a car ahead that lets a DRS zone arm the button. */
+export const DRS_RANGE = 3;
+
+/** Flags the client may set on SUBMIT_MOVE. The host decides if they apply. */
+export interface BoostRequest {
+  drs?: boolean;
+  ers?: boolean;
+}
+
+export interface BoostLimits {
+  maxGear: number;
+  maxDelta: number;
+  /** True when this request opens DRS before the gear check. */
+  openDrs: boolean;
+  /** True when an accepted move spends exactly one ERS bar. */
+  spendErs: boolean;
+}
+
 /** Off-track players may only use velocity components in this set. */
 export const OFF_TRACK_GEARS = [-1, 0, 1] as const;
 
@@ -448,12 +495,13 @@ export const GRASS_PENALTY_TIMED_REPEAT_MS = 10000;
 export function isValidGearChange(
   current: Vector2D,
   next: Vector2D,
-  isOffTrack: boolean
+  isOffTrack: boolean,
+  maxDelta = MAX_GEAR_DELTA,
+  maxGear = MAX_GEAR
 ): boolean {
-  if (
-    Math.abs(next.x - current.x) > MAX_GEAR_DELTA ||
-    Math.abs(next.y - current.y) > MAX_GEAR_DELTA
-  ) {
+  // Off-track and grass-penalty limits are not raised by DRS or ERS.
+  const delta = isOffTrack ? MAX_GEAR_DELTA : maxDelta;
+  if (Math.abs(next.x - current.x) > delta || Math.abs(next.y - current.y) > delta) {
     return false;
   }
   if (isOffTrack) {
@@ -462,7 +510,133 @@ export function isValidGearChange(
       OFF_TRACK_GEARS.includes(next.y as (typeof OFF_TRACK_GEARS)[number])
     );
   }
-  return gearOf(next) <= MAX_GEAR;
+  return gearOf(next) <= maxGear;
+}
+
+/** Snap ERS charge onto the quarter-bar grid and keep it inside 0–4. */
+export function clampErsCharge(value: number): number {
+  const snapped = Math.round(value * 4) / 4;
+  return Math.min(ERS_MAX_CHARGE, Math.max(0, snapped));
+}
+
+/**
+ * Ceiling and per-axis delta for a move, given the buttons the client asked
+ * for. Defaults stay 6 and 1. Gear-limited cars stay at delta 1 and gear 1.
+ */
+export function boostLimits(player: Player, round: number, request?: BoostRequest): BoostLimits {
+  const limited = isGearLimited(player, round);
+  const openDrs = !limited && !!request?.drs && !!player.drsArmed && !player.drsActive;
+  const drsOn = !!player.drsActive || openDrs;
+  const spendErs = !limited && !!request?.ers && (player.ersCharge ?? 0) >= 1;
+  return {
+    maxGear: limited ? 1 : drsOn ? DRS_MAX_GEAR : MAX_GEAR,
+    maxDelta: limited ? MAX_GEAR_DELTA : spendErs ? ERS_MAX_DELTA : MAX_GEAR_DELTA,
+    openDrs,
+    spendErs,
+  };
+}
+
+/**
+ * Open DRS before the velocity check when the request is legal. Returns the
+ * limits the host must validate against. Call {@link revertDrsOpen} if the
+ * vector is then rejected.
+ */
+export function engageRequestedDrs(player: Player, round: number, request?: BoostRequest): BoostLimits {
+  const limits = boostLimits(player, round, request);
+  if (limits.openDrs) {
+    player.drsActive = true;
+    player.drsArmed = false;
+  }
+  return limits;
+}
+
+export function revertDrsOpen(player: Player, drsActive: boolean | undefined, drsArmed: boolean | undefined): void {
+  player.drsActive = drsActive;
+  player.drsArmed = drsArmed;
+}
+
+/** Spend one ERS bar after the host has accepted the move. */
+export function spendErsIfAccepted(player: Player, limits: BoostLimits): void {
+  if (!limits.spendErs) return;
+  player.ersCharge = clampErsCharge((player.ersCharge ?? 0) - 1);
+}
+
+/**
+ * DRS stays open while the gear holds or rises. Any drop — including a stop
+ * on grass or rumble, where the final velocity is {0,0} — closes it and
+ * recharges ERS by 0.25 per gear lost.
+ */
+export function settleBoostFromGears(player: Player, previousGear: number, nextGear: number): void {
+  if (nextGear >= previousGear) return;
+  player.drsActive = false;
+  player.drsArmed = false;
+  player.ersCharge = clampErsCharge(
+    (player.ersCharge ?? 0) + (previousGear - nextGear) * ERS_CHARGE_PER_GEAR
+  );
+}
+
+/** True when `leader` is strictly ahead of `trailer` in live-standings order. */
+export function isStrictlyAhead(leader: Player, trailer: Player, track: TrackDefinition): boolean {
+  if (leader.finishOrder !== undefined) return false;
+  if (leader.lap !== trailer.lap) return leader.lap > trailer.lap;
+  const leaderCp = leader.passedCheckpoint ? 1 : 0;
+  const trailerCp = trailer.passedCheckpoint ? 1 : 0;
+  if (leaderCp !== trailerCp) return leaderCp > trailerCp;
+  return distanceToRaceGoal(leader, track) < distanceToRaceGoal(trailer, track);
+}
+
+/** Unfinished rival ahead, within Chebyshev `range` of `player.position`. */
+export function hasRivalAheadInRange(
+  player: Player,
+  others: Player[],
+  track: TrackDefinition,
+  range = DRS_RANGE
+): boolean {
+  return others.some((opponent) => {
+    if (opponent.connectionId === player.connectionId) return false;
+    if (opponent.finishOrder !== undefined) return false;
+    if (!isStrictlyAhead(opponent, player, track)) return false;
+    const gap = Math.max(
+      Math.abs(opponent.position.x - player.position.x),
+      Math.abs(opponent.position.y - player.position.y)
+    );
+    return gap <= range;
+  });
+}
+
+/**
+ * Arm DRS when the move enters a still-unused zone with a rival ahead at the
+ * landing. The zone index is spent immediately, so sitting inside it or
+ * crossing it again this lap does not rearm.
+ */
+export function armDrsZones(
+  player: Player,
+  from: Vector2D,
+  landing: Vector2D,
+  others: Player[],
+  track: TrackDefinition
+): void {
+  const zones = track.drsZones ?? [];
+  if (zones.length === 0) return;
+  const used = new Set(player.drsZonesUsed ?? []);
+  const atLanding: Player = { ...player, position: { ...landing } };
+  let armed = false;
+  for (let i = 0; i < zones.length; i++) {
+    if (used.has(i)) continue;
+    if (!segmentEntersRect(from, landing, zones[i])) continue;
+    if (!hasRivalAheadInRange(atLanding, others, track)) continue;
+    used.add(i);
+    armed = true;
+  }
+  if (!armed) return;
+  player.drsArmed = true;
+  player.drsZonesUsed = [...used].sort((a, b) => a - b);
+}
+
+/** Same moment passedCheckpoint returns to false: the lap's DRS zones reset. */
+export function beginNextLap(player: Player): void {
+  player.passedCheckpoint = false;
+  player.drsZonesUsed = [];
 }
 
 export function landingPosition(position: Vector2D, velocity: Vector2D): Vector2D {
@@ -653,17 +827,21 @@ export function getValidMoves(
   player: Player,
   track: TrackDefinition,
   others?: Player[],
-  round = 1
+  round = 1,
+  maxGear = MAX_GEAR,
+  maxDelta = MAX_GEAR_DELTA
 ): { velocity: Vector2D; landing: Vector2D }[] {
   const moves: { velocity: Vector2D; landing: Vector2D }[] = [];
   const { position, velocity } = player;
   const gearLimited = isGearLimited(player, round);
+  const delta = gearLimited ? MAX_GEAR_DELTA : maxDelta;
+  const cap = gearLimited ? 1 : maxGear;
   const opponents = others ? activeRacers(others, player.connectionId) : [];
 
-  for (let dvx = -MAX_GEAR_DELTA; dvx <= MAX_GEAR_DELTA; dvx++) {
-    for (let dvy = -MAX_GEAR_DELTA; dvy <= MAX_GEAR_DELTA; dvy++) {
+  for (let dvx = -delta; dvx <= delta; dvx++) {
+    for (let dvy = -delta; dvy <= delta; dvy++) {
       const next: Vector2D = { x: velocity.x + dvx, y: velocity.y + dvy };
-      if (!isValidGearChange(velocity, next, gearLimited)) continue;
+      if (!isValidGearChange(velocity, next, gearLimited, delta, cap)) continue;
       const landing = landingPosition(position, next);
       if (getTileAt(track, landing.x, landing.y) === null) continue;
       if (opponents.some((o) => o.position.x === landing.x && o.position.y === landing.y)) {

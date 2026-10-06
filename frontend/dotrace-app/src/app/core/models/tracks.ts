@@ -84,6 +84,8 @@ interface CircuitSpec {
   startLine: Vector2D[];
   arrows: TrackArrow[];
   checkpoint: { x0: number; y0: number; x1: number; y1: number };
+  /** DRS detection strips. Separate from the lap checkpoint and the finish. */
+  drsZones?: { x0: number; y0: number; x1: number; y1: number }[];
   /** Optional per-circuit grid size (defaults to GRID_W × GRID_H). */
   width?: number;
   height?: number;
@@ -206,6 +208,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     arrows: spec.arrows,
     centerline: spec.centerline.map((p) => ({ ...p })),
     checkpoint: spec.checkpoint,
+    drsZones: spec.drsZones?.map((z) => ({ ...z })),
   };
 }
 
@@ -271,6 +274,8 @@ const MONZA: CircuitSpec = {
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
+  // Pit straight, east of the stripe (race is left). Not the grid, not the line.
+  drsZones: [{ x0: 142, y0: 114, x1: 160, y1: 122 }],
 };
 
 /**
@@ -307,6 +312,8 @@ const MONACO: CircuitSpec = {
     { at: { x: 46, y: 40 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 63, y0: 6, x1: 81, y1: 27 },
+  // Harbour straight, left of the stripe.
+  drsZones: [{ x0: 24, y0: 28, x1: 40, y1: 36 }],
 };
 
 /**
@@ -347,6 +354,8 @@ const INTERLAGOS: CircuitSpec = {
     { at: { x: 46, y: 16 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 66, y0: 18, x1: 81, y1: 42 },
+  // Start straight, left of the stripe.
+  drsZones: [{ x0: 20, y0: 4, x1: 38, y1: 12 }],
 };
 
 /**
@@ -412,6 +421,8 @@ const SILVERSTONE: CircuitSpec = {
     { at: { x: 26, y: 32 }, dir: { x: 0, y: -1 } },
   ],
   checkpoint: { x0: 102, y0: 45, x1: 117, y1: 66 },
+  // Hangar/Wellington descent, clear of the start stripe and the right-hand checkpoint.
+  drsZones: [{ x0: 86, y0: 17, x1: 102, y1: 32 }],
 };
 
 /**
@@ -479,6 +490,8 @@ const SPA: CircuitSpec = {
     { at: { x: 37, y: 76 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 99, y0: 36, x1: 117, y1: 57 },
+  // Pit straight approaching the stripe (race is left).
+  drsZones: [{ x0: 50, y0: 64, x1: 68, y1: 75 }],
 };
 
 /**
@@ -538,6 +551,8 @@ const SUZUKA: CircuitSpec = {
     { at: { x: 102, y: 55 }, dir: { x: 0, y: -1 } },
   ],
   checkpoint: { x0: 40, y0: 1, x1: 72, y1: 12 },
+  // S/F straight above the stripe, before the crossover.
+  drsZones: [{ x0: 88, y0: 42, x1: 96, y1: 50 }],
 };
 
 export const TRACKS: TrackDefinition[] = [
