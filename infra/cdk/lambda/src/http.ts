@@ -4,6 +4,7 @@ import {
   APIGatewayProxyResultV2,
 } from 'aws-lambda';
 import { fetchTop10Entries, handleClientAction } from './lib/actions';
+import { loadReplay, saveReplay } from './lib/replays';
 import { parseBody, WsEnvelope } from './lib/response';
 
 const CORS_HEADERS = {
@@ -48,6 +49,26 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (method === 'GET' && path.endsWith('/top10')) {
       const entries = await fetchTop10Entries();
       return json(200, { action: 'TOP10', payload: { entries } });
+    }
+
+    if (method === 'POST' && /\/replays\/?$/.test(path)) {
+      const body = parseBody<unknown>(event);
+      const saved = await saveReplay(body);
+      if (!saved.ok) {
+        const statusCode = saved.reason === 'too_large' ? 413 : 400;
+        const message = saved.reason === 'too_large' ? 'Replay too large' : 'Invalid replay';
+        return json(statusCode, { message });
+      }
+      return json(201, { id: saved.id });
+    }
+
+    if (method === 'GET' && path.includes('/replays/')) {
+      const id =
+        event.pathParameters?.id ??
+        decodeURIComponent(path.split('/').filter(Boolean).pop() ?? '');
+      const replay = await loadReplay(id);
+      if (!replay) return json(404, { message: 'Replay not found' });
+      return json(200, replay);
     }
 
     if (method === 'POST' && (path.endsWith('/actions') || path.endsWith('/action'))) {

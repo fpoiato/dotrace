@@ -13,6 +13,20 @@ describe('DotRaceWsStack', () => {
   });
   const template = Template.fromStack(stack);
 
+  it('stores shared replays with a one-day Dynamo TTL', () => {
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'DotRaceReplays',
+      TimeToLiveSpecification: {
+        AttributeName: 'ttl',
+        Enabled: true,
+      },
+    });
+    const json = JSON.stringify(template.toJSON());
+    expect(json).toContain('REPLAYS_TABLE');
+    expect(json).toContain('POST /replays');
+    expect(json).toContain('GET /replays/{id}');
+  });
+
   it('synthesizes the AI player without a circular dependency', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'DotRaceAiPlayer',

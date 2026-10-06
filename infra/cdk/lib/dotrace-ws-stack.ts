@@ -64,6 +64,14 @@ export class DotRaceWsStack extends Stack {
       projectionType: ProjectionType.ALL,
     });
 
+    const replaysTable = new Table(this, 'DotRaceReplays', {
+      tableName: 'DotRaceReplays',
+      partitionKey: { name: 'replayId', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl',
+    });
+
     const leaderboardTable = new Table(this, 'DotRaceLeaderboard', {
       tableName: 'DotRaceLeaderboard',
       partitionKey: { name: 'nicknameKey', type: AttributeType.STRING },
@@ -132,8 +140,10 @@ export class DotRaceWsStack extends Stack {
     connectionsTable.grantReadWriteData(disconnectFn);
     connectionsTable.grantReadWriteData(messageFn);
     connectionsTable.grantReadWriteData(httpFn);
+    replaysTable.grantReadWriteData(httpFn);
     leaderboardTable.grantReadWriteData(messageFn);
     leaderboardTable.grantReadWriteData(httpFn);
+    httpFn.addEnvironment('REPLAYS_TABLE', replaysTable.tableName);
 
     const webSocketApi = new WebSocketApi(this, 'DotRaceWebSocketApi', {
       connectRouteOptions: {
@@ -175,7 +185,7 @@ export class DotRaceWsStack extends Stack {
     // HTTP API for client→server commands (async / resilient to mobile WS drops).
     const httpApi = new HttpApi(this, 'DotRaceHttpApi', {
       apiName: 'DotRaceHttpApi',
-      description: 'Dot Race client command API (POST actions, GET top10)',
+      description: 'Dot Race client command API (POST actions, GET top10, replays)',
       corsPreflight: {
         allowHeaders: ['Content-Type', 'X-Connection-Id'],
         allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST, CorsHttpMethod.OPTIONS],
@@ -194,6 +204,18 @@ export class DotRaceWsStack extends Stack {
 
     httpApi.addRoutes({
       path: '/top10',
+      methods: [HttpMethod.GET],
+      integration: httpIntegration,
+    });
+
+    httpApi.addRoutes({
+      path: '/replays',
+      methods: [HttpMethod.POST],
+      integration: httpIntegration,
+    });
+
+    httpApi.addRoutes({
+      path: '/replays/{id}',
       methods: [HttpMethod.GET],
       integration: httpIntegration,
     });

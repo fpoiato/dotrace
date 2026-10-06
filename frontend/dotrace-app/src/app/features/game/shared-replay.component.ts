@@ -1,5 +1,5 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { GameState } from '../../core/models/ws-types';
 import { ReplayShareService } from '../../core/services/replay-share.service';
@@ -55,20 +55,18 @@ import { ReplayViewerComponent } from './replay-viewer.component';
 })
 export class SharedReplayComponent implements OnInit {
   private readonly share = inject(ReplayShareService);
+  private readonly route = inject(ActivatedRoute);
 
   loading = true;
   error = false;
   state: GameState | null = null;
 
   async ngOnInit(): Promise<void> {
-    const hash = window.location.hash;
-    if (!hash || hash === '#') {
-      this.loading = false;
-      this.error = true;
-      return;
-    }
+    const id = this.route.snapshot.paramMap.get('id');
     try {
-      const decoded = await this.share.decodeHash(hash);
+      const decoded = id
+        ? await this.share.loadById(id)
+        : await this.share.decodeHash(window.location.hash);
       if (!decoded) {
         this.error = true;
       } else {

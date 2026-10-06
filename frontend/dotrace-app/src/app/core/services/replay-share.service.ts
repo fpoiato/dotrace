@@ -1,10 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import {
   GameMode,
   GameState,
   MoveRecord,
   Player,
 } from '../models/ws-types';
+import { ApiService } from './api.service';
 
 /** Compact player snapshot for shareable replays. */
 interface SharedReplayPlayer {
@@ -37,15 +38,6 @@ export interface SharedReplayPayload {
 
 const HASH_PREFIX = 'r1.';
 
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
 function base64UrlToBytes(encoded: string): Uint8Array {
   const padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
   const pad = padded.length % 4 === 0 ? '' : '='.repeat(4 - (padded.length % 4));
@@ -55,22 +47,11 @@ function base64UrlToBytes(encoded: string): Uint8Array {
   return bytes;
 }
 
-async function compress(bytes: Uint8Array): Promise<Uint8Array> {
-  if (typeof CompressionStream === 'undefined') return bytes;
-  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-  const buf = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buf);
-}
-
 async function decompress(bytes: Uint8Array): Promise<Uint8Array> {
   if (typeof DecompressionStream === 'undefined') return bytes;
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   const buf = await new Response(stream).arrayBuffer();
   return new Uint8Array(buf);
-}
-
-function textEncoder(): TextEncoder {
-  return new TextEncoder();
 }
 
 function textDecoder(): TextDecoder {
@@ -221,21 +202,32 @@ function isSharedReplayPayload(value: unknown): value is SharedReplayPayload {
 
 @Injectable({ providedIn: 'root' })
 export class ReplayShareService {
-  /** Encode race state into a shareable absolute URL (`/replay#r1.…`). */
+  private readonly api = inject(ApiService);
+
+  /**
+   * Persist the race and return `/replay/:id`.
+   * The id is the only thing that goes into WhatsApp — a 3-lap log no longer
+   * has to survive as a compressed hash.
+   */
   async buildShareUrl(state: GameState): Promise<string | null> {
     const payload = buildSharedReplayPayload(state);
     if (!payload) return null;
-    const json = JSON.stringify(payload);
-    const raw = textEncoder().encode(json);
-    const compressed = await compress(raw);
-    // Prefer the smaller of compressed vs raw (tiny races may not shrink).
-    const useCompressed = compressed.length < raw.length;
-    const body = bytesToBase64Url(useCompressed ? compressed : raw);
-    const flag = useCompressed ? 'c' : 'u';
-    return `${window.location.origin}/replay#${HASH_PREFIX}${flag}.${body}`;
+    const id = await this.api.saveReplay(payload);
+    return `${window.location.origin}/replay/${id}`;
   }
 
-  /** Decode a hash fragment (`#r1.c.…` or `#r1.u.…`) into GameState. */
+  /** Load a replay saved with a one-day TTL. */
+  async loadById(id: string): Promise<GameState | null> {
+    try {
+      const payload: unknown = await this.api.getReplay(id);
+      if (!isSharedReplayPayload(payload)) return null;
+      return sharedPayloadToGameState(payload);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Decode a legacy hash fragment (`#r1.c.…` or `#r1.u.…`) into GameState. */
   async decodeHash(hash: string): Promise<GameState | null> {
     const raw = hash.startsWith('#') ? hash.slice(1) : hash;
     if (!raw.startsWith(HASH_PREFIX)) return null;
