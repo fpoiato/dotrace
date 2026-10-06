@@ -100,12 +100,21 @@ export class MiniMapComponent implements OnChanges, OnDestroy {
     }
   }
 
+  /** Asphalt cell inside a DRS zone. Grass is never tinted. */
+  private inDrsZone(track: TrackDefinition, x: number, y: number): boolean {
+    const zones = track.drsZones ?? [];
+    for (const zone of zones) {
+      if (x >= zone.x0 && x <= zone.x1 && y >= zone.y0 && y <= zone.y1) return true;
+    }
+    return false;
+  }
+
   private drawRibbon(ctx: CanvasRenderingContext2D, track: TrackDefinition, s: number): void {
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
         const tile = track.grid[y][x];
         if (tile === 'track') {
-          ctx.fillStyle = '#cbd5e1';
+          ctx.fillStyle = this.inDrsZone(track, x, y) ? '#60a5fa' : '#cbd5e1';
           ctx.fillRect(x * s, y * s, s, s);
         } else if (tile === 'finish') {
           ctx.fillStyle = PAPER_COLORS.finish;
