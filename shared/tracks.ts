@@ -84,6 +84,8 @@ interface CircuitSpec {
   startLine: Vector2D[];
   arrows: TrackArrow[];
   checkpoint: { x0: number; y0: number; x1: number; y1: number };
+  /** DRS detection strips. Separate from the lap checkpoint and the finish. */
+  drsZones?: { x0: number; y0: number; x1: number; y1: number }[];
   /** Optional per-circuit grid size (defaults to GRID_W × GRID_H). */
   width?: number;
   height?: number;
@@ -206,6 +208,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     arrows: spec.arrows,
     centerline: spec.centerline.map((p) => ({ ...p })),
     checkpoint: spec.checkpoint,
+    drsZones: spec.drsZones?.map((z) => ({ ...z })),
   };
 }
 
@@ -271,6 +274,8 @@ const MONZA: CircuitSpec = {
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
+  // Pit straight, east of the stripe (race is left). Not the grid, not the line.
+  drsZones: [{ x0: 142, y0: 114, x1: 160, y1: 122 }],
 };
 
 /**
@@ -377,6 +382,7 @@ const MONACO: CircuitSpec = {
     { at: { x: 33, y: 83 }, dir: { x: 1, y: 0 } },
   ],
   checkpoint: { x0: 136, y0: 15, x1: 153, y1: 31 },
+  drsZones: [{ x0: 95, y0: 24, x1: 119, y1: 50 }],
 };
 
 /**
@@ -488,6 +494,7 @@ const INTERLAGOS: CircuitSpec = {
     { at: { x: 63, y: 27 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 72, y0: 127, x1: 88, y1: 144 },
+  drsZones: [{ x0: 83, y0: 78, x1: 103, y1: 110 }],
 };
 
 /**
@@ -596,6 +603,7 @@ const SILVERSTONE: CircuitSpec = {
     { at: { x: 60, y: 13 }, dir: { x: 1, y: 0 } },
   ],
   checkpoint: { x0: 52, y0: 157, x1: 68, y1: 173 },
+  drsZones: [{ x0: 84, y0: 116, x1: 107, y1: 148 }],
 };
 
 /**
@@ -706,6 +714,7 @@ const SPA: CircuitSpec = {
     { at: { x: 68, y: 144 }, dir: { x: 0, y: 1 } },
   ],
   checkpoint: { x0: 36, y0: 11, x1: 52, y1: 26 },
+  drsZones: [{ x0: 96, y0: 97, x1: 116, y1: 128 }],
 };
 
 /**
@@ -813,6 +822,7 @@ const SUZUKA: CircuitSpec = {
     { at: { x: 168, y: 81 }, dir: { x: 0, y: 1 } },
   ],
   checkpoint: { x0: 27, y0: 19, x1: 43, y1: 35 },
+  drsZones: [{ x0: 122, y0: 73, x1: 138, y1: 99 }],
 };
 
 export const TRACKS: TrackDefinition[] = [

@@ -10,7 +10,9 @@ import {
   LiveStandingRow,
   Player,
   Vector2D,
+  BoostRequest,
   buildLiveStandings,
+  boostLimits,
   canPlayerMove,
   formatRaceTime,
   getTileAt,
@@ -124,6 +126,14 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   showCelebration = false;
   showReplay = false;
   padOptions: PadOption[] = [];
+  /** Delta-2 landings the 3×3 pad cannot show. Only while ERS is selected. */
+  extendedOptions: PadOption[] = [];
+  /** Next SUBMIT_MOVE asks the host to open DRS. Does not spend the turn. */
+  drsIntent = false;
+  /** Next SUBMIT_MOVE spends one ERS bar. */
+  ersIntent = false;
+  readonly ersPips = [0, 1, 2, 3];
+  private boostStamp = '';
   /** Seconds left on a timed grass penalty (drives the popup countdown). */
   penaltyCountdownSec = 0;
   /** Tick every 250ms while a timed stop penalty is active. */
@@ -146,7 +156,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
       this.game.state$.subscribe((state) => {
-        this.padOptions = this.buildPadOptions(state);
+        this.syncBoostIntents(state);
+        this.rebuildPad(state);
         this.updatePenaltyCountdown(state);
         this.syncStopPenaltyTimer(state);
         this.maybePlayVictoryAnthem(state);
@@ -192,7 +203,16 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const canMove =
       !!state && !!myId && canPlayerMove(state, myId) && me?.finishOrder === undefined;
 
-    const valid = canMove && me && track ? getValidMoves(me, track, state?.players, state?.round ?? 1) : [];
+    const valid =
+      canMove && me && track
+        ? getValidMoves(
+            me,
+            track,
+            state?.players,
+            state?.round ?? 1,
+            ...this.moveCaps(state, me)
+          )
+        : [];
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -227,7 +247,95 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       };
     }
 
+    this.extendedOptions = [];
+    if (me && track) {
+      for (const move of valid) {
+        const dx = move.velocity.x - me.velocity.x;
+        const dy = move.velocity.y - me.velocity.y;
+        if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) continue;
+        const landing = landingPosition(me.position, move.velocity);
+        this.extendedOptions.push({
+          key: `${dx},${dy}`,
+          glyph: `${dx > 0 ? '+' : ''}${dx},${dy > 0 ? '+' : ''}${dy}`,
+          enabled: true,
+          velocity: move.velocity,
+          grass: moveWarnsOffAsphalt(track, me.position, landing),
+        });
+      }
+      this.extendedOptions.sort((a, b) => a.key.localeCompare(b.key));
+    }
+
     return options;
+  }
+
+  /** Ceiling and delta the host would use for the buttons currently held. */
+  private moveCaps(state: GameState, me: Player): [number, number] {
+    const limits = boostLimits(me, state.round, this.boostRequest(state, me));
+    return [limits.maxGear, limits.maxDelta];
+  }
+
+  private boostRequest(state: GameState, me: Player): BoostRequest {
+    return {
+      drs: this.drsIntent && this.drsButtonEnabled(state, me),
+      ers: this.ersIntent && this.ersButtonEnabled(state, me),
+    };
+  }
+
+  /**
+   * Drop the held buttons when the car actually moves (or the turn changes).
+   * Toggling a button does not change this stamp.
+   */
+  private syncBoostIntents(state: GameState | null): void {
+    const me = state ? this.myPlayer(state) : undefined;
+    const stamp = [
+      state?.phase,
+      state?.round,
+      state?.currentTurnIndex,
+      me?.position.x,
+      me?.position.y,
+      me?.velocity.x,
+      me?.velocity.y,
+      me?.lap,
+    ].join(':');
+    if (stamp === this.boostStamp) return;
+    this.boostStamp = stamp;
+    this.drsIntent = false;
+    this.ersIntent = false;
+  }
+
+  private rebuildPad(state: GameState | null): void {
+    this.padOptions = this.buildPadOptions(state);
+  }
+
+  drsButtonEnabled(state: GameState, me: Player): boolean {
+    return (
+      this.game.isMyTurn() && !!me.drsArmed && !me.drsActive && !isGearLimited(me, state.round)
+    );
+  }
+
+  ersButtonEnabled(state: GameState, me: Player): boolean {
+    return this.game.isMyTurn() && (me.ersCharge ?? 0) >= 1 && !isGearLimited(me, state.round);
+  }
+
+  toggleDrs(state: GameState, me: Player): void {
+    if (!this.drsButtonEnabled(state, me)) return;
+    this.drsIntent = !this.drsIntent;
+    this.rebuildPad(state);
+  }
+
+  toggleErs(state: GameState, me: Player): void {
+    if (!this.ersButtonEnabled(state, me) && !this.ersIntent) return;
+    this.ersIntent = !this.ersIntent;
+    this.rebuildPad(state);
+  }
+
+  /** 0, 0.25, 0.5, 0.75 or 1 for pip `index` (0 = first bar). */
+  ersPipFill(me: Player, index: number): number {
+    const charge = me.ersCharge ?? 0;
+    const full = Math.floor(charge);
+    if (index < full) return 1;
+    if (index > full) return 0;
+    return charge - full;
   }
 
   pad(option: PadOption): void {
@@ -253,7 +361,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       }
     }
 
-    this.game.submitMove(option.velocity);
+    const request = me && state ? this.boostRequest(state, me) : undefined;
+    this.game.submitMove(option.velocity, request);
   }
 
   ngOnDestroy(): void {
@@ -320,7 +429,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         const s = this.game.state;
         const id = this.room.room?.connectionId;
         const p = s?.players.find((pl) => pl.connectionId === id);
-        this.padOptions = this.buildPadOptions(s);
+        this.rebuildPad(s);
         this.updatePenaltyCountdown(s);
         if (!p || remainingStopMs(p) <= 0) {
           this.clearStopPenaltyTimer();
