@@ -65,6 +65,7 @@
   "game.grassPenaltyTurns": "Atalho na grama — marcha máx. 1 na penalidade",
   "game.grassPenaltyTimed": "Atalho na grama — parado por {{sec}}s",
   "game.penaltyTitle": "Atalho na grama!",
+  "game.penaltyFlag": "Punição para {{name}}",
   "game.penaltyBody": "Penalidade — você não pode mover até a contagem chegar a zero.",
   "game.map.zoomIn": "Aumentar zoom",
   "game.map.zoomOut": "Diminuir zoom",
