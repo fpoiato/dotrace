@@ -109,10 +109,11 @@ function buildGaugeSegments(): string[] {
             type="button"
             (click)="focusLeader()"
             [attr.aria-label]="'game.map.leader' | translate"
-            class="h-10 rounded-lg px-2 text-xs font-bold text-white active:bg-slate-700"
             [attr.aria-pressed]="followingLeader"
-            [class.bg-orange-500]="followingLeader"
-            [class.bg-slate-900/80]="!followingLeader"
+            [class]="
+              'h-10 rounded-lg px-2 text-xs font-bold text-white active:bg-slate-700 ' +
+              (followingLeader ? 'bg-orange-500' : 'bg-slate-900/80')
+            "
           >
             {{ 'game.map.leader' | translate }}
           </button>
