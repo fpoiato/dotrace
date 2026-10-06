@@ -16,6 +16,7 @@ import {
   canPlayerMove,
   formatRaceTime,
   getTileAt,
+  ersForwardDeltas,
   getValidMoves,
   isGearLimited,
   isGrassShortcut,
@@ -72,6 +73,17 @@ const PAD_GLYPHS: Record<string, string> = {
   '1,1': '↘',
 };
 
+/** Arrow for one ERS step. Axis-aligned headings keep the steer visible; diagonals use the dominant axis. */
+function ersGlyph(velocity: Vector2D, delta: Vector2D): string {
+  const sx = Math.sign(delta.x);
+  const sy = Math.sign(delta.y);
+  if (Math.abs(velocity.x) === Math.abs(velocity.y)) {
+    if (Math.abs(delta.x) > Math.abs(delta.y)) return PAD_GLYPHS[`${sx},0`];
+    if (Math.abs(delta.y) > Math.abs(delta.x)) return PAD_GLYPHS[`0,${sy}`];
+  }
+  return PAD_GLYPHS[`${sx},${sy}`];
+}
+
 @Component({
   selector: 'app-game-room',
   standalone: true,
@@ -126,8 +138,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   showCelebration = false;
   showReplay = false;
   padOptions: PadOption[] = [];
-  /** Delta-2 landings the 3×3 pad cannot show. Only while ERS is selected. */
-  extendedOptions: PadOption[] = [];
+  /** ERS is held: the pad is the forward line only. */
+  ersPad = false;
   /** Next SUBMIT_MOVE asks the host to open DRS. Does not spend the turn. */
   drsIntent = false;
   /** Next SUBMIT_MOVE spends one ERS bar. */
@@ -194,6 +206,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
    * The 3×3 "gear shift" pad: each button adjusts velocity by ±1 on each
    * axis (center = coast). Buttons are enabled only for moves the host
    * would accept, and flagged when the landing square is gravel.
+   * With ERS held, the pad collapses to the three forward steps on one row.
    */
   private buildPadOptions(state: GameState | null): PadOption[] {
     const options: PadOption[] = [];
@@ -202,6 +215,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const me = state?.players.find((p) => p.connectionId === myId);
     const canMove =
       !!state && !!myId && canPlayerMove(state, myId) && me?.finishOrder === undefined;
+    const ersOn = !!(state && me && this.boostRequest(state, me).ers);
+    this.ersPad = ersOn;
 
     const valid =
       canMove && me && track
@@ -213,6 +228,21 @@ export class GameRoomComponent implements OnInit, OnDestroy {
             ...this.moveCaps(state, me)
           )
         : [];
+
+    if (ersOn && me) {
+      return ersForwardDeltas(me.velocity).map((delta) => {
+        const next = { x: me.velocity.x + delta.x, y: me.velocity.y + delta.y };
+        const match = valid.find((m) => m.velocity.x === next.x && m.velocity.y === next.y);
+        const landing = match && track ? landingPosition(me.position, match.velocity) : null;
+        return {
+          key: `${delta.x},${delta.y}`,
+          glyph: ersGlyph(me.velocity, delta),
+          enabled: !!match,
+          velocity: match ? match.velocity : null,
+          grass: !!(match && track && landing && moveWarnsOffAsphalt(track, me.position, landing)),
+        };
+      });
+    }
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -245,24 +275,6 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         velocity: stop.velocity,
         grass: moveWarnsOffAsphalt(track, me.position, landing),
       };
-    }
-
-    this.extendedOptions = [];
-    if (me && track) {
-      for (const move of valid) {
-        const dx = move.velocity.x - me.velocity.x;
-        const dy = move.velocity.y - me.velocity.y;
-        if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) continue;
-        const landing = landingPosition(me.position, move.velocity);
-        this.extendedOptions.push({
-          key: `${dx},${dy}`,
-          glyph: `${dx > 0 ? '+' : ''}${dx},${dy > 0 ? '+' : ''}${dy}`,
-          enabled: true,
-          velocity: move.velocity,
-          grass: moveWarnsOffAsphalt(track, me.position, landing),
-        });
-      }
-      this.extendedOptions.sort((a, b) => a.key.localeCompare(b.key));
     }
 
     return options;
