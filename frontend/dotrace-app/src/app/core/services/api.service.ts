@@ -98,4 +98,29 @@ export class ApiService {
       this.http.get<WsEnvelope<T>>(`${this.baseUrl}/top10`).pipe(timeout(10_000))
     );
   }
+
+  /** Store a compact replay. Returns the id used in `/replay/:id`. */
+  async saveReplay(payload: unknown): Promise<string> {
+    if (!this.baseUrl) {
+      throw new Error('HTTP API URL not configured');
+    }
+    const response = await firstValueFrom(
+      this.http
+        .post<{ id: string }>(`${this.baseUrl}/replays`, payload)
+        .pipe(timeout(20_000))
+    );
+    if (!response?.id) throw new Error('Replay id missing');
+    return response.id;
+  }
+
+  async getReplay<T = unknown>(id: string): Promise<T> {
+    if (!this.baseUrl) {
+      throw new Error('HTTP API URL not configured');
+    }
+    return firstValueFrom(
+      this.http
+        .get<T>(`${this.baseUrl}/replays/${encodeURIComponent(id)}`)
+        .pipe(timeout(15_000))
+    );
+  }
 }

@@ -45,6 +45,7 @@ import {
   remapReplayLogConnectionId,
   adoptNicknameConnection,
   remapPlayerConnection,
+  retargetLocalPlayer,
   createInitialState,
   buildRaceStatDeltas,
 } from '../../../shared/ws-types';
@@ -909,6 +910,38 @@ describe('lap splits and session ranking', () => {
     ];
     remapSessionStatsConnectionId(state, 'old', 'new');
     expect(state.sessionStats![0].connectionId).toBe('new');
+  });
+
+  it('keeps the host able to move after their own socket id changes', () => {
+    const host = racePlayer({
+      connectionId: 'old-host',
+      nickname: 'Nilton',
+      finishOrder: undefined,
+      isHost: true,
+    });
+    const bot = racePlayer({
+      connectionId: 'ai#ROOM#bot',
+      nickname: 'Bot Alfa · Pro',
+      color: '#38BDF8',
+      joinOrder: 1,
+      isHost: false,
+      finishOrder: undefined,
+    });
+    const state = createInitialState([host, bot], 'old-host');
+    state.phase = 'GAME_ROUND';
+    state.turnOrder = ['ai#ROOM#bot', 'old-host'];
+    state.currentTurnIndex = 1;
+
+    expect(canPlayerMove(state, 'old-host')).toBe(true);
+    expect(retargetLocalPlayer(state, 'old-host', 'new-host', 'Nilton')).toBe(true);
+    expect(state.turnOrder).toEqual(['ai#ROOM#bot', 'new-host']);
+    expect(state.hostId).toBe('new-host');
+    expect(state.players.find((p) => p.nickname === 'Nilton')?.isHost).toBe(true);
+    expect(canPlayerMove(state, 'new-host')).toBe(true);
+    expect(canPlayerMove(state, 'old-host')).toBe(false);
+    // Same socket again is a no-op, including when the previous id was missed.
+    expect(retargetLocalPlayer(state, 'new-host', 'new-host', 'Nilton')).toBe(false);
+    expect(retargetLocalPlayer(state, null, 'new-host', 'Nilton')).toBe(false);
   });
 
   it('retargets a car to the new socket when an AI Lambda rotates', () => {
