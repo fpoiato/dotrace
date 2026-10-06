@@ -1517,24 +1517,32 @@ describe('DRS and ERS', () => {
     expect(player.ersCharge).toBe(0.25);
   });
 
-  it('places one DRS zone on each circuit, off the stripe and off the lap checkpoint', () => {
+  it('places DRS zones on asphalt, off the stripe and off the lap checkpoint', () => {
+    const several = new Set(['monza', 'monaco', 'interlagos']);
     for (const track of TRACKS) {
-      expect(track.drsZones).toHaveLength(1);
-      const zone = track.drsZones![0];
+      const zones = track.drsZones ?? [];
+      expect(zones.length).toBeGreaterThanOrEqual(1);
+      if (several.has(track.id)) expect(zones).toHaveLength(2);
       expect(track.checkpoint).toBeDefined();
-      expect(rectsOverlap(zone, track.checkpoint!)).toBe(false);
-
-      let coversFinish = false;
-      let coversAsphalt = false;
-      for (let y = zone.y0; y <= zone.y1; y++) {
-        for (let x = zone.x0; x <= zone.x1; x++) {
-          const tile = track.grid[y]?.[x];
-          if (tile === 'finish') coversFinish = true;
-          if (tile === 'track' || tile === 'finish') coversAsphalt = true;
+      for (let i = 0; i < zones.length; i++) {
+        const zone = zones[i];
+        expect(rectsOverlap(zone, track.checkpoint!)).toBe(false);
+        for (let j = i + 1; j < zones.length; j++) {
+          expect(rectsOverlap(zone, zones[j])).toBe(false);
         }
+
+        let coversFinish = false;
+        let coversAsphalt = false;
+        for (let y = zone.y0; y <= zone.y1; y++) {
+          for (let x = zone.x0; x <= zone.x1; x++) {
+            const tile = track.grid[y]?.[x];
+            if (tile === 'finish') coversFinish = true;
+            if (tile === 'track' || tile === 'finish') coversAsphalt = true;
+          }
+        }
+        expect(coversFinish).toBe(false);
+        expect(coversAsphalt).toBe(true);
       }
-      expect(coversFinish).toBe(false);
-      expect(coversAsphalt).toBe(true);
     }
   });
 });

@@ -274,9 +274,11 @@ const MONZA: CircuitSpec = {
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
-  // Main straight, from the cell after the stripe to the Parabolica entry.
-  // Race is left. Stays off the grid and off the finish line.
-  drsZones: [{ x0: 127, y0: 108, x1: 196, y1: 128 }],
+  // Two straights. Race is left. Off the grid, the stripe, and the Lesmo checkpoint.
+  drsZones: [
+    { x0: 127, y0: 108, x1: 196, y1: 128 },
+    { x0: 70, y0: 26, x1: 118, y1: 78 },
+  ],
 };
 
 /**
@@ -383,7 +385,11 @@ const MONACO: CircuitSpec = {
     { at: { x: 33, y: 83 }, dir: { x: 1, y: 0 } },
   ],
   checkpoint: { x0: 136, y0: 15, x1: 153, y1: 31 },
-  drsZones: [{ x0: 90, y0: 18, x1: 126, y1: 58 }],
+  // Climb to the hairpin, then the pit straight east of the stripe.
+  drsZones: [
+    { x0: 90, y0: 18, x1: 126, y1: 58 },
+    { x0: 42, y0: 78, x1: 88, y1: 88 },
+  ],
 };
 
 /**
@@ -495,8 +501,11 @@ const INTERLAGOS: CircuitSpec = {
     { at: { x: 63, y: 27 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 72, y0: 127, x1: 88, y1: 144 },
-  // Whole climb on the right, above the lap checkpoint and short of the kink.
-  drsZones: [{ x0: 78, y0: 58, x1: 110, y1: 126 }],
+  // Right climb (above the checkpoint) and the left descent. Off the stripe.
+  drsZones: [
+    { x0: 78, y0: 58, x1: 110, y1: 126 },
+    { x0: 14, y0: 46, x1: 27, y1: 110 },
+  ],
 };
 
 /**

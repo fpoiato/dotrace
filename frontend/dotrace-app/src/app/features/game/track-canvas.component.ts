@@ -701,21 +701,26 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
-  /** Translucent DRS detection band so the pilot can see where the button arms. */
+  /**
+   * DRS asphalt only: a blue tint on track cells inside the zone.
+   * Grass and the rectangle outline stay unmarked.
+   */
   private drawDrsZones(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
     const zones = track.drsZones ?? [];
     if (zones.length === 0) return;
     ctx.save();
-    ctx.fillStyle = 'rgba(34, 211, 238, 0.28)';
-    ctx.strokeStyle = 'rgba(8, 145, 178, 0.9)';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(37, 99, 235, 0.45)';
     for (const zone of zones) {
-      const x = zone.x0 * CELL;
-      const y = zone.y0 * CELL;
-      const w = (zone.x1 - zone.x0 + 1) * CELL;
-      const h = (zone.y1 - zone.y0 + 1) * CELL;
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      const y1 = Math.min(zone.y1, track.height - 1);
+      const x1 = Math.min(zone.x1, track.width - 1);
+      for (let y = Math.max(0, zone.y0); y <= y1; y++) {
+        const row = track.grid[y];
+        if (!row) continue;
+        for (let x = Math.max(0, zone.x0); x <= x1; x++) {
+          if (row[x] !== 'track') continue;
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+      }
     }
     ctx.restore();
   }
