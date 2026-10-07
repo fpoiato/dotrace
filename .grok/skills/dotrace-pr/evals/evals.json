@@ -1,0 +1,32 @@
+{
+  "skill": "dotrace-pr",
+  "test_cases": [
+    {
+      "name": "replay_flag_fix",
+      "input": "No replay, a bandeira de penalidade nao aparece.",
+      "assertions": [
+        "Creates a new branch from main",
+        "Makes the replay change on that branch",
+        "Bumps environment.prod.ts and environment.ts patch version",
+        "Commits, pushes, and opens a PR into main"
+      ]
+    },
+    {
+      "name": "small_copy_change",
+      "input": "Troca o texto do botao de replay para Assistir de novo.",
+      "assertions": [
+        "Does not commit on main",
+        "Bumps the app patch version",
+        "Pushes the branch and returns the PR URL"
+      ]
+    },
+    {
+      "name": "explicit_no_pr",
+      "input": "Ajusta o comentario no replay, mas nao abre PR.",
+      "assertions": [
+        "Edits the file",
+        "Does not push or open a PR because the user opted out"
+      ]
+    }
+  ]
+}

@@ -48,6 +48,23 @@ assert(ai.nickname === 'Bot Alfa', `expected Bot Alfa, got ${ai.nickname}`);
 assert(ai.position.x === 17 && ai.position.y === 10, 'AI final position wrong');
 assert(ai.trail.length >= 2, 'AI trail should have multiple points');
 
+const penalized: MoveRecord[] = [
+  { seq: 0, round: 0, connectionId: 'human-1', position: { x: 10, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1, grassCuts: 0 },
+  { seq: 1, round: 1, connectionId: 'human-1', position: { x: 11, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1, grassCuts: 1, gearPenaltyUntilRound: 4 },
+  { seq: 2, round: 2, connectionId: 'human-1', position: { x: 12, y: 10 }, velocity: { x: 1, y: 0 }, isOffTrack: false, lap: 1, grassCuts: 1, gearPenaltyUntilRound: 4 },
+];
+const penaltyFrames = buildReplayFrames(penalized, [human], []);
+assert(penaltyFrames[1]?.players[0]?.grassCuts === 1, 'replay frame should keep the grass cut');
+assert(penaltyFrames[1]?.players[0]?.gearPenaltyUntilRound === 4, 'replay frame should keep the gear penalty');
+assert(penaltyFrames[2]?.players[0]?.gearPenaltyUntilRound === 4, 'penalty should stay on later frames');
+
+const legacyOff: MoveRecord[] = [
+  { seq: 0, round: 0, connectionId: 'human-1', position: { x: 10, y: 10 }, velocity: { x: 0, y: 0 }, isOffTrack: false, lap: 1 },
+  { seq: 1, round: 1, connectionId: 'human-1', position: { x: 11, y: 12 }, velocity: { x: 0, y: 0 }, isOffTrack: true, lap: 1 },
+];
+const legacyFrames = buildReplayFrames(legacyOff, [human], []);
+assert(legacyFrames[1]?.players[0]?.grassCuts === 1, 'old off-track log should still raise a cut');
+
 console.log('replay orphan recovery: ok');
 
 // Handoff without remapping would leave early moves on ai-old and late moves on

@@ -294,6 +294,7 @@ export class GameEngineService implements OnDestroy {
         velocity: { ...player.velocity },
         isOffTrack: player.isOffTrack,
         lap: player.lap,
+        grassCuts: player.grassCuts ?? 0,
       });
     }
   }
@@ -411,6 +412,9 @@ export class GameEngineService implements OnDestroy {
       lap: player.lap,
       drsActive: !!player.drsActive,
       ersActive: !!player.ersActive,
+      grassCuts: player.grassCuts ?? 0,
+      gearPenaltyUntilRound: player.gearPenaltyUntilRound,
+      stopUntil: player.stopUntil,
     });
 
     if (this.tryEndRace(state)) return true;

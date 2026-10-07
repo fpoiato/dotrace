@@ -150,6 +150,12 @@ export interface MoveRecord {
   drsActive?: boolean;
   /** This move spent an ERS bar. */
   ersActive?: boolean;
+  /** Grass shortcuts taken by this car after this move. */
+  grassCuts?: number;
+  /** TURNS mode: max gear 1 until this round (inclusive). */
+  gearPenaltyUntilRound?: number;
+  /** TIMED mode: epoch ms before the player may move again. */
+  stopUntil?: number;
 }
 
 /** Maximum number of move records stored in the replay log. */

@@ -12,6 +12,7 @@ import { GameState, Player } from '../../core/models/ws-types';
 import { ReplayShareService } from '../../core/services/replay-share.service';
 import { TrackCanvasComponent } from './track-canvas.component';
 import { ReplayFrame, buildReplayFrames } from './replay-frames';
+import { newPenaltyFlags } from './penalty-flag';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Speed = (typeof SPEEDS)[number];
@@ -20,6 +21,14 @@ type Speed = (typeof SPEEDS)[number];
   selector: 'app-replay-viewer',
   standalone: true,
   imports: [TrackCanvasComponent, TranslateModule],
+  styles: [
+    `
+      .penalty-flag {
+        background: linear-gradient(135deg, #0a0a0a 50%, #f8fafc 50%);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+      }
+    `,
+  ],
   template: `
     <div class="mt-4 rounded-2xl bg-slate-800 p-4" [class.mt-0]="standalone">
       <div class="mb-3 flex items-center justify-between gap-2">
@@ -50,7 +59,30 @@ type Speed = (typeof SPEEDS)[number];
       @if (frames.length === 0) {
         <p class="text-center text-sm text-slate-400">{{ 'game.replayNoData' | translate }}</p>
       } @else {
-        <app-track-canvas [state]="replayState" [followLeader]="true" />
+        <div class="relative">
+          <app-track-canvas [state]="replayState" [followLeader]="true" />
+          @if (penaltyFlags.length > 0) {
+            <div
+              class="pointer-events-none absolute right-2 top-2 z-30 flex w-max max-w-[16rem] flex-col items-end gap-1.5"
+              aria-live="polite"
+            >
+              @for (flag of penaltyFlags; track flag.connectionId) {
+                <div
+                  class="flex items-center gap-2 rounded-md border border-white/25 bg-slate-950/95 px-2 py-1.5 shadow-lg"
+                  role="status"
+                  [attr.aria-label]="'game.penaltyFlag' | translate: { name: flag.nickname }"
+                >
+                  <span class="penalty-flag inline-block h-5 w-8 shrink-0 rounded-sm" aria-hidden="true"></span>
+                  <span
+                    class="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-white/50"
+                    [style.background]="flag.color"
+                  ></span>
+                  <span class="truncate text-sm font-semibold text-white">{{ flag.nickname }}</span>
+                </div>
+              }
+            </div>
+          }
+        </div>
 
         <!-- Progress info -->
         <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
@@ -182,6 +214,41 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
     const frame = this.currentFrame;
     if (!frame?.movedId) return '';
     return frame.players.find((p) => p.connectionId === frame.movedId)?.color ?? '';
+  }
+
+  /**
+   * Pilots under a grass penalty on this frame: the cut just happened, or the
+   * gear-1 window is still open. Scrubbing stays on the flag instead of a toast.
+   */
+  get penaltyFlags(): { connectionId: string; nickname: string; color: string }[] {
+    const frame = this.currentFrame;
+    if (!frame) return [];
+    const previous = this.frames[this.currentIndex - 1];
+    const baseline = previous
+      ? new Map(
+          previous.players.map((player) => [
+            player.connectionId,
+            {
+              cuts: player.grassCuts ?? 0,
+              gearUntil: player.gearPenaltyUntilRound ?? 0,
+              stopUntil: player.stopUntil ?? 0,
+            },
+          ])
+        )
+      : null;
+    const { notices } = newPenaltyFlags(baseline, frame.players);
+    const noticed = new Set(notices.map((notice) => notice.connectionId));
+    return frame.players
+      .filter(
+        (player) =>
+          noticed.has(player.connectionId) ||
+          ((player.gearPenaltyUntilRound ?? 0) >= frame.round && frame.round > 0)
+      )
+      .map((player) => ({
+        connectionId: player.connectionId,
+        nickname: player.nickname,
+        color: player.color,
+      }));
   }
 
   ngOnInit(): void {
