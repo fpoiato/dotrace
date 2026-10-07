@@ -1163,7 +1163,7 @@ describe('lap splits and session ranking', () => {
 
 describe('global leaderboard rank keys', () => {
   it('normalizes nicknames case-insensitively', () => {
-    expect(nicknameKey('  Ana ')).toBe('ana');
+    expect(nicknameKey('  Ana ')).toBe('s2#ana');
   });
 
   it('orders higher wins before lower wins (ascending rankKey)', () => {
