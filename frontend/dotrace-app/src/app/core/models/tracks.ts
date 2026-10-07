@@ -207,12 +207,94 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     width,
     height,
     grid,
-    startLine: spec.startLine,
+    startLine: placeGridBeforeFinish(grid, spec),
     arrows: spec.arrows,
     centerline: spec.centerline.map((p) => ({ ...p })),
     checkpoint: spec.checkpoint,
     drsZones: spec.drsZones?.map((z) => ({ ...z })),
   };
+}
+
+/**
+ * Twelve staggered slots on the asphalt before the stripe, marching upstream
+ * so the lights drop behind the start/finish line.
+ */
+function placeGridBeforeFinish(grid: TileType[][], spec: CircuitSpec): Vector2D[] {
+  const dir = spec.arrows[0]?.dir ?? { x: 1, y: 0 };
+  const len = Math.hypot(dir.x, dir.y) || 1;
+  const dx = dir.x / len;
+  const dy = dir.y / len;
+  const px = -dy;
+  const py = dx;
+  const cx = (spec.finish.x0 + spec.finish.x1) / 2;
+  const cy = (spec.finish.y0 + spec.finish.y1) / 2;
+  const line = spec.centerline;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < line.length; i++) {
+    const d = Math.hypot(line[i].x - cx, line[i].y - cy);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  const n = line.length;
+  const at = (i: number, delta: number) => line[(i + delta + n * 2) % n];
+  const upstream = (i: number) => {
+    const a = line[i];
+    const forward = at(i, 1);
+    const back = at(i, -1);
+    const f = (forward.x - a.x) * dx + (forward.y - a.y) * dy;
+    const b = (back.x - a.x) * dx + (back.y - a.y) * dy;
+    return f < b ? 1 : -1;
+  };
+  let step = upstream(best);
+  let i = best;
+  let gap = 0;
+  while (gap < 5) {
+    const a = line[i];
+    const b = at(i, step);
+    gap += Math.hypot(b.x - a.x, b.y - a.y);
+    i = (i + step + n) % n;
+  }
+  const used = new Set<string>();
+  const slots: Vector2D[] = [];
+  const snap = (x: number, y: number): Vector2D | null => {
+    for (let r = 0; r <= 5; r++) {
+      for (let oy = -r; oy <= r; oy++) {
+        for (let ox = -r; ox <= r; ox++) {
+          if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+          const nx = Math.round(x + ox);
+          const ny = Math.round(y + oy);
+          if (grid[ny]?.[nx] !== 'track') continue;
+          const key = `${nx},${ny}`;
+          if (used.has(key)) continue;
+          used.add(key);
+          return { x: nx, y: ny };
+        }
+      }
+    }
+    return null;
+  };
+  for (let row = 0; row < 6 && slots.length < 12; row++) {
+    const a = line[i];
+    const b = at(i, step);
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const left = snap(mx + px * 1.7, my + py * 1.7);
+    const right = snap(mx - px * 1.7, my - py * 1.7);
+    if (left) slots.push(left);
+    if (right) slots.push(right);
+    let walked = 0;
+    while (walked < 3.2) {
+      const c = line[i];
+      const d = at(i, step);
+      walked += Math.hypot(d.x - c.x, d.y - c.y);
+      i = (i + step + n) % n;
+    }
+  }
+  const behind = slots.filter((p) => (p.x - cx) * dx + (p.y - cy) * dy < -1);
+  return behind.length > 0 ? behind : spec.startLine;
 }
 
 /**
@@ -271,7 +353,8 @@ const MONZA: CircuitSpec = {
     { x: 168, y: 118 },
   ],
   finish: { x0: 124, x1: 126, y0: 112, y1: 125 },
-  startLine: gridSlots(120, -3, [116, 119]),
+  // Race goes left. Grid sits upstream of the stripe and marches away from it.
+  startLine: gridSlots(130, 3, [116, 119]),
   arrows: [
     { at: { x: 125, y: 110 }, dir: { x: -1, y: 0 } },
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
@@ -369,20 +452,8 @@ const MONACO: CircuitSpec = {
     { x: 35, y: 92 },
   ],
   finish: { x0: 32, x1: 38, y0: 84, y1: 100 },
-  startLine: [
-    { x: 42, y: 88 },
-    { x: 43, y: 92 },
-    { x: 46, y: 87 },
-    { x: 47, y: 91 },
-    { x: 50, y: 86 },
-    { x: 51, y: 90 },
-    { x: 54, y: 85 },
-    { x: 55, y: 89 },
-    { x: 58, y: 84 },
-    { x: 59, y: 88 },
-    { x: 62, y: 83 },
-    { x: 62, y: 87 },
-  ],
+  // Race goes east. Grid sits upstream of the stripe.
+  startLine: gridSlots(28, -3, [90, 94]),
   arrows: [
     { at: { x: 37, y: 101 }, dir: { x: 1, y: 0 } },
     { at: { x: 33, y: 83 }, dir: { x: 1, y: 0 } },
@@ -485,20 +556,8 @@ const INTERLAGOS: CircuitSpec = {
     { x: 63, y: 18 },
   ],
   finish: { x0: 62, x1: 64, y0: 10, y1: 26 },
-  startLine: [
-    { x: 56, y: 20 },
-    { x: 54, y: 16 },
-    { x: 52, y: 21 },
-    { x: 51, y: 17 },
-    { x: 48, y: 23 },
-    { x: 47, y: 18 },
-    { x: 44, y: 24 },
-    { x: 43, y: 19 },
-    { x: 41, y: 25 },
-    { x: 39, y: 22 },
-    { x: 38, y: 27 },
-    { x: 35, y: 24 },
-  ],
+  // Race goes west. Grid sits upstream of the stripe.
+  startLine: gridSlots(68, 2, [18, 22]),
   arrows: [
     { at: { x: 63, y: 9 }, dir: { x: -1, y: 0 } },
     { at: { x: 63, y: 27 }, dir: { x: -1, y: 0 } },
@@ -598,20 +657,8 @@ const SILVERSTONE: CircuitSpec = {
     { x: 61, y: 22 },
   ],
   finish: { x0: 59, x1: 63, y0: 14, y1: 30 },
-  startLine: [
-    { x: 69, y: 19 },
-    { x: 69, y: 23 },
-    { x: 73, y: 18 },
-    { x: 73, y: 22 },
-    { x: 77, y: 18 },
-    { x: 77, y: 22 },
-    { x: 80, y: 17 },
-    { x: 81, y: 21 },
-    { x: 85, y: 17 },
-    { x: 85, y: 21 },
-    { x: 89, y: 17 },
-    { x: 89, y: 21 },
-  ],
+  // Race goes east. Grid sits upstream of the stripe.
+  startLine: gridSlots(55, -3, [22, 26]),
   arrows: [
     { at: { x: 62, y: 31 }, dir: { x: 1, y: 0 } },
     { at: { x: 60, y: 13 }, dir: { x: 1, y: 0 } },
@@ -709,20 +756,8 @@ const SPA: CircuitSpec = {
     { x: 60, y: 140 },
   ],
   finish: { x0: 52, x1: 68, y0: 135, y1: 145 },
-  startLine: [
-    { x: 56, y: 148 },
-    { x: 55, y: 144 },
-    { x: 53, y: 150 },
-    { x: 51, y: 146 },
-    { x: 48, y: 150 },
-    { x: 48, y: 146 },
-    { x: 44, y: 150 },
-    { x: 44, y: 146 },
-    { x: 42, y: 152 },
-    { x: 40, y: 149 },
-    { x: 40, y: 155 },
-    { x: 36, y: 152 },
-  ],
+  // Race goes south. Grid sits upstream of the stripe.
+  startLine: gridSlotsVertical([54, 58], 131, -2),
   arrows: [
     { at: { x: 52, y: 136 }, dir: { x: 0, y: 1 } },
     { at: { x: 68, y: 144 }, dir: { x: 0, y: 1 } },
@@ -817,20 +852,8 @@ const SUZUKA: CircuitSpec = {
     { x: 161, y: 87 },
   ],
   finish: { x0: 154, x1: 168, y0: 81, y1: 93 },
-  startLine: [
-    { x: 168, y: 92 },
-    { x: 164, y: 95 },
-    { x: 170, y: 95 },
-    { x: 167, y: 98 },
-    { x: 173, y: 98 },
-    { x: 169, y: 101 },
-    { x: 175, y: 101 },
-    { x: 172, y: 104 },
-    { x: 178, y: 104 },
-    { x: 174, y: 107 },
-    { x: 180, y: 107 },
-    { x: 177, y: 110 },
-  ],
+  // Race goes south. Grid sits upstream of the stripe.
+  startLine: gridSlotsVertical([158, 162], 76, -2),
   arrows: [
     { at: { x: 154, y: 93 }, dir: { x: 0, y: 1 } },
     { at: { x: 168, y: 81 }, dir: { x: 0, y: 1 } },
