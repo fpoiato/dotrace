@@ -504,34 +504,33 @@ describe('race telemetry', () => {
 describe('grass shortcut penalties', () => {
   it('detects cutting through grass without landing on it', () => {
     const track = makeTrack();
-    // Column 4 is the zebra square; column 5 is past half a square, and the
-    // whole column is grass so a diagonal neighbor cannot pull it back in.
+    // Column 4 is the zebra square. Its center is half a square out, past the
+    // quarter-square allowance, so sitting on it is a cut. Column 5 is further.
     for (let y = 0; y < track.height; y++) track.grid[y][4] = 'grass';
     expect(isKerbGrass(track, 4, 1)).toBe(true);
     expect(isKerbGrass(track, 5, 1)).toBe(false);
     expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 3, y: 1 })).toBe(false);
-    expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 4, y: 1 })).toBe(false);
-    expect(isGrassShortcut(track, { x: 3, y: 1 }, { x: 4, y: 1 })).toBe(false);
+    expect(isGrassShortcut(track, { x: 3, y: 1 }, { x: 4, y: 1 })).toBe(true);
     expect(segmentCrossesGrass(track, { x: 3, y: 1 }, { x: 5, y: 1 })).toBe(true);
     expect(isGrassShortcut(track, { x: 3, y: 1 }, { x: 5, y: 1 })).toBe(true);
     expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 3, y: 1 })).toBe(false);
   });
 
-  it('does not penalize clipping the inner half of the zebra on Monza', () => {
+  it('penalizes the zebra square and still allows a quarter-square nick on Monza', () => {
     const monza = TRACKS.find((t) => t.id === 'monza')!;
-    // Lesmo edge: landing on the zebra square is the center of that border
-    // cell — exactly half a square out, which stays legal.
+    // Lesmo edge: the car on the zebra square sits at that cell's center,
+    // half a square off the asphalt. That is a cut. The shallow nick the
+    // other way peaks at exactly a quarter of a square and stays legal.
     expect(isKerbGrass(monza, 36, 4)).toBe(true);
-    expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 36, y: 4 })).toBe(false);
+    expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 36, y: 4 })).toBe(true);
     expect(isGrassShortcut(monza, { x: 36, y: 5 }, { x: 33, y: 6 })).toBe(false);
     expect(segmentCrossesGrass(monza, { x: 36, y: 5 }, { x: 33, y: 6 })).toBe(false);
-    // The reverse corner chord crosses the outer half of that same zebra.
     expect(isGrassShortcut(monza, { x: 33, y: 6 }, { x: 36, y: 4 })).toBe(true);
   });
 
-  it('penalizes a chord that leaves more than half a zebra square', () => {
-    // Inside of a corner. Landing on the border-cell center is exactly half
-    // a square and stays legal. A straight cut past that midline is not.
+  it('penalizes a chord that leaves more than a quarter of a zebra square', () => {
+    // Inside of a corner. The border-cell center is a cut. A straight cut
+    // across the infield is a cut. Sliding along the asphalt is not.
     const grid = [
       ['track', 'track', 'track', 'track'],
       ['track', 'grass', 'grass', 'grass'],
@@ -552,13 +551,13 @@ describe('grass shortcut penalties', () => {
       ],
     };
 
-    expect(isGrassShortcut(track, { x: 1, y: 0 }, { x: 1, y: 1 })).toBe(false);
+    expect(isGrassShortcut(track, { x: 1, y: 0 }, { x: 1, y: 1 })).toBe(true);
     expect(isGrassShortcut(track, { x: 3, y: 0 }, { x: 0, y: 2 })).toBe(true);
     expect(segmentCrossesGrass(track, { x: 3, y: 0 }, { x: 0, y: 2 })).toBe(true);
     expect(isGrassShortcut(track, { x: 3, y: 0 }, { x: 2, y: 0 })).toBe(false);
   });
 
-  it('penalizes the outer half of a rumble kerb the same way', () => {
+  it('penalizes sitting on a rumble kerb the same way', () => {
     const grid = [
       ['track', 'track', 'track', 'track', 'track', 'track'],
       ['track', 'track', 'track', 'track', 'track', 'track'],
@@ -580,7 +579,7 @@ describe('grass shortcut penalties', () => {
       ],
     };
 
-    expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 2, y: 2 })).toBe(false);
+    expect(isGrassShortcut(track, { x: 2, y: 1 }, { x: 2, y: 2 })).toBe(true);
     expect(isGrassShortcut(track, { x: 5, y: 1 }, { x: 1, y: 3 })).toBe(true);
   });
 
@@ -615,7 +614,7 @@ describe('grass shortcut penalties', () => {
     expect(segmentCrossesGrass(track, { x: 5, y: 1 }, { x: 4, y: 1 })).toBe(false);
   });
 
-  it('applies 3-round gear cap on first turns-mode cut, 5 on repeat', () => {
+  it('stops the car and applies a 5-round gear cap on the first cut, 8 on repeat', () => {
     const player = makePlayer();
     const state: GameState = {
       phase: 'GAME_ROUND',
@@ -631,16 +630,18 @@ describe('grass shortcut penalties', () => {
       podium: [],
     };
 
+    player.velocity = { x: 4, y: 0 };
     applyGrassPenalty(player, state, 1000);
     expect(player.grassCuts).toBe(1);
-    expect(player.gearPenaltyUntilRound).toBe(13);
-    expect(isGearLimited(player, 12)).toBe(true);
-    expect(isGearLimited(player, 13)).toBe(true);
-    expect(isGearLimited(player, 14)).toBe(false);
+    expect(player.velocity).toEqual({ x: 0, y: 0 });
+    expect(player.gearPenaltyUntilRound).toBe(15);
+    expect(isGearLimited(player, 14)).toBe(true);
+    expect(isGearLimited(player, 15)).toBe(true);
+    expect(isGearLimited(player, 16)).toBe(false);
 
     applyGrassPenalty(player, state, 2000);
     expect(player.grassCuts).toBe(2);
-    expect(player.gearPenaltyUntilRound).toBe(15);
+    expect(player.gearPenaltyUntilRound).toBe(18);
   });
 
   it('applies timed stop penalties with repeat downgear', () => {
@@ -662,7 +663,7 @@ describe('grass shortcut penalties', () => {
 
     applyGrassPenalty(player, state, now);
     expect(player.stopUntil).toBe(now + GRASS_PENALTY_TIMED_FIRST_MS);
-    expect(player.velocity).toEqual({ x: 3, y: 0 });
+    expect(player.velocity).toEqual({ x: 0, y: 0 });
     expect(isPlayerStopped(player, now + 1000)).toBe(true);
 
     applyGrassPenalty(player, state, now + 10_000);

@@ -1,5 +1,5 @@
 import { AsyncPipe } from '@angular/common';
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
@@ -37,7 +37,7 @@ import { LoadingSpinnerComponent } from '../../shared/loading-spinner.component'
 import { LeaderboardComponent } from './leaderboard.component';
 import { MiniMapComponent } from './mini-map.component';
 import { ReplayViewerComponent } from './replay-viewer.component';
-import { newPenaltyFlags } from './penalty-flag';
+import { newPenaltyFlags, PenaltyMark } from './penalty-flag';
 import { TrackCanvasComponent } from './track-canvas.component';
 
 /** Amber on the pad: a real grass cut, or a landing that leaves the asphalt. */
@@ -137,6 +137,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private readonly room = inject(RoomService);
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   readonly state$ = this.game.state$;
   readonly roomCtx$ = this.room.room$;
@@ -156,10 +157,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   penaltyCountdownSec = 0;
   /** Recent grass penalties, newest first. Shown to every client. */
   penaltyFlags: { id: number; nickname: string; color: string }[] = [];
-  private penaltyCuts: Map<string, number> | null = null;
+  private penaltyCuts: Map<string, PenaltyMark> | null = null;
   private penaltyFlagSeq = 0;
   private readonly penaltyFlagTimers = new Map<number, ReturnType<typeof setTimeout>>();
-  private static readonly PENALTY_FLAG_MS = 4200;
+  private static readonly PENALTY_FLAG_MS = 7000;
   /** Tick every 250ms while a timed stop penalty is active. */
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
   /** One-shot so reconnect/replay emissions don't restart the anthem. */
@@ -427,15 +428,22 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return Math.ceil(remainingStopMs(player) / 1000);
   }
 
-  /** Black-and-white flag when anyone's grass-cut count goes up. */
+  /**
+   * Black-and-white flag when anyone takes a grass penalty.
+   * A lobby reset clears the baseline. Leaving the round (podium) leaves the
+   * chip up until its timer, so the last cut of a race is still visible.
+   */
   private syncPenaltyFlags(state: GameState | null): void {
-    if (!state || state.phase !== 'GAME_ROUND') {
+    if (!state || state.phase === 'LOBBY') {
       this.clearPenaltyFlags();
       return;
     }
+    if (state.phase !== 'GAME_ROUND') return;
     const { baseline, notices } = newPenaltyFlags(this.penaltyCuts, state.players);
     this.penaltyCuts = baseline;
+    if (notices.length === 0) return;
     for (const notice of notices) this.pushPenaltyFlag(notice.nickname, notice.color);
+    this.cdr.markForCheck();
   }
 
   private pushPenaltyFlag(nickname: string, color: string): void {

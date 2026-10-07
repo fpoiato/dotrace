@@ -489,12 +489,12 @@ export interface BoostLimits {
 export const OFF_TRACK_GEARS = [-1, 0, 1] as const;
 
 /** TURNS mode: rounds capped at gear 1 after a grass shortcut. */
-export const GRASS_PENALTY_TURNS_FIRST = 3;
-export const GRASS_PENALTY_TURNS_REPEAT = 5;
+export const GRASS_PENALTY_TURNS_FIRST = 5;
+export const GRASS_PENALTY_TURNS_REPEAT = 8;
 
 /** TIMED mode: stop duration (ms) after a grass shortcut. */
-export const GRASS_PENALTY_TIMED_FIRST_MS = 5000;
-export const GRASS_PENALTY_TIMED_REPEAT_MS = 10000;
+export const GRASS_PENALTY_TIMED_FIRST_MS = 8000;
+export const GRASS_PENALTY_TIMED_REPEAT_MS = 15000;
 
 /**
  * True when a 3×3 step (each axis −2, 0 or +2) points only against travel.
@@ -1039,8 +1039,8 @@ export function gearOf(velocity: Vector2D): number {
 
 /**
  * Grass square that shares a side with the asphalt. The red/white zebra is
- * drawn on that edge. Stepping on this square is the kerb; the shortcut rule
- * only gives away the inner half of it.
+ * drawn on that edge. A light kiss of that square is still the kerb; the
+ * shortcut rule only gives away its inner quarter.
  */
 export function isKerbGrass(track: TrackDefinition, x: number, y: number): boolean {
   if (getTileAt(track, x, y) !== 'grass') return false;
@@ -1053,9 +1053,13 @@ export function isKerbGrass(track: TrackDefinition, x: number, y: number): boole
 
 /**
  * How far the pen may leave the asphalt before it is a shortcut, in cells.
- * Half a zebra square: the inner half of the border square is still the kerb.
+ * A quarter of a zebra square: the line may kiss the border, but the middle
+ * of that square (where a car on the kerb actually sits) is already a cut.
  */
-const ZEBRA_ALLOWANCE = 0.5;
+const ZEBRA_ALLOWANCE = 0.25;
+
+/** Cells of asphalt to search around a sample. Wider than the allowance so a point just outside still reports a real distance. */
+const CLEARANCE_REACH = 2;
 
 function isAsphaltTile(track: TrackDefinition, x: number, y: number): boolean {
   const tile = getTileAt(track, x, y);
@@ -1068,10 +1072,10 @@ function isAsphaltTile(track: TrackDefinition, x: number, y: number): boolean {
  * so a car on cell (x, y) sits at (x+0.5, y+0.5).
  */
 function asphaltClearance(track: TrackDefinition, px: number, py: number): number {
-  const i0 = Math.floor(px - ZEBRA_ALLOWANCE) - 1;
-  const i1 = Math.floor(px + ZEBRA_ALLOWANCE);
-  const j0 = Math.floor(py - ZEBRA_ALLOWANCE) - 1;
-  const j1 = Math.floor(py + ZEBRA_ALLOWANCE);
+  const i0 = Math.floor(px) - CLEARANCE_REACH;
+  const i1 = Math.floor(px) + CLEARANCE_REACH;
+  const j0 = Math.floor(py) - CLEARANCE_REACH;
+  const j1 = Math.floor(py) + CLEARANCE_REACH;
   let best = Infinity;
   for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
@@ -1085,17 +1089,17 @@ function asphaltClearance(track: TrackDefinition, px: number, py: number): numbe
   return best;
 }
 
-/** True when the point is more than half a zebra square off the asphalt. */
-function beyondHalfZebra(track: TrackDefinition, px: number, py: number): boolean {
+/** True when the point is more than a quarter of a zebra square off the asphalt. */
+function beyondZebraAllowance(track: TrackDefinition, px: number, py: number): boolean {
   return asphaltClearance(track, px, py) > ZEBRA_ALLOWANCE + 1e-9;
 }
 
 /**
- * Whether the pen line from → to runs more than half a zebra square off the
- * asphalt. Samples the segment drawn between cell centers. A car already past
- * the allowance may return without a new cut; the penalty starts when the
- * line leaves the allowance after it was inside. The starting cell itself
- * does not count.
+ * Whether the pen line from → to runs more than a quarter of a zebra square
+ * off the asphalt. Samples the segment drawn between cell centers. A car
+ * already past the allowance may return without a new cut; the penalty starts
+ * when the line leaves the allowance after it was inside. The starting cell
+ * itself does not count.
  */
 export function segmentCrossesGrass(
   track: TrackDefinition,
@@ -1108,13 +1112,13 @@ export function segmentCrossesGrass(
   const y1 = to.y + 0.5;
   const dist = Math.hypot(x1 - x0, y1 - y0);
   const steps = Math.max(1, Math.ceil(dist / 0.05));
-  let inside = !beyondHalfZebra(track, x0, y0);
+  let inside = !beyondZebraAllowance(track, x0, y0);
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     const px = x0 + (x1 - x0) * t;
     const py = y0 + (y1 - y0) * t;
     if (Math.floor(px) === from.x && Math.floor(py) === from.y) continue;
-    const outside = beyondHalfZebra(track, px, py);
+    const outside = beyondZebraAllowance(track, px, py);
     if (inside && outside) return true;
     if (!outside) inside = true;
   }
@@ -1140,9 +1144,10 @@ export function segmentTouchesKerb(
 }
 
 /**
- * Landing more than half a zebra square off the asphalt, or a pen line that
- * crosses that line. The inner half of the border square (and a return from
- * already being past it) does not count.
+ * Landing more than a quarter of a zebra square off the asphalt, or a pen
+ * line that crosses that line. The inner quarter of the border square (and a
+ * return from already being past it) does not count. The center of the kerb
+ * square does: that is where the car sits when it takes the green.
  */
 export function isGrassShortcut(
   track: TrackDefinition,
@@ -1151,7 +1156,7 @@ export function isGrassShortcut(
 ): boolean {
   const landedPast =
     (landing.x !== from.x || landing.y !== from.y) &&
-    beyondHalfZebra(track, landing.x + 0.5, landing.y + 0.5);
+    beyondZebraAllowance(track, landing.x + 0.5, landing.y + 0.5);
   return landedPast || segmentCrossesGrass(track, from, landing);
 }
 
@@ -1175,17 +1180,19 @@ export function segmentCrossesRumble(
   return false;
 }
 
-/** Apply escalating grass-shortcut penalties (host calls after a violation). */
+/**
+ * Apply escalating grass-shortcut penalties (host calls after a violation).
+ * Every cut kills the car's speed, then holds it at gear 1 (turns) or
+ * stopped (timed) long enough that the shortcut is not worth taking.
+ */
 export function applyGrassPenalty(player: Player, state: GameState, now = Date.now()): void {
   const isRepeat = (player.grassCuts ?? 0) > 0;
   player.grassCuts = (player.grassCuts ?? 0) + 1;
+  player.velocity = zeroVector();
 
   if (isTimedMode(state)) {
     const duration = isRepeat ? GRASS_PENALTY_TIMED_REPEAT_MS : GRASS_PENALTY_TIMED_FIRST_MS;
     player.stopUntil = now + duration;
-    if (isRepeat) {
-      player.velocity = zeroVector();
-    }
   } else {
     const rounds = isRepeat ? GRASS_PENALTY_TURNS_REPEAT : GRASS_PENALTY_TURNS_FIRST;
     player.gearPenaltyUntilRound = state.round + rounds;

@@ -31,7 +31,7 @@ const rejoined = newPenaltyFlags(first.baseline, [
 assert(rejoined.notices.length === 0, 'a new seat is baselined without a flag');
 
 const cut = newPenaltyFlags(rejoined.baseline, [
-  { ...fernando, grassCuts: 3 },
+  { ...fernando, grassCuts: 3, gearPenaltyUntilRound: 12 },
   { connectionId: 'c2-new', nickname: 'Laya', color: '#22C55E', grassCuts: 5 },
 ]);
 assert(cut.notices.length === 2, 'every pilot whose cuts increased is announced');
@@ -39,7 +39,7 @@ assert(cut.notices[0].nickname === 'Fernando' && cut.notices[0].color === '#EF44
 assert(cut.notices[1].nickname === 'Laya', 'announces the second pilot too');
 
 const same = newPenaltyFlags(cut.baseline, [
-  { ...fernando, grassCuts: 3 },
+  { ...fernando, grassCuts: 3, gearPenaltyUntilRound: 12 },
   { connectionId: 'c2-new', nickname: 'Laya', color: '#22C55E', grassCuts: 5 },
 ]);
 assert(same.notices.length === 0, 'a relay of the same board does not repeat the flag');
@@ -49,5 +49,17 @@ const back = newPenaltyFlags(cut.baseline, [
   { connectionId: 'c2-new', nickname: 'Laya', color: '#22C55E', grassCuts: 0 },
 ]);
 assert(back.notices.length === 0, 'a lower cut count does not raise a flag');
+
+const gearOnly = newPenaltyFlags(same.baseline, [
+  { ...fernando, grassCuts: 3, gearPenaltyUntilRound: 20 },
+  { connectionId: 'c2-new', nickname: 'Laya', color: '#22C55E', grassCuts: 5 },
+]);
+assert(gearOnly.notices.length === 1 && gearOnly.notices[0].nickname === 'Fernando', 'an extended gear penalty raises the flag');
+
+const stopOnly = newPenaltyFlags(gearOnly.baseline, [
+  { ...fernando, grassCuts: 3, gearPenaltyUntilRound: 20 },
+  { connectionId: 'c2-new', nickname: 'Laya', color: '#22C55E', grassCuts: 5, stopUntil: 50_000 },
+]);
+assert(stopOnly.notices.length === 1 && stopOnly.notices[0].nickname === 'Laya', 'an extended stop penalty raises the flag');
 
 console.log('penalty-flag tests passed');
