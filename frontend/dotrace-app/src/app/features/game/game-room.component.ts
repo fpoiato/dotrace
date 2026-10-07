@@ -21,6 +21,7 @@ import {
   isErsOppositeStep,
   isGearLimited,
   isGrassShortcut,
+  isAiPilotNickname,
   isKerbGrass,
   segmentTouchesKerb,
   landingPosition,
@@ -517,6 +518,24 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   openReplay(): void {
     this.showReplay = true;
+  }
+
+  /** Humans are done and bots are still out. Ending leaves those bots as DNF. */
+  canEndNow(state: GameState): boolean {
+    if (state.phase !== 'GAME_ROUND') return false;
+    const me = this.myPlayer(state);
+    if (!me || isAiPilotNickname(me.nickname)) return false;
+    const humansOut = state.players.some(
+      (p) => !isAiPilotNickname(p.nickname) && p.finishOrder === undefined
+    );
+    const botsOut = state.players.some(
+      (p) => isAiPilotNickname(p.nickname) && p.finishOrder === undefined
+    );
+    return !humansOut && botsOut;
+  }
+
+  endRaceNow(): void {
+    this.game.endRaceNow();
   }
 
   closeReplay(): void {

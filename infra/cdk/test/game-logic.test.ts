@@ -227,7 +227,7 @@ describe('turn order', () => {
 });
 
 describe('game over conditions', () => {
-  it('ends when the podium is full', () => {
+  it('does not end when the podium is full if someone is still racing', () => {
     const state: GameState = {
       phase: 'GAME_ROUND',
       players: [makePlayer()],
@@ -245,7 +245,7 @@ describe('game over conditions', () => {
         { connectionId: 'z', nickname: 'Z', position: 3 },
       ],
     };
-    expect(isGameOver(state)).toBe(true);
+    expect(isGameOver(state)).toBe(false);
   });
 
   it('ends when every player finished', () => {
@@ -282,7 +282,7 @@ describe('game over conditions', () => {
     expect(isGameOver(state)).toBe(false);
   });
 
-  it('ends when every human has finished and only an AI pilot is still racing', () => {
+  it('keeps going so bots can finish after every human has finished', () => {
     const state: GameState = {
       phase: 'GAME_ROUND',
       players: [
@@ -299,7 +299,7 @@ describe('game over conditions', () => {
       diceRolls: {},
       podium: [{ connectionId: 'c1', nickname: 'Ana', position: 1 }],
     };
-    expect(isGameOver(state)).toBe(true);
+    expect(isGameOver(state)).toBe(false);
   });
 
   it('keeps going while a human is still racing beside the AI', () => {
