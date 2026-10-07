@@ -23,6 +23,8 @@
   "lobby.startPractice": "Start Practice",
   "lobby.selectTrack": "Select track",
   "lobby.selectTrackPlaceholder": "Tap to choose a track",
+  "lobby.prevTrack": "Previous track",
+  "lobby.nextTrack": "Next track",
   "lobby.laps": "Laps",
   "lobby.gameMode": "Game mode",
   "lobby.mode.TURNS": "Turns",

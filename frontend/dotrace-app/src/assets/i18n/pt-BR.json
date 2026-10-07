@@ -23,6 +23,8 @@
   "lobby.startPractice": "Iniciar Treino",
   "lobby.selectTrack": "Escolher pista",
   "lobby.selectTrackPlaceholder": "Toque para escolher uma pista",
+  "lobby.prevTrack": "Pista anterior",
+  "lobby.nextTrack": "Próxima pista",
   "lobby.laps": "Voltas",
   "lobby.gameMode": "Modo de jogo",
   "lobby.mode.TURNS": "Turnos",
