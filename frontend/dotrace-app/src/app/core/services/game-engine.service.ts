@@ -28,6 +28,7 @@ import {
   nextActiveTurnIndex,
   pushReplayMove,
   pushTrail,
+  racingProgress,
   revertDrsOpen,
   settleBoostFromGears,
   spendErsIfAccepted,
@@ -74,8 +75,9 @@ export class GameEngineService implements OnDestroy {
   /** Re-broadcast the board while an old socket AI is the one who must move. */
   private turnNudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly TURN_NUDGE_MS = 5_000;
-  /** On-demand AI seats already have an HTTP call in flight. */
-  private readonly aiInFlight = new Set<string>();
+  /** Fast local moves once only bots are left, so the human is not waiting on Lambda. */
+  private rushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly AI_RUSH_MS = 70;
   private readonly aiFollowUps = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly AI_TURN_TIMEOUT_MS = 28_000;
   private static readonly AI_TIMED_GAP_MS = 400;
@@ -229,6 +231,35 @@ export class GameEngineService implements OnDestroy {
         )
         .catch((err) => console.warn('Move forward failed', err));
     }
+  }
+
+  /**
+   * Human asked to stop waiting. Remaining cars are left unfinished (DNF)
+   * and the race closes.
+   */
+  endRaceNow(): void {
+    const room = this.roomService.room;
+    if (!room) return;
+    if (this.isHost) {
+      this.forceEndRace();
+      return;
+    }
+    void this.api
+      .postAction('FORWARD_TO_HOST', { action: 'END_RACE' }, room.roomCode)
+      .catch((err) => console.warn('End race forward failed', err));
+  }
+
+  private forceEndRace(): void {
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') return;
+    if (this.rushTimer) {
+      clearTimeout(this.rushTimer);
+      this.rushTimer = null;
+    }
+    state.phase = 'GAME_OVER';
+    updateSessionStats(state);
+    this.setStateAndRelay('GAME_OVER', state);
+    this.submitGlobalRaceStats(state);
   }
 
   private finalizeGridOrder(): void {
@@ -743,6 +774,12 @@ export class GameEngineService implements OnDestroy {
         this.applyMove(senderId, vector, { drs, ers });
         break;
       }
+      case 'END_RACE': {
+        const nickname = action['senderNickname'] as string | undefined;
+        if (nickname && isAiPilotNickname(nickname)) return;
+        this.forceEndRace();
+        break;
+      }
     }
   }
 
@@ -812,6 +849,7 @@ export class GameEngineService implements OnDestroy {
     if (this.hostRecoveryTimer) clearTimeout(this.hostRecoveryTimer);
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
     if (this.turnNudgeTimer) clearTimeout(this.turnNudgeTimer);
+    if (this.rushTimer) clearTimeout(this.rushTimer);
     for (const timer of this.aiFollowUps.values()) clearTimeout(timer);
     this.aiFollowUps.clear();
   }
@@ -822,6 +860,10 @@ export class GameEngineService implements OnDestroy {
    */
   private maybeDriveAi(state: GameState): void {
     if (!this.isHost || state.phase !== 'GAME_ROUND') return;
+    if (this.shouldRushBots(state)) {
+      this.scheduleRush();
+      return;
+    }
     if (isTimedMode(state)) {
       for (const player of state.players) {
         if (!player.connectionId.startsWith('ai#')) continue;
@@ -844,6 +886,58 @@ export class GameEngineService implements OnDestroy {
     if (!seat?.startsWith('ai#')) return;
     const player = state.players.find((candidate) => candidate.connectionId === seat);
     if (player) this.requestAiMove(player);
+  }
+
+  /** Humans are done and at least one bot is still out. */
+  private shouldRushBots(state: GameState): boolean {
+    if (state.phase !== 'GAME_ROUND' || isTimedMode(state)) return false;
+    const humansOut = state.players.some(
+      (p) => !isAiPilotNickname(p.nickname) && p.finishOrder === undefined
+    );
+    const botsOut = state.players.some(
+      (p) => isAiPilotNickname(p.nickname) && p.finishOrder === undefined
+    );
+    return !humansOut && botsOut;
+  }
+
+  private scheduleRush(): void {
+    if (this.rushTimer) return;
+    this.rushTimer = setTimeout(() => {
+      this.rushTimer = null;
+      this.applyRushMove();
+    }, GameEngineService.AI_RUSH_MS);
+  }
+
+  /** Host plays the bot's turn locally, picking the move that gains the most lap. */
+  private applyRushMove(): void {
+    const state = this.state;
+    if (!state || !this.shouldRushBots(state)) return;
+    const seat = state.turnOrder[state.currentTurnIndex];
+    const player = state.players.find((p) => p.connectionId === seat);
+    if (!player || !isAiPilotNickname(player.nickname) || !canPlayerMove(state, player.connectionId)) {
+      return;
+    }
+    const track = getTrackById(state.trackId);
+    if (!track) return;
+    const moves = getValidMoves(player, track, state.players, state.round);
+    if (moves.length === 0) return;
+    let best = moves[0]!;
+    let bestScore = -Infinity;
+    for (const move of moves) {
+      let score = racingProgress(move.landing, track);
+      if (
+        player.passedCheckpoint &&
+        segmentCrossesFinish(track, player.position, move.landing)
+      ) {
+        score += 10_000;
+      }
+      if (move.velocity.x === 0 && move.velocity.y === 0) score -= 100;
+      if (score > bestScore) {
+        bestScore = score;
+        best = move;
+      }
+    }
+    this.applyMove(player.connectionId, best.velocity);
   }
 
   private requestAiMove(player: Player, attempt = 1): void {
