@@ -1,0 +1,10 @@
+{
+  "skill": "dotrace-pr",
+  "test_cases": [
+    {"input": "Corrige a bandeira de penalidade no replay do dotrace", "should_trigger": true},
+    {"input": "Faz o bump, commit, push e abre um PR para a main", "should_trigger": true},
+    {"input": "Implementa o DRS no bot e manda para a main", "should_trigger": true},
+    {"input": "Qual a capital da Franca?", "should_trigger": false},
+    {"input": "Explica o que o replay faz, sem alterar codigo", "should_trigger": false}
+  ]
+}

@@ -45,6 +45,12 @@ export interface ReplayPlayerState {
   drsActive?: boolean;
   /** This car's latest move spent an ERS bar. */
   ersActive?: boolean;
+  /** Grass shortcuts taken by this car so far. */
+  grassCuts?: number;
+  /** TURNS mode: max gear 1 until this round (inclusive). */
+  gearPenaltyUntilRound?: number;
+  /** TIMED mode: epoch ms before the player may move again. */
+  stopUntil?: number;
 }
 
 export interface ReplayFrame {
@@ -61,6 +67,37 @@ function cloneStates(map: Map<string, ReplayPlayerState>): ReplayPlayerState[] {
     velocity: { ...s.velocity },
     trail: [...s.trail],
   }));
+}
+
+/**
+ * Carry recorded grass penalties onto the frame. Logs saved before the fields
+ * existed only have isOffTrack: treat a new off-track stop as one cut so the
+ * replay still raises the flag.
+ */
+function penaltyAfterMove(
+  prev: ReplayPlayerState,
+  rec: MoveRecord
+): { grassCuts: number; gearPenaltyUntilRound?: number; stopUntil?: number } {
+  if (rec.grassCuts !== undefined) {
+    return {
+      grassCuts: rec.grassCuts,
+      gearPenaltyUntilRound: rec.gearPenaltyUntilRound,
+      stopUntil: rec.stopUntil,
+    };
+  }
+  const cuts = prev.grassCuts ?? 0;
+  if (rec.isOffTrack && !prev.isOffTrack) {
+    return {
+      grassCuts: cuts + 1,
+      gearPenaltyUntilRound: rec.round + 3,
+      stopUntil: prev.stopUntil,
+    };
+  }
+  return {
+    grassCuts: cuts,
+    gearPenaltyUntilRound: prev.gearPenaltyUntilRound,
+    stopUntil: prev.stopUntil,
+  };
 }
 
 /**
@@ -182,6 +219,9 @@ export function buildReplayFrames(
       finishRound: info.finishRound,
       drsActive: !!rec?.drsActive,
       ersActive: !!rec?.ersActive,
+      grassCuts: rec?.grassCuts ?? 0,
+      gearPenaltyUntilRound: rec?.gearPenaltyUntilRound,
+      stopUntil: rec?.stopUntil,
     });
   }
 
@@ -214,11 +254,15 @@ export function buildReplayFrames(
         diceRoll: info.diceRoll,
         drsActive: !!rec.drsActive,
         ersActive: !!rec.ersActive,
+        grassCuts: rec.grassCuts ?? 0,
+        gearPenaltyUntilRound: rec.gearPenaltyUntilRound,
+        stopUntil: rec.stopUntil,
       };
       currentState.set(rec.connectionId, ps);
     }
 
     const trail = rec.lap > ps.lap ? [{ ...rec.position }] : [...ps.trail, { ...rec.position }];
+    const penalty = penaltyAfterMove(ps, rec);
 
     const info = meta.get(rec.connectionId);
     currentState.set(rec.connectionId, {
@@ -233,6 +277,9 @@ export function buildReplayFrames(
       finishRound: info?.finishRound,
       drsActive: !!rec.drsActive,
       ersActive: !!rec.ersActive,
+      grassCuts: penalty.grassCuts,
+      gearPenaltyUntilRound: penalty.gearPenaltyUntilRound,
+      stopUntil: penalty.stopUntil,
     });
 
     frames.push({
