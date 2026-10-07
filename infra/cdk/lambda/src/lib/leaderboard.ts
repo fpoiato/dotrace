@@ -16,7 +16,8 @@ export interface LeaderboardRecord {
   bestLapRounds?: number;
   updatedAt: number;
   /** Constant GSI partition for Top-N queries. */
-  board: 'global';
+  /** Season partition. Bump LEADERBOARD_SEASON to hide previous layouts. */
+  board: string;
   /**
    * GSI sort key — lower sorts first.
    * Encodes: more wins → lower bestLapMs → lower bestLapRounds → name.
@@ -45,7 +46,13 @@ export interface Top10Entry {
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.LEADERBOARD_TABLE!;
-const BOARD = 'global';
+/**
+ * Home-screen season. Tracks changed, so s2 is a fresh board.
+ * The item key is also prefixed: the table PK is nicknameKey, and writing
+ * the new board onto the old key would carry wins and best laps forward.
+ */
+export const LEADERBOARD_SEASON = 's2';
+const BOARD = LEADERBOARD_SEASON;
 const TOP_N = 10;
 /** Wins inverted into a 6-digit field (supports up to 999_999 wins). */
 const WINS_PAD = 1_000_000;
@@ -64,7 +71,7 @@ const MAX_LAP_ROUNDS = 999_999;
 export const MAX_PLAUSIBLE_LAP_MS = 10 * 60 * 1000;
 
 export function nicknameKey(nickname: string): string {
-  return nickname.trim().toLowerCase();
+  return `${LEADERBOARD_SEASON}#${nickname.trim().toLowerCase()}`;
 }
 
 /** Drop non-positive / absurd wall-clock "best laps" (legacy TURNS pollution). */
