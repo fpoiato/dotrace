@@ -13,6 +13,7 @@ import { ReplayShareService } from '../../core/services/replay-share.service';
 import { TrackCanvasComponent } from './track-canvas.component';
 import { ReplayFrame, buildReplayFrames } from './replay-frames';
 import { newPenaltyFlags } from './penalty-flag';
+import { replayBoostNotices } from './replay-boost';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Speed = (typeof SPEEDS)[number];
@@ -61,6 +62,49 @@ type Speed = (typeof SPEEDS)[number];
       } @else {
         <div class="relative">
           <app-track-canvas [state]="replayState" [followLeader]="true" />
+          @if (boostNotices.length > 0) {
+            <div
+              class="pointer-events-none absolute left-2 top-2 z-30 flex w-max max-w-[16rem] flex-col items-start gap-1.5"
+              aria-live="polite"
+            >
+              @for (notice of boostNotices; track notice.connectionId + notice.kind) {
+                <div
+                  class="flex items-center gap-2 rounded-md border border-white/25 bg-slate-950/95 px-2 py-1.5 shadow-lg"
+                  role="status"
+                  [attr.aria-label]="
+                    (notice.kind === 'ers'
+                      ? 'game.replayErs'
+                      : notice.justOpened
+                        ? 'game.replayDrsOpen'
+                        : 'game.replayDrsOn'
+                    ) | translate: { name: notice.nickname }
+                  "
+                >
+                  <span
+                    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide text-slate-950"
+                    [class.bg-sky-400]="notice.kind === 'drs'"
+                    [class.bg-amber-400]="notice.kind === 'ers'"
+                  >
+                    {{ notice.kind === 'drs' ? 'DRS' : 'ERS' }}
+                  </span>
+                  <span
+                    class="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-white/50"
+                    [style.background]="notice.color"
+                  ></span>
+                  <span class="truncate text-sm font-semibold text-white">
+                    {{
+                      (notice.kind === 'ers'
+                        ? 'game.replayErs'
+                        : notice.justOpened
+                          ? 'game.replayDrsOpen'
+                          : 'game.replayDrsOn'
+                      ) | translate: { name: notice.nickname }
+                    }}
+                  </span>
+                </div>
+              }
+            </div>
+          }
           @if (penaltyFlags.length > 0) {
             <div
               class="pointer-events-none absolute right-2 top-2 z-30 flex w-max max-w-[16rem] flex-col items-end gap-1.5"
@@ -249,6 +293,19 @@ export class ReplayViewerComponent implements OnInit, OnDestroy {
         nickname: player.nickname,
         color: player.color,
       }));
+  }
+
+  /** DRS open (and the move that opened it) plus ERS spent on this frame. */
+  get boostNotices(): {
+    connectionId: string;
+    nickname: string;
+    color: string;
+    kind: 'drs' | 'ers';
+    justOpened: boolean;
+  }[] {
+    const frame = this.currentFrame;
+    if (!frame) return [];
+    return replayBoostNotices(this.frames[this.currentIndex - 1]?.players ?? null, frame);
   }
 
   ngOnInit(): void {
