@@ -730,12 +730,17 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     }
   }
 
+  /** Black-and-white checkered start/finish stripe. */
   private drawFinishStripe(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
-    ctx.fillStyle = PAPER_COLORS.finish;
+    const sq = CELL / 2;
     for (let y = 0; y < track.height; y++) {
       for (let x = 0; x < track.width; x++) {
-        if (track.grid[y][x] === 'finish') {
-          ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+        if (track.grid[y][x] !== 'finish') continue;
+        for (let sy = 0; sy < 2; sy++) {
+          for (let sx = 0; sx < 2; sx++) {
+            ctx.fillStyle = (x + y + sx + sy) % 2 === 0 ? PAPER_COLORS.finishDark : '#ffffff';
+            ctx.fillRect(x * CELL + sx * sq, y * CELL + sy * sq, sq, sq);
+          }
         }
       }
     }

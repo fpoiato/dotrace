@@ -113,7 +113,7 @@ export class MiniMapComponent implements OnChanges, OnDestroy {
           ctx.fillStyle = this.inDrsZone(track, x, y) ? '#60a5fa' : '#cbd5e1';
           ctx.fillRect(x * s, y * s, s, s);
         } else if (tile === 'finish') {
-          ctx.fillStyle = PAPER_COLORS.finish;
+          ctx.fillStyle = (x + y) % 2 === 0 ? PAPER_COLORS.finishDark : '#ffffff';
           ctx.fillRect(x * s, y * s, s, s);
         }
       }
