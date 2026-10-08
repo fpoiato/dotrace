@@ -460,11 +460,12 @@ const MONACO: CircuitSpec = {
   ],
   checkpoint: { x0: 136, y0: 15, x1: 153, y1: 31 },
   // Climb to the hairpin, the pit straight east of the stripe, and a long
-  // strip on the opposite (westbound) straight back toward the harbour.
+  // strip on the opposite (westbound) straight. Starts at x 40 so it does
+  // not cover the finish stripe (x 32–38).
   drsZones: [
     { x0: 90, y0: 18, x1: 126, y1: 58 },
     { x0: 42, y0: 78, x1: 88, y1: 88 },
-    { x0: 34, y0: 90, x1: 98, y1: 110 },
+    { x0: 40, y0: 90, x1: 98, y1: 110 },
   ],
 };
 
