@@ -24,6 +24,11 @@ resource "aws_cloudfront_distribution" "frontend" {
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
+    # Honor origin Cache-Control. index.html is no-store; hashed assets are immutable for a year.
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 31536000
+
     forwarded_values {
       query_string = false
       cookies {
