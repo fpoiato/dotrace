@@ -21,13 +21,16 @@ import {
   Vector2D,
   gearOf,
   getTileAt,
+  isDrsAsphalt,
   isGearLimited,
   isGrassShortcut,
+  isStrictlyAhead,
   isValidGearChange,
   landingPosition,
   segmentCrossesFinish,
   segmentEntersRect,
 } from '../../shared/ws-types';
+import { adviseBoost, type BoostPick } from './boost-advice';
 import {
   annotatePath,
   densifyRacingLine,
@@ -62,10 +65,10 @@ const HOLD_TURNS = 3;
 /**
  * Char budget for the JSON decide body. Measured with the ModernBERT
  * tokenizer: the heaviest forward map (gear 6 on a diagonal) is ~546
- * tokens (~1860 chars). 2000 chars stays under ~600 tokens, inside the
- * 1024 window with the [CLS]/marker wrapper still to add.
+ * tokens (~1860 chars) before the boost question. 2800 chars stays under
+ * ~850 tokens, inside the 1024 window with the [CLS]/marker wrapper.
  */
-export const LAYA_REQUEST_CHAR_BUDGET = 2000;
+export const LAYA_REQUEST_CHAR_BUDGET = 2800;
 
 const OPPONENT_LETTERS = 'ABDEFGHIJKLMNPQRSTUVWXYZ';
 
@@ -117,6 +120,7 @@ function terrainChar(track: TrackDefinition, x: number, y: number): string {
   if (tile === null) return ' ';
   if ((tile === 'track' || tile === 'finish') && inCheckpoint(track, x, y)) return 'C';
   if (tile === 'grass') return '.';
+  if (tile === 'track' && isDrsAsphalt(track, x, y)) return 'B';
   if (tile === 'track') return '#';
   if (tile === 'rumble') return '=';
   if (tile === 'finish') return 'F';
@@ -394,6 +398,39 @@ function forwardScore(
   return score;
 }
 
+/** Squares to the nearest rival ahead. Lead when this car is the first. */
+function rivalGap(player: Player, state: GameState, track: TrackDefinition): number | 'lead' {
+  let best = Number.POSITIVE_INFINITY;
+  for (const opponent of state.players) {
+    if (opponent.connectionId === player.connectionId) continue;
+    if (opponent.finishOrder !== undefined) continue;
+    if (!isStrictlyAhead(opponent, player, track)) continue;
+    const gap = Math.max(
+      Math.abs(opponent.position.x - player.position.x),
+      Math.abs(opponent.position.y - player.position.y)
+    );
+    if (gap < best) best = gap;
+  }
+  return Number.isFinite(best) ? best : 'lead';
+}
+
+/** Blue cells under the car and ahead, one step at a time, until the zone ends. */
+function blueAhead(track: TrackDefinition, position: Vector2D, velocity: Vector2D): number {
+  const sx = Math.sign(velocity.x);
+  const sy = Math.sign(velocity.y);
+  let n = 0;
+  for (let k = 0; k <= 8; k++) {
+    const x = position.x + k * sx;
+    const y = position.y + k * sy;
+    if (!isDrsAsphalt(track, x, y)) {
+      if (k === 0) continue;
+      break;
+    }
+    n++;
+  }
+  return n;
+}
+
 function illegalReason(reasons: string[]): string {
   if (reasons.some((reason) => reason.includes('outside'))) return 'edge';
   if (reasons.some((reason) => reason.includes('another car'))) return 'car';
@@ -612,6 +649,28 @@ export function buildLayaScene(
     };
   });
 
+  const best = bestIndex >= 0 ? pending[bestIndex] : undefined;
+  const gap = rivalGap(player, state, track);
+  const blue = blueAhead(track, position, velocity);
+  const drs = player.drsActive ? 'open' : player.drsArmed ? 'armed' : 'shut';
+  const boost: BoostPick = best
+    ? adviseBoost({
+        gear: currentGear,
+        nextGear: best.gear,
+        clearAhead: best.clearAhead,
+        overspeed: best.overspeed,
+        gearLimited,
+        drsArmed: !!player.drsArmed,
+        drsActive: !!player.drsActive,
+        ersCharge: player.ersCharge ?? 0,
+        gap,
+        blue,
+        bendCells: situation.cellsToCorner,
+        fuel: player.fuel,
+        pit: false,
+      })
+    : 'save';
+
   return {
     state: {
       kind: 'vector race',
@@ -629,13 +688,22 @@ export function buildLayaScene(
       toGoal: situation.cellsToGoal,
       off: offTrack ? stepsToAsphalt(track, position.x, position.y) : 0,
       hold: holdCourse(track, position, velocity),
+      drs,
+      ers: player.ersCharge ?? 0,
+      gap,
+      blue,
+      boost,
+      ...(player.fuel !== undefined ? { fuel: Math.round(player.fuel) } : {}),
     },
     options,
   };
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Vector race. Gear max(|vx|,|vy|) carries, max 6. Each option adds -1, 0, or +1 to vx and vy. Accelerate up to pace when bend is straight and hold stays on asphalt. Slow down only when bend is inside stopDist. y grows down. dir is the circuit direction. Steer with dir. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6, or 8 with DRS open. Each option adds -1, 0, or +1 to vx and vy. Accelerate up to pace when bend is straight and hold stays on asphalt. Slow down only when bend is inside stopDist. y grows down. dir is the circuit direction. Steer with dir. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, B blue DRS, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
+
+export const LAYA_BOOST_INSTRUCTIONS =
+  'Pick state.boost. DRS arms only on B with a rival within 6 (gap). Open wing allows gear 8 and a +2 climb below gear 6, then closes if you brake or leave B. ers is bars left of 4; one bar is a +2 step and half fuel. save when braking, bend is inside stopDist, gap is lead, or blue is short. drs on a long blue straight. ers only for a +2 the wing cannot give. both only at gear 6, gap<=4, blue>=4.';
 
 /** JSON body posted to Ollaya `/api/decide`. */
 export function layaDecideBody(scene: LayaScene, model: string) {
@@ -647,6 +715,16 @@ export function layaDecideBody(scene: LayaScene, model: string) {
         type: 'choice' as const,
         instructions: LAYA_MOVE_INSTRUCTIONS,
         criteria: Object.fromEntries(scene.options.map((option) => [option.label, option.detail])),
+      },
+      boost: {
+        type: 'choice' as const,
+        instructions: LAYA_BOOST_INSTRUCTIONS,
+        criteria: {
+          save: 'keep wing shut and battery',
+          drs: 'open wing, do not spend a bar',
+          ers: 'spend 1 bar, wing stays shut',
+          both: 'open wing and spend 1 bar',
+        },
       },
     },
     keep_alive: '-1',

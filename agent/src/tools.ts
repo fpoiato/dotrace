@@ -64,6 +64,10 @@ export interface AnnotatedMove {
   drs?: boolean;
   /** This velocity is only legal on the ERS pad (step of 2). */
   ers?: boolean;
+  /** Boost the pilot already chose. withBoost honors it. */
+  boostPick?: 'save' | 'drs' | 'ers' | 'both';
+  /** Gear ceiling for a boosted climb. Easy stays at 3. */
+  boostCap?: number;
 }
 
 export interface BoardSummary {
