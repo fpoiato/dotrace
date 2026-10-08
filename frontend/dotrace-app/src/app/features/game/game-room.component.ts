@@ -41,7 +41,7 @@ import { MiniMapComponent } from './mini-map.component';
 import { ReplayViewerComponent } from './replay-viewer.component';
 import { newPenaltyFlags, PenaltyMark } from './penalty-flag';
 import { TrackCanvasComponent } from './track-canvas.component';
-import { PLAY_NOW_SECONDS, TURN_STALL_MS, isBotPlayer, turnStallKey } from './turn-stall';
+import { PLAY_NOW_SECONDS, isBotPlayer, stallWindowMs, turnStallKey } from './turn-stall';
 
 /** Amber on the pad: a real grass cut, or a landing that leaves the asphalt. */
 function moveWarnsOffAsphalt(
@@ -235,8 +235,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * 5s with no move: waiters get the wake button, the human on the clock
-   * gets "Jogue agora!". The host also signals a stuck bot from the engine.
+   * Human stall is 5s: waiters get the wake button, the seat on the clock
+   * gets "Jogue agora!". A bot that is still thinking does not count — the
+   * button waits until the AI request has had time to fail.
    */
   private watchTurnStall(state: GameState | null): void {
     const key = turnStallKey(state);
@@ -250,6 +251,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.waking = false;
     this.clearPlayNow();
     if (this.stallTimer) clearTimeout(this.stallTimer);
+    const wait = stallWindowMs(this.game.currentPlayer());
     this.stallTimer = setTimeout(() => {
       this.stallTimer = null;
       if (this.stallKey !== key) return;
@@ -260,7 +262,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.showWakeButton = true;
       }
       this.cdr.markForCheck();
-    }, TURN_STALL_MS);
+    }, wait);
   }
 
   private startPlayNow(): void {
