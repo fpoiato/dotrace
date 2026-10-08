@@ -155,5 +155,6 @@
   "howto.8.title": "Fuel and pits",
   "howto.8.body": "In races of 6 laps or more the tank to the right of the pad drops every turn. Higher gears burn more; ERS halves the burn. At empty the max gear is 1. The detour on the longest straight is the pit lane: gear cap 3. Stopping in the stall of your color fills the tank and holds you for 1 round. Driving through does not refuel. Three black-and-white flags require a drive-through; finishing without serving it is a disqualification.",
   "game.wakeOpponents": "Wake the opponents",
-  "game.playNow": "Play now!"
+  "game.playNow": "Play now!",
+  "game.waking": "Waking…"
 }

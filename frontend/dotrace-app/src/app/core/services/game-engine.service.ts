@@ -871,8 +871,22 @@ export class GameEngineService implements OnDestroy {
     const telemetry = buildRaceTelemetry(state);
     const relayMeta = telemetry ? { ...meta, telemetry } : meta;
     void this.api
-      .postAction('RELAY', { type, state, meta: relayMeta }, room.roomCode)
+      .postAction('RELAY', { type, state: this.relayBoard(state, type), meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
+  }
+
+  /**
+   * Live relays were carrying the whole replay. Around round 43 that crosses
+   * the WebSocket frame limit, the broadcast dies, and a wake never lands.
+   * The host keeps the full log; guests only need the board.
+   */
+  private relayBoard(state: GameState, type: RelayPayload['type']): GameState {
+    const copy = structuredClone(state);
+    if (type !== 'GAME_OVER') delete copy.replayLog;
+    for (const player of copy.players) {
+      if (player.trail && player.trail.length > 48) player.trail = player.trail.slice(-48);
+    }
+    return copy;
   }
 
   /**
@@ -924,8 +938,16 @@ export class GameEngineService implements OnDestroy {
     const player = state.players.find((candidate) => candidate.connectionId === seat);
     if (!player || player.finishOrder !== undefined) return;
     if (this.isBotSeat(player)) {
-      if (seat.startsWith('ai#')) this.requestAiMove(player, 1, true);
-      this.setStateAndRelay('STATE_SYNC', state, { stuck: true, seat });
+      this.aiInFlight.delete(seat);
+      const pending = this.aiFollowUps.get(seat);
+      if (pending) {
+        clearTimeout(pending);
+        this.aiFollowUps.delete(seat);
+      }
+      // A hung PLAY_AI_TURN is why the button looked dead. Play here.
+      if (!this.playLocalBotMove()) {
+        this.setStateAndRelay('STATE_SYNC', state, { stuck: true, seat });
+      }
       return;
     }
     this.playNow$.next(seat);
@@ -1031,13 +1053,20 @@ export class GameEngineService implements OnDestroy {
   private applyRushMove(): void {
     const state = this.state;
     if (!state || !this.shouldRushBots(state)) return;
+    this.playLocalBotMove();
+  }
+
+  /** Legal local move for the bot on the clock. Does not wait on Lambda. */
+  private playLocalBotMove(): boolean {
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND') return false;
     const seat = state.turnOrder[state.currentTurnIndex];
     const player = state.players.find((p) => p.connectionId === seat);
-    if (!player || !isAiPilotNickname(player.nickname) || !canPlayerMove(state, player.connectionId)) {
-      return;
+    if (!player || !this.isBotSeat(player) || !canPlayerMove(state, player.connectionId)) {
+      return false;
     }
     const track = getTrackById(state.trackId);
-    if (!track) return;
+    if (!track) return false;
     const limited = isGearLimited(player, state.round);
     const drs = !limited && !!player.drsArmed && !player.drsActive;
     const ers = !limited && (player.ersCharge ?? 0) >= 1;
@@ -1052,7 +1081,7 @@ export class GameEngineService implements OnDestroy {
       ers || (drs && climb) ? ERS_MAX_DELTA : 1,
       ers
     );
-    if (moves.length === 0) return;
+    if (moves.length === 0) return false;
     const box = ownPitBox(track, player);
     const here = getTileAt(track, player.position.x, player.position.y);
     const onPit = isPitTile(here);
@@ -1090,7 +1119,7 @@ export class GameEngineService implements OnDestroy {
     }
     const accelerating = gearOf(best.velocity) > gearOf(player.velocity) || gearOf(best.velocity) > MAX_GEAR;
     const boost = accelerating && !isPitTile(getTileAt(track, best.landing.x, best.landing.y)) ? request : undefined;
-    this.applyMove(player.connectionId, best.velocity, boost);
+    return this.applyMove(player.connectionId, best.velocity, boost);
   }
 
   private requestAiMove(player: Player, attempt = 1, stuck = false): void {

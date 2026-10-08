@@ -55,9 +55,9 @@
         <button
           type="button"
           (click)="wakeOpponents()"
-          class="mb-1.5 shrink-0 rounded-lg bg-amber-500 px-2 py-1.5 text-xs font-bold text-slate-950 active:bg-amber-400"
+          class="relative z-20 mb-1.5 shrink-0 rounded-lg bg-amber-500 px-2 py-1.5 text-xs font-bold text-slate-950 active:bg-amber-400"
         >
-          {{ 'game.wakeOpponents' | translate }}
+          {{ (waking ? 'game.waking' : 'game.wakeOpponents') | translate }}
         </button>
       }
 
