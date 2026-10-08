@@ -129,8 +129,8 @@ export function buildRankKey(
 
 /** Same ordering as buildRankKey — used to sort Top 10 in memory (covers stale keys). */
 export function compareLeaderboardEntries(
-  a: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname' | 'trackId'>,
-  b: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname' | 'trackId'>
+  a: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'> & { trackId?: string },
+  b: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'> & { trackId?: string }
 ): number {
   if (b.wins !== a.wins) return b.wins - a.wins;
   const aLap = sanitizeBestLapMs(a.bestLapMs) ?? Number.POSITIVE_INFINITY;

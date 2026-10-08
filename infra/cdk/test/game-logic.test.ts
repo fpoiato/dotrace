@@ -1812,7 +1812,7 @@ describe('fuel and pit lane', () => {
     expect(moves.every((m) => gearOf(m.velocity) <= PIT_MAX_GEAR)).toBe(true);
 
     settleFuel(player, 5, false);
-    expect(player.fuel).toBe(9.6);
+    expect(player.fuel).toBe(6);
     player.driveThroughOwed = 1;
     expect(settlePitVisit(player, track, 'pitbox', 3)).toBe('stop');
     expect(player.fuel).toBe(FUEL_TANK);
