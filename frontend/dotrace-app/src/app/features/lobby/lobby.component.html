@@ -42,21 +42,18 @@
 
         <div class="mb-2">
           <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.laps' | translate }}</p>
-          <div class="grid grid-cols-5 gap-1">
+          <div class="grid grid-cols-9 gap-1">
             @for (n of lapOptions; track n) {
               <button
                 type="button"
                 (click)="selectLaps(n)"
-                class="min-h-10 rounded-lg border-2 text-base font-bold transition"
+                class="min-h-10 rounded-lg border-2 px-0 text-sm font-bold transition"
                 [class]="selectedLaps === n ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
               >
                 {{ n }}
               </button>
             }
           </div>
-          @if (selectedLaps > 5) {
-            <p class="mt-1 text-[11px] leading-tight text-amber-300">{{ 'lobby.fuelHint' | translate }}</p>
-          }
         </div>
       </div>
     } @else {
