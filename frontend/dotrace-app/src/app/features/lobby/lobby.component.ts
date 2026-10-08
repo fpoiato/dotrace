@@ -45,8 +45,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   /** Names for heuristic bots (local planner). */
   private readonly botNames = ['Bot Alfa', 'Bot Turbo', 'Bot Apex', 'Bot Drift', 'Bot Nitro', 'Bot Pulse'];
-  /** Names for Bedrock IA pilots. */
-  private readonly iaNames = ['IA Nova', 'IA Micro', 'IA Vega', 'IA Comet', 'IA Bolt', 'IA Dash'];
 
   ngOnInit(): void {
     if (!this.room.room) {
@@ -112,13 +110,9 @@ export class LobbyComponent implements OnInit, OnDestroy {
     await this.spawnPilot(players, 'laya', this.botNames);
   }
 
-  async addIaPilot(players: Player[]): Promise<void> {
-    await this.spawnPilot(players, 'bedrock', this.iaNames);
-  }
-
   private async spawnPilot(
     players: Player[],
-    brain: 'bedrock' | 'heuristic' | 'laya',
+    brain: 'heuristic' | 'laya',
     names: string[]
   ): Promise<void> {
     if (this.aiSpawning) return;
