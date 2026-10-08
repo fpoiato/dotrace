@@ -17,6 +17,7 @@ import {
   isErsOppositeStep,
   isErsPadDelta,
   DRS_MAX_GEAR,
+  DRS_GAP,
   ERS_MAX_DELTA,
   ERS_MAX_CHARGE,
   armDrsZones,
@@ -24,6 +25,7 @@ import {
   resolvedDrsZones,
   isDrsAsphalt,
   isStrictlyAhead,
+  closeDrsOutsideZone,
   beginNextLap,
   boostLimits,
   engageRequestedDrs,
@@ -1266,12 +1268,13 @@ function makeDrsTrack(): TrackDefinition {
 }
 
 describe('DRS and ERS', () => {
-  it('rejects gear 7 without DRS, allows it while DRS is open, and never allows gear 8', () => {
+  it('rejects gear 7 without DRS, allows gear 8 while DRS is open, and never allows gear 9', () => {
     expect(isValidGearChange({ x: 6, y: 0 }, { x: 7, y: 0 }, false)).toBe(false);
     expect(isValidGearChange({ x: 6, y: 0 }, { x: 7, y: 0 }, false, 1, DRS_MAX_GEAR)).toBe(true);
-    expect(isValidGearChange({ x: 7, y: 0 }, { x: 8, y: 0 }, false, 1, DRS_MAX_GEAR)).toBe(false);
+    expect(isValidGearChange({ x: 7, y: 0 }, { x: 8, y: 0 }, false, 1, DRS_MAX_GEAR)).toBe(true);
+    expect(isValidGearChange({ x: 8, y: 0 }, { x: 9, y: 0 }, false, 1, DRS_MAX_GEAR)).toBe(false);
     expect(isValidGearChange({ x: 6, y: 0 }, { x: 8, y: 0 }, false, ERS_MAX_DELTA, DRS_MAX_GEAR)).toBe(
-      false
+      true
     );
 
     const track = makeDrsTrack();
@@ -1286,12 +1289,30 @@ describe('DRS and ERS', () => {
     });
     const limits = boostLimits(open, 1, {});
     expect(limits.maxGear).toBe(DRS_MAX_GEAR);
+    expect(limits.maxDelta).toBe(1);
     const withDrs = getValidMoves(open, track, undefined, 1, limits.maxGear, limits.maxDelta);
     expect(withDrs.some((m) => m.velocity.x === 7 && m.velocity.y === 0)).toBe(true);
     expect(withDrs.some((m) => m.velocity.x === 8)).toBe(false);
+
+    const climbing = makePlayer({
+      position: { x: 10, y: 10 },
+      velocity: { x: 4, y: 0 },
+      drsActive: true,
+    });
+    const climb = boostLimits(climbing, 1, {});
+    expect(climb.maxDelta).toBe(ERS_MAX_DELTA);
+    expect(
+      isValidGearChange(climbing.velocity, { x: 6, y: 0 }, false, climb.maxDelta, climb.maxGear, false)
+    ).toBe(true);
+    expect(
+      isValidGearChange(climbing.velocity, { x: 5, y: 0 }, false, climb.maxDelta, climb.maxGear, false)
+    ).toBe(true);
+    expect(
+      isValidGearChange(climbing.velocity, { x: 3, y: 0 }, false, climb.maxDelta, climb.maxGear, false)
+    ).toBe(true);
   });
 
-  it('arms a zone when any unfinished rival is ahead, including one far up the straight', () => {
+  it('arms only in the blue zone and only within 6 squares of the car ahead', () => {
     const track = makeDrsTrack();
     const from = { x: 8, y: 5 };
     const landing = { x: 11, y: 5 };
@@ -1306,7 +1327,17 @@ describe('DRS and ERS', () => {
     const me = makePlayer({ position: from, lap: 1 });
     armDrsZones(me, from, landing, [me, aheadNear], track);
     expect(me.drsArmed).toBe(true);
-    expect(me.drsZonesUsed).toEqual([0]);
+
+    const atGap = makePlayer({ position: from, lap: 1 });
+    const sixAway = makePlayer({
+      connectionId: 'rival',
+      nickname: 'Bea',
+      isHost: false,
+      position: { x: landing.x + DRS_GAP, y: 5 },
+      lap: 1,
+    });
+    armDrsZones(atGap, from, landing, [atGap, sixAway], track);
+    expect(atGap.drsArmed).toBe(true);
 
     const far = makePlayer({ position: from, lap: 1 });
     const aheadFar = makePlayer({
@@ -1317,8 +1348,7 @@ describe('DRS and ERS', () => {
       lap: 1,
     });
     armDrsZones(far, from, landing, [far, aheadFar], track);
-    expect(far.drsArmed).toBe(true);
-    expect(far.drsZonesUsed).toEqual([0]);
+    expect(far.drsArmed).toBe(false);
 
     const behindMe = makePlayer({ position: from, lap: 1 });
     const behind = makePlayer({
@@ -1329,23 +1359,31 @@ describe('DRS and ERS', () => {
       lap: 1,
     });
     armDrsZones(behindMe, from, landing, [behindMe, behind], track);
-    expect(behindMe.drsArmed).toBeUndefined();
+    expect(behindMe.drsArmed).toBe(false);
+
+    const outside = makePlayer({ position: from, lap: 1 });
+    armDrsZones(outside, from, { x: 8, y: 5 }, [outside, aheadNear], track);
+    expect(outside.drsArmed).toBe(false);
   });
 
-  it('arms a car already standing in the blue zone when a rival is ahead', () => {
+  it('arms a car already standing in the blue zone when the car ahead is within 6 squares', () => {
     const track = makeDrsTrack();
     const me = makePlayer({ position: { x: 11, y: 5 }, lap: 1 });
     const ahead = makePlayer({
       connectionId: 'rival',
       nickname: 'Bea',
       isHost: false,
-      position: { x: 30, y: 5 },
+      position: { x: 16, y: 5 },
       lap: 1,
     });
     syncDrsArms([me, ahead], track);
     expect(me.drsArmed).toBe(true);
-    expect(me.drsZonesUsed).toEqual([0]);
-    expect(ahead.drsArmed).toBeUndefined();
+    expect(ahead.drsArmed).toBe(false);
+
+    ahead.position = { x: 30, y: 5 };
+    me.drsArmed = false;
+    syncDrsArms([me, ahead], track);
+    expect(me.drsArmed).toBe(false);
   });
 
   it('arms DRS on the first step into the blue zone when the rival is ahead along the racing line', () => {
@@ -1438,7 +1476,7 @@ describe('DRS and ERS', () => {
     }
   });
 
-  it('spends a zone for the lap, arms the next one, and clears the list on the following lap', () => {
+  it('can arm again in the same zone, and shuts DRS on the first cell outside it', () => {
     const track = makeDrsTrack();
     const rival = makePlayer({
       connectionId: 'rival',
@@ -1449,17 +1487,23 @@ describe('DRS and ERS', () => {
     });
     const me = makePlayer({ position: { x: 8, y: 5 }, lap: 1 });
     armDrsZones(me, { x: 8, y: 5 }, { x: 11, y: 5 }, [me, rival], track);
-    expect(me.drsZonesUsed).toEqual([0]);
+    expect(me.drsArmed).toBe(true);
 
     me.drsArmed = false;
     armDrsZones(me, { x: 11, y: 5 }, { x: 11, y: 5 }, [me, rival], track);
-    expect(me.drsArmed).toBe(false);
-    expect(me.drsZonesUsed).toEqual([0]);
-
-    rival.position = { x: 26, y: 5 };
-    armDrsZones(me, { x: 20, y: 5 }, { x: 23, y: 5 }, [me, rival], track);
     expect(me.drsArmed).toBe(true);
-    expect(me.drsZonesUsed).toEqual([0, 1]);
+
+    rival.position = { x: 36, y: 5 };
+    armDrsZones(me, { x: 20, y: 5 }, { x: 23, y: 5 }, [me, rival], track);
+    expect(me.drsArmed).toBe(false);
+
+    me.position = { x: 11, y: 5 };
+    me.drsActive = true;
+    closeDrsOutsideZone(me, track);
+    expect(me.drsActive).toBe(true);
+    me.position = { x: 8, y: 5 };
+    closeDrsOutsideZone(me, track);
+    expect(me.drsActive).toBe(false);
 
     me.passedCheckpoint = true;
     beginNextLap(me);
@@ -1602,7 +1646,7 @@ describe('DRS and ERS', () => {
     ]);
   });
 
-  it('with DRS and ERS together reaches gear 7 from 5, and not 8', () => {
+  it('with DRS and ERS together reaches gear 7 from 5, and gear 8 from 6', () => {
     const player = makePlayer({
       position: { x: 10, y: 10 },
       velocity: { x: 5, y: 0 },
@@ -1621,6 +1665,9 @@ describe('DRS and ERS', () => {
     );
     expect(isValidGearChange({ x: 5, y: 0 }, { x: 8, y: 0 }, false, limits.maxDelta, limits.maxGear)).toBe(
       false
+    );
+    expect(isValidGearChange({ x: 6, y: 0 }, { x: 8, y: 0 }, false, limits.maxDelta, limits.maxGear)).toBe(
+      true
     );
 
     const track = makeDrsTrack();
@@ -1679,7 +1726,7 @@ describe('DRS and ERS', () => {
     expect(limits.maxGear).toBe(DRS_MAX_GEAR);
     expect(player.drsActive).toBe(true);
     expect(
-      isValidGearChange(player.velocity, { x: 3, y: 0 }, false, limits.maxDelta, limits.maxGear)
+      isValidGearChange(player.velocity, { x: 3, y: 0 }, false, limits.maxDelta, limits.maxGear, limits.spendErs)
     ).toBe(true);
     settleBoostFromGears(player, 4, 3);
     expect(player.drsActive).toBe(false);
@@ -1836,5 +1883,18 @@ describe('fuel and pit lane', () => {
     applyGrassPenalty(player, state);
     expect(player.grassCuts).toBe(3);
     expect(player.driveThroughOwed).toBe(1);
+  });
+
+  it('does not treat the pit lane or a stop in the box as a grass cut', () => {
+    const track = TRACKS[0];
+    const box = track.pitBoxes?.[0];
+    expect(box).toBeDefined();
+    const pit = track.grid
+      .flatMap((row, y) => row.map((tile, x) => ({ tile, x, y })))
+      .find((cell) => cell.tile === 'pit');
+    expect(pit).toBeDefined();
+    expect(isGrassShortcut(track, { x: box!.x, y: box!.y }, { x: box!.x, y: box!.y })).toBe(false);
+    expect(isGrassShortcut(track, { x: pit!.x, y: pit!.y }, box!)).toBe(false);
+    expect(isGrassShortcut(track, { x: box!.x + 3, y: box!.y }, box!)).toBe(false);
   });
 });

@@ -232,7 +232,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     const canMove =
       !!state && !!myId && canPlayerMove(state, myId) && me?.finishOrder === undefined;
     const ersOn = !!(state && me && this.boostRequest(state, me).ers);
-    const step = ersOn ? ERS_MAX_DELTA : 1;
+    const drsClimb = !!(state && me && this.moveCaps(state, me)[1] > 1 && !ersOn);
+    const step = ersOn || drsClimb ? ERS_MAX_DELTA : 1;
 
     const valid =
       canMove && me && track
@@ -287,10 +288,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return options;
   }
 
-  /** Ceiling and delta the host would use for the buttons currently held. */
-  private moveCaps(state: GameState, me: Player): [number, number] {
+  /** Ceiling, delta, and whether the ERS pad (not the DRS ±2) applies. */
+  private moveCaps(state: GameState, me: Player): [number, number, boolean] {
     const limits = boostLimits(me, state.round, this.boostRequest(state, me));
-    return [limits.maxGear, limits.maxDelta];
+    return [limits.maxGear, limits.maxDelta, limits.spendErs];
   }
 
   private boostRequest(state: GameState, me: Player): BoostRequest {

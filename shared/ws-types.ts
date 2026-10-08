@@ -340,7 +340,7 @@ export interface HostStateResponsePayload {
 export interface SubmitMoveAction {
   action: 'SUBMIT_MOVE';
   vector: Vector2D;
-  /** Ask to open DRS for this move. Host ignores it unless drsArmed. */
+  /** Ask to open DRS for this move. Host ignores it unless the car is armed in the blue zone. */
   drs?: boolean;
   /** Ask to spend one ERS bar so each axis may change by 2. */
   ers?: boolean;
@@ -362,7 +362,7 @@ export const LAP_OPTIONS = [1, 2, 3, 4, 5, 10, 15, 20, 25] as const;
 export const FUEL_RACE_MIN_LAPS = 6;
 export const FUEL_TANK = 100;
 /** Burn per turn by gear. Index is the gear the car travels at. One tenth of the first tuning. */
-export const FUEL_BURN_BY_GEAR = [0, 0.1, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6] as const;
+export const FUEL_BURN_BY_GEAR = [0, 0.1, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] as const;
 export const PIT_MAX_GEAR = 3;
 export const FLAGS_PER_DRIVE_THROUGH = 3;
 
@@ -561,8 +561,11 @@ export const MAX_GEAR_DELTA = 1;
 /** Top speed: velocity magnitude (Chebyshev) can never exceed this. */
 export const MAX_GEAR = 6;
 
-/** Gear ceiling while DRS is open. Gear 8 is never legal. */
-export const DRS_MAX_GEAR = 7;
+/** Gear ceiling while DRS is open. */
+export const DRS_MAX_GEAR = 8;
+
+/** Squares to the car ahead. Farther than this, or leading, and DRS stays shut. */
+export const DRS_GAP = 6;
 
 /** Per-axis step of the 3×3 pad while an ERS bar is spent. */
 export const ERS_MAX_DELTA = 2;
@@ -632,7 +635,8 @@ export function isValidGearChange(
   next: Vector2D,
   isOffTrack: boolean,
   maxDelta = MAX_GEAR_DELTA,
-  maxGear = MAX_GEAR
+  maxGear = MAX_GEAR,
+  ersPad = maxDelta > MAX_GEAR_DELTA
 ): boolean {
   // Off-track and grass-penalty limits are not raised by DRS or ERS.
   const delta = isOffTrack ? MAX_GEAR_DELTA : maxDelta;
@@ -646,7 +650,8 @@ export function isValidGearChange(
     );
   }
   // ERS keeps the 3×3 pad at step 2 and rejects the three opposite steps.
-  if (delta > MAX_GEAR_DELTA && !isErsPadDelta(current, next)) return false;
+  // DRS below gear 6 raises the step to 2 but still allows a normal ±1, so a brake closes the wing.
+  if (ersPad && delta > MAX_GEAR_DELTA && !isErsPadDelta(current, next)) return false;
   return gearOf(next) <= maxGear;
 }
 
@@ -659,15 +664,18 @@ export function clampErsCharge(value: number): number {
 /**
  * Ceiling and per-axis delta for a move, given the buttons the client asked
  * for. Defaults stay 6 and 1. Gear-limited cars stay at delta 1 and gear 1.
+ * Below gear 6, open DRS may step by 2 (a faster upshift, same as ERS) and
+ * still accepts a normal ±1. At 6 and above the step is 1 again, up to gear 8.
  */
 export function boostLimits(player: Player, round: number, request?: BoostRequest): BoostLimits {
   const limited = isGearLimited(player, round);
   const openDrs = !limited && !!request?.drs && !!player.drsArmed && !player.drsActive;
   const drsOn = !!player.drsActive || openDrs;
   const spendErs = !limited && !!request?.ers && (player.ersCharge ?? 0) >= 1;
+  const drsClimb = drsOn && gearOf(player.velocity) < MAX_GEAR;
   return {
     maxGear: limited ? 1 : drsOn ? DRS_MAX_GEAR : MAX_GEAR,
-    maxDelta: limited ? MAX_GEAR_DELTA : spendErs ? ERS_MAX_DELTA : MAX_GEAR_DELTA,
+    maxDelta: limited ? MAX_GEAR_DELTA : spendErs || drsClimb ? ERS_MAX_DELTA : MAX_GEAR_DELTA,
     openDrs,
     spendErs,
   };
@@ -1068,42 +1076,44 @@ export function isStrictlyAhead(leader: Player, trailer: Player, track: TrackDef
   return racingProgress(leader.position, track) > racingProgress(trailer.position, track);
 }
 
-/** Unfinished rival strictly ahead on the racing line. Distance does not matter. */
-export function hasRivalAhead(player: Player, others: Player[], track: TrackDefinition): boolean {
+/** Unfinished rival strictly ahead and at most DRS_GAP squares away. */
+export function hasDrsRival(player: Player, others: Player[], track: TrackDefinition): boolean {
   return others.some((opponent) => {
     if (opponent.connectionId === player.connectionId) return false;
     if (opponent.finishOrder !== undefined) return false;
+    const gap = Math.max(
+      Math.abs(opponent.position.x - player.position.x),
+      Math.abs(opponent.position.y - player.position.y)
+    );
+    if (gap > DRS_GAP) return false;
     return isStrictlyAhead(opponent, player, track);
   });
 }
 
 /**
- * Arm DRS when the move is on a still-unused blue zone and a rival is ahead.
- * Any cell of the zone counts, including the first step onto it. The zone is
- * spent when it arms, so the rest of that visit does not arm it again.
+ * Arm DRS only while the car is standing on blue asphalt and a rival is
+ * ahead within 6 squares. The leader, a far field, and any cell outside the
+ * zone leave it shut. The same zone can arm again later in the lap.
  */
 export function armDrsZones(
   player: Player,
-  from: Vector2D,
+  _from: Vector2D,
   landing: Vector2D,
   others: Player[],
   track: TrackDefinition
 ): void {
-  const zones = track.drsZones ?? [];
-  if (zones.length === 0) return;
-  const used = new Set(player.drsZonesUsed ?? []);
+  if (player.drsActive) return;
   const atLanding: Player = { ...player, position: { ...landing } };
-  if (!hasRivalAhead(atLanding, others, track)) return;
-  let armed = false;
-  for (let i = 0; i < zones.length; i++) {
-    if (used.has(i)) continue;
-    if (!segmentEntersDrsZone(from, landing, track, i)) continue;
-    used.add(i);
-    armed = true;
-  }
-  if (!armed) return;
-  player.drsArmed = true;
-  player.drsZonesUsed = [...used].sort((a, b) => a - b);
+  player.drsArmed =
+    isDrsAsphalt(track, landing.x, landing.y) && hasDrsRival(atLanding, others, track);
+}
+
+/** Open DRS dies on the first cell outside the blue zone. */
+export function closeDrsOutsideZone(player: Player, track: TrackDefinition): void {
+  if (!player.drsActive) return;
+  if (isDrsAsphalt(track, player.position.x, player.position.y)) return;
+  player.drsActive = false;
+  player.drsArmed = false;
 }
 
 /** Arm every car that is already standing on an unused blue zone. */
@@ -1166,7 +1176,7 @@ const CLEARANCE_REACH = 2;
 
 function isAsphaltTile(track: TrackDefinition, x: number, y: number): boolean {
   const tile = getTileAt(track, x, y);
-  return tile === 'track' || tile === 'finish';
+  return tile === 'track' || tile === 'finish' || tile === 'pit' || tile === 'pitbox';
 }
 
 /**
@@ -1257,6 +1267,8 @@ export function isGrassShortcut(
   from: Vector2D,
   landing: Vector2D
 ): boolean {
+  // The pit lane is a detour, not a cut — including the stop in your own box.
+  if (isPitTile(getTileAt(track, landing.x, landing.y))) return false;
   const landedPast =
     (landing.x !== from.x || landing.y !== from.y) &&
     beyondZebraAllowance(track, landing.x + 0.5, landing.y + 0.5);
@@ -1365,7 +1377,8 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
  * Cars may cross each other's paths, but cannot land on an occupied cell.
  * If every normal candidate lands outside the grid, an emergency stop
  * (velocity {0,0}, stay in place) is offered so the game never soft-locks.
- * An ERS request (maxDelta above 1) returns the 3×3 steps of 2, except the three opposite ones.
+ * An ERS request (maxDelta above 1 and the pad flag) returns the 3×3 steps of 2, except the three opposite ones.
+ * DRS below gear 6 uses the same ceiling of 2 but keeps every ±1 step.
  */
 export function getValidMoves(
   player: Player,
@@ -1373,7 +1386,8 @@ export function getValidMoves(
   others?: Player[],
   round = 1,
   maxGear = MAX_GEAR,
-  maxDelta = MAX_GEAR_DELTA
+  maxDelta = MAX_GEAR_DELTA,
+  ersPad = maxDelta > MAX_GEAR_DELTA
 ): { velocity: Vector2D; landing: Vector2D }[] {
   const moves: { velocity: Vector2D; landing: Vector2D }[] = [];
   const { position, velocity } = player;
@@ -1387,7 +1401,7 @@ export function getValidMoves(
   for (let dvx = -delta; dvx <= delta; dvx++) {
     for (let dvy = -delta; dvy <= delta; dvy++) {
       const next: Vector2D = { x: velocity.x + dvx, y: velocity.y + dvy };
-      if (!isValidGearChange(velocity, next, gearLimited, delta, cap)) continue;
+      if (!isValidGearChange(velocity, next, gearLimited, delta, cap, ersPad && !gearLimited)) continue;
       if (outOfFuel && gearOf(next) > 1) continue;
       const landing = landingPosition(position, next);
       const landingTile = getTileAt(track, landing.x, landing.y);

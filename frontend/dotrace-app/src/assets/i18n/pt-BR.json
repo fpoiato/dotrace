@@ -59,7 +59,7 @@
   "game.drs": "DRS",
   "game.drsActive": "DRS aberto",
   "game.drsArmed": "DRS armado",
-  "game.drsHint": "Abrir o DRS no próximo movimento (marcha 7)",
+  "game.drsHint": "Abrir o DRS na área azul, a até 6 quadrados do piloto da frente (marcha 8)",
   "game.ers": "ERS",
   "game.ersHint": "Gastar 1 barra de ERS — os 9 botões dão passo 2, menos os 3 para trás",
   "game.ersCharge": "Carga do ERS",
