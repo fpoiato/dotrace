@@ -635,7 +635,8 @@ export function isValidGearChange(
   next: Vector2D,
   isOffTrack: boolean,
   maxDelta = MAX_GEAR_DELTA,
-  maxGear = MAX_GEAR
+  maxGear = MAX_GEAR,
+  ersPad = maxDelta > MAX_GEAR_DELTA
 ): boolean {
   // Off-track and grass-penalty limits are not raised by DRS or ERS.
   const delta = isOffTrack ? MAX_GEAR_DELTA : maxDelta;
@@ -649,7 +650,8 @@ export function isValidGearChange(
     );
   }
   // ERS keeps the 3×3 pad at step 2 and rejects the three opposite steps.
-  if (delta > MAX_GEAR_DELTA && !isErsPadDelta(current, next)) return false;
+  // DRS below gear 6 raises the step to 2 but still allows a normal ±1, so a brake closes the wing.
+  if (ersPad && delta > MAX_GEAR_DELTA && !isErsPadDelta(current, next)) return false;
   return gearOf(next) <= maxGear;
 }
 
@@ -662,8 +664,8 @@ export function clampErsCharge(value: number): number {
 /**
  * Ceiling and per-axis delta for a move, given the buttons the client asked
  * for. Defaults stay 6 and 1. Gear-limited cars stay at delta 1 and gear 1.
- * Below gear 6, open DRS climbs like ERS (step of 2). At 6 and above the
- * step is 1 again, up to gear 8, and only while the wing is open.
+ * Below gear 6, open DRS may step by 2 (a faster upshift, same as ERS) and
+ * still accepts a normal ±1. At 6 and above the step is 1 again, up to gear 8.
  */
 export function boostLimits(player: Player, round: number, request?: BoostRequest): BoostLimits {
   const limited = isGearLimited(player, round);
@@ -1375,7 +1377,8 @@ export function getTileAt(track: TrackDefinition, x: number, y: number): TileTyp
  * Cars may cross each other's paths, but cannot land on an occupied cell.
  * If every normal candidate lands outside the grid, an emergency stop
  * (velocity {0,0}, stay in place) is offered so the game never soft-locks.
- * An ERS request (maxDelta above 1) returns the 3×3 steps of 2, except the three opposite ones.
+ * An ERS request (maxDelta above 1 and the pad flag) returns the 3×3 steps of 2, except the three opposite ones.
+ * DRS below gear 6 uses the same ceiling of 2 but keeps every ±1 step.
  */
 export function getValidMoves(
   player: Player,
@@ -1383,7 +1386,8 @@ export function getValidMoves(
   others?: Player[],
   round = 1,
   maxGear = MAX_GEAR,
-  maxDelta = MAX_GEAR_DELTA
+  maxDelta = MAX_GEAR_DELTA,
+  ersPad = maxDelta > MAX_GEAR_DELTA
 ): { velocity: Vector2D; landing: Vector2D }[] {
   const moves: { velocity: Vector2D; landing: Vector2D }[] = [];
   const { position, velocity } = player;
@@ -1397,7 +1401,7 @@ export function getValidMoves(
   for (let dvx = -delta; dvx <= delta; dvx++) {
     for (let dvy = -delta; dvy <= delta; dvy++) {
       const next: Vector2D = { x: velocity.x + dvx, y: velocity.y + dvy };
-      if (!isValidGearChange(velocity, next, gearLimited, delta, cap)) continue;
+      if (!isValidGearChange(velocity, next, gearLimited, delta, cap, ersPad && !gearLimited)) continue;
       if (outOfFuel && gearOf(next) > 1) continue;
       const landing = landingPosition(position, next);
       const landingTile = getTileAt(track, landing.x, landing.y);

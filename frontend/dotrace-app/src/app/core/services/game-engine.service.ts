@@ -370,7 +370,8 @@ export class GameEngineService implements OnDestroy {
       state.players,
       state.round,
       limits.maxGear,
-      limits.maxDelta
+      limits.maxDelta,
+      limits.spendErs
     ).some((m) => m.velocity.x === vector.x && m.velocity.y === vector.y);
     if (!isLegal) {
       revertDrsOpen(player, activeBefore, armedBefore);

@@ -1302,11 +1302,14 @@ describe('DRS and ERS', () => {
     const climb = boostLimits(climbing, 1, {});
     expect(climb.maxDelta).toBe(ERS_MAX_DELTA);
     expect(
-      isValidGearChange(climbing.velocity, { x: 6, y: 0 }, false, climb.maxDelta, climb.maxGear)
+      isValidGearChange(climbing.velocity, { x: 6, y: 0 }, false, climb.maxDelta, climb.maxGear, false)
     ).toBe(true);
     expect(
-      isValidGearChange(climbing.velocity, { x: 5, y: 0 }, false, climb.maxDelta, climb.maxGear)
-    ).toBe(false);
+      isValidGearChange(climbing.velocity, { x: 5, y: 0 }, false, climb.maxDelta, climb.maxGear, false)
+    ).toBe(true);
+    expect(
+      isValidGearChange(climbing.velocity, { x: 3, y: 0 }, false, climb.maxDelta, climb.maxGear, false)
+    ).toBe(true);
   });
 
   it('arms only in the blue zone and only within 6 squares of the car ahead', () => {
@@ -1490,7 +1493,7 @@ describe('DRS and ERS', () => {
     armDrsZones(me, { x: 11, y: 5 }, { x: 11, y: 5 }, [me, rival], track);
     expect(me.drsArmed).toBe(true);
 
-    rival.position = { x: 26, y: 5 };
+    rival.position = { x: 36, y: 5 };
     armDrsZones(me, { x: 20, y: 5 }, { x: 23, y: 5 }, [me, rival], track);
     expect(me.drsArmed).toBe(false);
 
@@ -1723,7 +1726,7 @@ describe('DRS and ERS', () => {
     expect(limits.maxGear).toBe(DRS_MAX_GEAR);
     expect(player.drsActive).toBe(true);
     expect(
-      isValidGearChange(player.velocity, { x: 3, y: 0 }, false, limits.maxDelta, limits.maxGear)
+      isValidGearChange(player.velocity, { x: 3, y: 0 }, false, limits.maxDelta, limits.maxGear, limits.spendErs)
     ).toBe(true);
     settleBoostFromGears(player, 4, 3);
     expect(player.drsActive).toBe(false);
