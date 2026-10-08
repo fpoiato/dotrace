@@ -88,6 +88,8 @@ export class GameEngineService implements OnDestroy {
   /** Re-broadcast / retry when the seat on the clock has not moved. */
   private turnNudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly TURN_NUDGE_MS = 5_000;
+  /** Past the AI request timeout, so a thinking Laya is not played locally. */
+  private static readonly BOT_NUDGE_MS = 30_000;
   /** Human phones listen for this and show the "jogue agora!" countdown. */
   readonly playNow$ = new Subject<string>();
   /** Fast local moves once only bots are left, so the human is not waiting on Lambda. */
@@ -890,9 +892,9 @@ export class GameEngineService implements OnDestroy {
   }
 
   /**
-   * If the seat on the clock has not moved, poke it. On-demand bots (`ai#`)
-   * used to be skipped here, so a hung PLAY_AI_TURN left the race frozen
-   * with no button and no retry. Humans get a play-now ping; bots get stuck.
+   * If the seat on the clock has not moved, poke it. Humans get a play-now
+   * ping at 5s. A bot with a request in flight is thinking, not stuck — the
+   * local play waits until that request has had time to fail.
    */
   private armTurnNudge(state: GameState): void {
     if (this.turnNudgeTimer) {
@@ -902,6 +904,8 @@ export class GameEngineService implements OnDestroy {
     if (!this.isHost || state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
     const seat = state.turnOrder[state.currentTurnIndex];
     if (!seat) return;
+    const player = state.players.find((candidate) => candidate.connectionId === seat);
+    const wait = player && this.isBotSeat(player) ? GameEngineService.BOT_NUDGE_MS : GameEngineService.TURN_NUDGE_MS;
     const round = state.round;
     const index = state.currentTurnIndex;
     this.turnNudgeTimer = setTimeout(() => {
@@ -910,8 +914,9 @@ export class GameEngineService implements OnDestroy {
       if (!latest || latest.phase !== 'GAME_ROUND' || isTimedMode(latest)) return;
       if (latest.round !== round || latest.currentTurnIndex !== index) return;
       if (latest.turnOrder[latest.currentTurnIndex] !== seat) return;
+      if (this.aiInFlight.has(seat)) return;
       this.wakeCurrentSeat();
-    }, GameEngineService.TURN_NUDGE_MS);
+    }, wait);
   }
 
   /**
