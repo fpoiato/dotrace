@@ -263,6 +263,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private startPlayNow(): void {
     this.playNowSeconds = PLAY_NOW_SECONDS;
     this.showWakeButton = false;
+    this.haptic.playNow();
     if (this.playNowTimer) clearInterval(this.playNowTimer);
     this.playNowTimer = setInterval(() => {
       this.playNowSeconds -= 1;
