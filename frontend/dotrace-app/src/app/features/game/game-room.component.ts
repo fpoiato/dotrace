@@ -41,6 +41,7 @@ import { MiniMapComponent } from './mini-map.component';
 import { ReplayViewerComponent } from './replay-viewer.component';
 import { newPenaltyFlags, PenaltyMark } from './penalty-flag';
 import { TrackCanvasComponent } from './track-canvas.component';
+import { PLAY_NOW_SECONDS, TURN_STALL_MS, isBotPlayer, turnStallKey } from './turn-stall';
 
 /** Amber on the pad: a real grass cut, or a landing that leaves the asphalt. */
 function moveWarnsOffAsphalt(
@@ -121,6 +122,14 @@ const PAD_GLYPHS: Record<string, string> = {
       .fuel-reserve {
         color: #fbbf24;
       }
+      .play-now {
+        animation: play-now-pulse 1s ease-in-out infinite;
+      }
+      @keyframes play-now-pulse {
+        50% {
+          transform: scale(1.03);
+        }
+      }
       @keyframes penalty-chip-in {
         from {
           opacity: 0;
@@ -162,6 +171,13 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private boostStamp = '';
   /** Seconds left on a timed grass penalty (drives the popup countdown). */
   penaltyCountdownSec = 0;
+  /** Waiting players can poke a seat that has not moved for 5s. */
+  showWakeButton = false;
+  /** Countdown on the human whose turn has gone quiet. */
+  playNowSeconds = 0;
+  private stallKey = '';
+  private stallTimer: ReturnType<typeof setTimeout> | null = null;
+  private playNowTimer: ReturnType<typeof setInterval> | null = null;
   /** Recent grass penalties, newest first. Shown to every client. */
   penaltyFlags: { id: number; nickname: string; color: string }[] = [];
   private penaltyCuts: Map<string, PenaltyMark> | null = null;
@@ -193,6 +209,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.updatePenaltyCountdown(state);
         this.syncPenaltyFlags(state);
         this.syncStopPenaltyTimer(state);
+        this.watchTurnStall(state);
         this.maybePlayVictoryAnthem(state);
         if (state?.phase === 'GAME_OVER') {
           this.showCelebration = true;
@@ -204,8 +221,72 @@ export class GameRoomComponent implements OnInit, OnDestroy {
           this.showReplay = false;
           void this.router.navigate(['/lobby']);
         }
+      }),
+      this.game.playNow$.subscribe((seat) => {
+        if (seat === this.room.room?.connectionId) this.startPlayNow();
       })
     );
+  }
+
+  wakeOpponents(): void {
+    this.game.wakeOpponents();
+  }
+
+  /**
+   * 5s with no move: waiters get the wake button, the human on the clock
+   * gets "Jogue agora!". The host also signals a stuck bot from the engine.
+   */
+  private watchTurnStall(state: GameState | null): void {
+    const key = turnStallKey(state);
+    if (!key) {
+      this.clearTurnStall();
+      return;
+    }
+    if (key === this.stallKey) return;
+    this.stallKey = key;
+    this.showWakeButton = false;
+    this.clearPlayNow();
+    if (this.stallTimer) clearTimeout(this.stallTimer);
+    this.stallTimer = setTimeout(() => {
+      this.stallTimer = null;
+      if (this.stallKey !== key) return;
+      const current = this.game.currentPlayer();
+      if (this.game.isMyTurn() && !isBotPlayer(current)) {
+        this.startPlayNow();
+      } else {
+        this.showWakeButton = true;
+      }
+      this.cdr.markForCheck();
+    }, TURN_STALL_MS);
+  }
+
+  private startPlayNow(): void {
+    this.playNowSeconds = PLAY_NOW_SECONDS;
+    this.showWakeButton = false;
+    if (this.playNowTimer) clearInterval(this.playNowTimer);
+    this.playNowTimer = setInterval(() => {
+      this.playNowSeconds -= 1;
+      if (this.playNowSeconds <= 0) {
+        this.clearPlayNow();
+        if (this.stallKey) this.showWakeButton = true;
+      }
+      this.cdr.markForCheck();
+    }, 1_000);
+    this.cdr.markForCheck();
+  }
+
+  private clearPlayNow(): void {
+    if (this.playNowTimer) clearInterval(this.playNowTimer);
+    this.playNowTimer = null;
+    this.playNowSeconds = 0;
+  }
+
+  private clearTurnStall(): void {
+    this.stallKey = '';
+    this.showWakeButton = false;
+    if (this.stallTimer) clearTimeout(this.stallTimer);
+    this.stallTimer = null;
+    this.clearPlayNow();
   }
 
   /**
@@ -399,6 +480,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.clearPenaltyFlags();
     this.clearStopPenaltyTimer();
+    this.clearTurnStall();
     this.removeAudioUnlock?.();
     this.removeAudioUnlock = null;
     this.audio.stop();

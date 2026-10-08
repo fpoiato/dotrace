@@ -42,6 +42,25 @@
         }
       </div>
 
+      @if (playNowSeconds > 0) {
+        <p
+          class="play-now mb-1.5 shrink-0 rounded-lg border border-green-400/50 bg-green-700 px-2 py-1.5 text-center text-sm font-black tracking-wide text-white"
+          role="status"
+          aria-live="assertive"
+        >
+          {{ 'game.playNow' | translate }} {{ playNowSeconds }}
+        </p>
+      }
+      @if (showWakeButton) {
+        <button
+          type="button"
+          (click)="wakeOpponents()"
+          class="mb-1.5 shrink-0 rounded-lg bg-amber-500 px-2 py-1.5 text-xs font-bold text-slate-950 active:bg-amber-400"
+        >
+          {{ 'game.wakeOpponents' | translate }}
+        </button>
+      }
+
       @if (myPlayer(state); as me) {
         @if (me.isOffTrack) {
           <p
