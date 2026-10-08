@@ -204,6 +204,7 @@ export class GameEngineService implements OnDestroy {
       state.round = 1;
       state.phase = 'GAME_ROUND';
       state.raceStartedAt = Date.now();
+      this.recordRaceStarted(state.raceStartedAt);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
       return;
     }
@@ -295,6 +296,7 @@ export class GameEngineService implements OnDestroy {
 
     state.phase = 'GAME_ROUND';
     state.raceStartedAt = Date.now();
+    this.recordRaceStarted(state.raceStartedAt);
     this.setStateAndRelay('GRID_ORDER_DONE', state);
   }
 
@@ -534,16 +536,29 @@ export class GameEngineService implements OnDestroy {
     return true;
   }
 
-  /** Persist this race's deltas into the global nickname leaderboard (host only). */
+  /** Persist this race's deltas and the finish counter (host only, no screen). */
   private submitGlobalRaceStats(state: GameState): void {
     if (!this.isHost) return;
     const room = this.roomService.room;
     if (!room) return;
     const stats = buildRaceStatDeltas(state);
-    if (stats.length === 0) return;
+    const raceStartedAt = state.raceStartedAt;
+    const durationMs =
+      typeof raceStartedAt === 'number' ? Math.max(0, Date.now() - raceStartedAt) : undefined;
+    if (stats.length === 0 && durationMs === undefined) return;
     void this.api
-      .postAction('SUBMIT_RACE_STATS', { stats }, room.roomCode)
+      .postAction('SUBMIT_RACE_STATS', { stats, raceStartedAt, durationMs }, room.roomCode)
       .catch((err) => console.warn('Race stats submit failed', err));
+  }
+
+  /** Count the green flag once. A retry with the same timestamp is ignored server-side. */
+  private recordRaceStarted(raceStartedAt: number): void {
+    if (!this.isHost) return;
+    const room = this.roomService.room;
+    if (!room) return;
+    void this.api
+      .postAction('RECORD_RACE_START', { raceStartedAt }, room.roomCode)
+      .catch((err) => console.warn('Race start counter failed', err));
   }
 
   /**

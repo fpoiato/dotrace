@@ -247,6 +247,7 @@ export type ClientAction =
   | 'HOST_STATE_RESPONSE'
   | 'FORWARD_TO_HOST'
   | 'SUBMIT_RACE_STATS'
+  | 'RECORD_RACE_START'
   | 'GET_TOP10'
   | 'SPAWN_AI_PLAYER'
   | 'PLAY_AI_TURN';
@@ -278,6 +279,7 @@ export type ServerEvent =
   | 'PLAYER_ACTION'
   | 'TOP10'
   | 'RACE_STATS_SAVED'
+  | 'RACE_COUNTER_SAVED'
   | 'RELAY_ACK'
   | 'FORWARD_ACK'
   | 'AI_PLAYER_SPAWNING'
