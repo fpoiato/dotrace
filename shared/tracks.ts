@@ -216,51 +216,96 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
 }
 
 /**
- * Twelve staggered slots on the asphalt before the stripe, marching upstream
- * so the lights drop behind the start/finish line.
+ * Twelve staggered slots on the asphalt just behind the stripe.
+ * Sample the centerline continuously: vertex hops on a long straight used to
+ * drop cars a whole segment (~30 cells) apart and far from the checkered line.
+ * Neighbours stay within 3 cells (2 back, 2 across).
  */
 function placeGridBeforeFinish(grid: TileType[][], spec: CircuitSpec): Vector2D[] {
   const dir = spec.arrows[0]?.dir ?? { x: 1, y: 0 };
   const len = Math.hypot(dir.x, dir.y) || 1;
   const dx = dir.x / len;
   const dy = dir.y / len;
-  const px = -dy;
-  const py = dx;
+  const line = spec.centerline;
+  const n = line.length;
+  if (n < 2) return spec.startLine;
+
+  const segLen: number[] = [];
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const a = line[i];
+    const b = line[(i + 1) % n];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    segLen.push(L);
+    total += L;
+  }
+  if (total < 1) return spec.startLine;
+
   const cx = (spec.finish.x0 + spec.finish.x1) / 2;
   const cy = (spec.finish.y0 + spec.finish.y1) / 2;
-  const line = spec.centerline;
-  let best = 0;
+
+  let bestS = 0;
   let bestD = Infinity;
-  for (let i = 0; i < line.length; i++) {
-    const d = Math.hypot(line[i].x - cx, line[i].y - cy);
+  let acc = 0;
+  for (let i = 0; i < n; i++) {
+    const a = line[i];
+    const b = line[(i + 1) % n];
+    const L = segLen[i];
+    const denom = L * L || 1;
+    const t = Math.max(0, Math.min(1, ((cx - a.x) * (b.x - a.x) + (cy - a.y) * (b.y - a.y)) / denom));
+    const px = a.x + (b.x - a.x) * t;
+    const py = a.y + (b.y - a.y) * t;
+    const d = Math.hypot(px - cx, py - cy);
     if (d < bestD) {
       bestD = d;
-      best = i;
+      bestS = acc + L * t;
     }
+    acc += L;
   }
-  const n = line.length;
-  const at = (i: number, delta: number) => line[(i + delta + n * 2) % n];
-  const upstream = (i: number) => {
-    const a = line[i];
-    const forward = at(i, 1);
-    const back = at(i, -1);
-    const f = (forward.x - a.x) * dx + (forward.y - a.y) * dy;
-    const b = (back.x - a.x) * dx + (back.y - a.y) * dy;
-    return f < b ? 1 : -1;
+
+  const pointAt = (s: number): { x: number; y: number; tx: number; ty: number } => {
+    let u = ((s % total) + total) % total;
+    for (let i = 0; i < n; i++) {
+      const L = segLen[i];
+      if (u <= L || i === n - 1) {
+        const a = line[i];
+        const b = line[(i + 1) % n];
+        const t = L > 0 ? Math.min(1, u / L) : 0;
+        const vx = b.x - a.x;
+        const vy = b.y - a.y;
+        const vl = Math.hypot(vx, vy) || 1;
+        return { x: a.x + vx * t, y: a.y + vy * t, tx: vx / vl, ty: vy / vl };
+      }
+      u -= L;
+    }
+    return { x: line[0].x, y: line[0].y, tx: dx, ty: dy };
   };
-  let step = upstream(best);
-  let i = best;
-  let gap = 0;
-  while (gap < 5) {
-    const a = line[i];
-    const b = at(i, step);
-    gap += Math.hypot(b.x - a.x, b.y - a.y);
-    i = (i + step + n) % n;
+
+  const here = pointAt(bestS);
+  // Increasing arc length is upstream when the tangent opposes the race direction.
+  let upstreamSign = here.tx * dx + here.ty * dy >= 0 ? -1 : 1;
+  const behind = (s: number): number => {
+    const p = pointAt(s);
+    return (p.x - cx) * dx + (p.y - cy) * dy;
+  };
+  if (behind(bestS + upstreamSign * 2) > behind(bestS - upstreamSign * 2)) upstreamSign *= -1;
+
+  const inFinish = (x: number, y: number): boolean =>
+    x >= spec.finish.x0 - 0.5 &&
+    x <= spec.finish.x1 + 0.5 &&
+    y >= spec.finish.y0 - 0.5 &&
+    y <= spec.finish.y1 + 0.5;
+
+  // First row sits one cell behind the stripe, not on it and not a segment away.
+  let back = 0.5;
+  while (back < 12 && inFinish(pointAt(bestS + upstreamSign * back).x, pointAt(bestS + upstreamSign * back).y)) {
+    back += 0.5;
   }
+  back += 1;
+
   const used = new Set<string>();
-  const slots: Vector2D[] = [];
   const snap = (x: number, y: number): Vector2D | null => {
-    for (let r = 0; r <= 5; r++) {
+    for (let r = 0; r <= 3; r++) {
       for (let oy = -r; oy <= r; oy++) {
         for (let ox = -r; ox <= r; ox++) {
           if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
@@ -276,25 +321,26 @@ function placeGridBeforeFinish(grid: TileType[][], spec: CircuitSpec): Vector2D[
     }
     return null;
   };
+
+  const slots: Vector2D[] = [];
+  const ROW_GAP = 2;
+  const LAT = 1.15;
   for (let row = 0; row < 6 && slots.length < 12; row++) {
-    const a = line[i];
-    const b = at(i, step);
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    const left = snap(mx + px * 1.7, my + py * 1.7);
-    const right = snap(mx - px * 1.7, my - py * 1.7);
-    if (left) slots.push(left);
-    if (right) slots.push(right);
-    let walked = 0;
-    while (walked < 3.2) {
-      const c = line[i];
-      const d = at(i, step);
-      walked += Math.hypot(d.x - c.x, d.y - c.y);
-      i = (i + step + n) % n;
+    const p = pointAt(bestS + upstreamSign * (back + row * ROW_GAP));
+    const nx = -p.ty;
+    const ny = p.tx;
+    const left = snap(p.x + nx * LAT, p.y + ny * LAT);
+    const right = snap(p.x - nx * LAT, p.y - ny * LAT);
+    // Stagger so car N+2 sits beside the previous row, still within 3 cells.
+    if (row % 2 === 0) {
+      if (left) slots.push(left);
+      if (right) slots.push(right);
+    } else {
+      if (right) slots.push(right);
+      if (left) slots.push(left);
     }
   }
-  const behind = slots.filter((p) => (p.x - cx) * dx + (p.y - cy) * dy < -1);
-  return behind.length > 0 ? behind : spec.startLine;
+  return slots.length > 0 ? slots : spec.startLine;
 }
 
 /**
