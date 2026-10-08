@@ -1,58 +1,56 @@
 <div>
   <h2 class="mb-1 text-xs font-medium text-slate-400">{{ 'lobby.selectTrack' | translate }}</h2>
-  <button
-    type="button"
-    (click)="openPicker()"
-    class="mb-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border-2 px-3 text-left transition hover:border-slate-500"
-    [class]="selectedTrackId ? 'border-orange-500 bg-orange-500/10' : 'border-slate-600'"
-  >
-    <span class="font-semibold" [class.text-slate-400]="!selectedTrackId">
-      {{ buttonLabelKey | translate }}
-    </span>
-    <span class="shrink-0 text-slate-400" aria-hidden="true">▾</span>
-  </button>
-</div>
+  <div class="mb-2 rounded-xl border-2 bg-slate-900/60 p-2" [class]="chosen ? 'border-orange-500' : 'border-slate-600'">
+    <div class="flex items-center gap-2">
+      <button
+        type="button"
+        (click)="prev()"
+        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-slate-600 text-xl text-white transition hover:border-slate-500"
+        [attr.aria-label]="'lobby.prevTrack' | translate"
+      >
+        ‹
+      </button>
 
-@if (open) {
-  <div
-    class="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center"
-    (click)="closePicker()"
-  >
-    <div
-      class="flex max-h-[85dvh] w-full max-w-md flex-col rounded-t-2xl bg-slate-900 sm:rounded-2xl"
-      (click)="$event.stopPropagation()"
-      role="dialog"
-      aria-modal="true"
-      [attr.aria-label]="'lobby.selectTrack' | translate"
-    >
-      <div class="shrink-0 border-b border-slate-700 px-5 py-4">
-        <h3 class="text-lg font-bold text-orange-400">{{ 'lobby.selectTrack' | translate }}</h3>
-      </div>
+      <button
+        type="button"
+        class="min-w-0 flex-1"
+        (click)="chooseCurrent()"
+        (touchstart)="onTouchStart($event)"
+        (touchend)="onTouchEnd($event)"
+        [attr.aria-label]="(current?.nameKey ?? 'lobby.selectTrack') | translate"
+      >
+        <canvas #preview class="h-40 w-full rounded-lg bg-slate-950"></canvas>
+      </button>
 
-      <div class="overflow-y-auto overscroll-contain px-5 py-4">
-        <div class="grid grid-cols-1 gap-3">
-          @for (track of tracks; track track.id) {
-            <button
-              type="button"
-              (click)="pick(track.id)"
-              class="min-h-14 rounded-xl border-2 px-4 text-left font-semibold transition"
-              [class]="selectedTrackId === track.id ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600 hover:border-slate-500'"
-            >
-              {{ trackLabelKey(track) | translate }}
-            </button>
-          }
-        </div>
-      </div>
+      <button
+        type="button"
+        (click)="next()"
+        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-slate-600 text-xl text-white transition hover:border-slate-500"
+        [attr.aria-label]="'lobby.nextTrack' | translate"
+      >
+        ›
+      </button>
+    </div>
 
-      <div class="shrink-0 border-t border-slate-700 p-5">
+    <div class="mt-2 flex items-center justify-between gap-2 px-1">
+      <p class="truncate text-sm font-semibold" [class.text-orange-300]="chosen" [class.text-white]="!chosen">
+        {{ (current?.nameKey ?? 'lobby.selectTrackPlaceholder') | translate }}
+      </p>
+      <p class="shrink-0 text-[11px] text-slate-400">{{ index + 1 }}/{{ tracks.length }}</p>
+    </div>
+
+    <div class="mt-2 flex justify-center gap-1.5" role="tablist" [attr.aria-label]="'lobby.selectTrack' | translate">
+      @for (track of tracks; track track.id; let i = $index) {
         <button
           type="button"
-          (click)="closePicker()"
-          class="min-h-12 w-full rounded-xl bg-slate-700 font-semibold text-white transition hover:bg-slate-600"
-        >
-          {{ closeLabelKey | translate }}
-        </button>
-      </div>
+          role="tab"
+          (click)="go(i)"
+          class="h-2.5 rounded-full transition"
+          [class]="i === index ? 'w-6 bg-orange-500' : 'w-2.5 bg-slate-600'"
+          [attr.aria-selected]="i === index"
+          [attr.aria-label]="track.nameKey | translate"
+        ></button>
+      }
     </div>
   </div>
-}
+</div>
