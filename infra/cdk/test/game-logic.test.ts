@@ -1207,11 +1207,11 @@ describe('global leaderboard rank keys', () => {
 describe('compareLeaderboardEntries', () => {
   it('sorts by wins, then best lap time, then rounds, then name', () => {
     const rows = [
-      { nickname: 'slow-champ', wins: 5, bestLapMs: 90_000, bestLapRounds: 20 },
-      { nickname: 'fast-rookie', wins: 1, bestLapMs: 15_000, bestLapRounds: 4 },
-      { nickname: 'same-wins-slower', wins: 5, bestLapMs: 60_000, bestLapRounds: 10 },
-      { nickname: 'same-wins-faster', wins: 5, bestLapMs: 40_000, bestLapRounds: 12 },
-      { nickname: 'same-time-fewer-r', wins: 5, bestLapMs: 40_000, bestLapRounds: 8 },
+      { trackId: 'monza', nickname: 'slow-champ', wins: 5, bestLapMs: 90_000, bestLapRounds: 20 },
+      { trackId: 'monza', nickname: 'fast-rookie', wins: 1, bestLapMs: 15_000, bestLapRounds: 4 },
+      { trackId: 'monza', nickname: 'same-wins-slower', wins: 5, bestLapMs: 60_000, bestLapRounds: 10 },
+      { trackId: 'monza', nickname: 'same-wins-faster', wins: 5, bestLapMs: 40_000, bestLapRounds: 12 },
+      { trackId: 'monza', nickname: 'same-time-fewer-r', wins: 5, bestLapMs: 40_000, bestLapRounds: 8 },
     ];
     rows.sort(compareLeaderboardEntries);
     expect(rows.map((r) => r.nickname)).toEqual([
@@ -1225,8 +1225,8 @@ describe('compareLeaderboardEntries', () => {
 
   it('ignores absurd legacy wall-clock "laps" when comparing', () => {
     const rows = [
-      { nickname: 'turns-junk', wins: 2, bestLapMs: 12 * 60 * 1000, bestLapRounds: 8 },
-      { nickname: 'timed-real', wins: 2, bestLapMs: 45_000, bestLapRounds: 10 },
+      { trackId: 'monza', nickname: 'turns-junk', wins: 2, bestLapMs: 12 * 60 * 1000, bestLapRounds: 8 },
+      { trackId: 'monza', nickname: 'timed-real', wins: 2, bestLapMs: 45_000, bestLapRounds: 10 },
     ];
     rows.sort(compareLeaderboardEntries);
     expect(rows.map((r) => r.nickname)).toEqual(['timed-real', 'turns-junk']);

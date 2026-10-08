@@ -1,7 +1,7 @@
 export const environment = {
   production: false,
-  wsUrl: 'wss://localhost/ws',
+  wsUrl: 'ws://localhost:3001',
   apiUrl: 'http://localhost:3001',
   appUrl: 'http://localhost:4200',
-  version: '1.11.44-dev',
+  version: '1.11.47-dev',
 };
