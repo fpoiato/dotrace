@@ -5,17 +5,18 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
-/** Cumulative global stats keyed by normalized nickname. */
+/** Cumulative stats keyed by normalized nickname and track. */
 export interface LeaderboardRecord {
   nicknameKey: string;
   displayName: string;
+  /** Circuit this row belongs to. Same pilot can have one row per track. */
+  trackId: string;
   races: number;
   wins: number;
   podiums: number;
   bestLapMs?: number;
   bestLapRounds?: number;
   updatedAt: number;
-  /** Constant GSI partition for Top-N queries. */
   /** Season partition. Bump LEADERBOARD_SEASON to hide previous layouts. */
   board: string;
   /**
@@ -28,6 +29,7 @@ export interface LeaderboardRecord {
 /** Per-race delta submitted by the host after GAME_OVER. */
 export interface RaceStatDelta {
   nickname: string;
+  trackId: string;
   races: number;
   wins: number;
   podiums: number;
@@ -37,6 +39,7 @@ export interface RaceStatDelta {
 
 export interface Top10Entry {
   nickname: string;
+  trackId: string;
   races: number;
   wins: number;
   podiums: number;
@@ -47,13 +50,22 @@ export interface Top10Entry {
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.LEADERBOARD_TABLE!;
 /**
- * Home-screen season. Tracks changed, so s2 is a fresh board.
- * The item key is also prefixed: the table PK is nicknameKey, and writing
- * the new board onto the old key would carry wins and best laps forward.
+ * Home-screen season. s3 splits the board by track: the same pilot can
+ * appear once per circuit. The item key is prefixed so s2 nickname-only
+ * rows (wins mixed across tracks) stay off this board.
  */
-export const LEADERBOARD_SEASON = 's2';
+export const LEADERBOARD_SEASON = 's3';
 const BOARD = LEADERBOARD_SEASON;
 const TOP_N = 10;
+/** Circuits that can own a ranking row. Keep in sync with shared/tracks.ts. */
+export const LEADERBOARD_TRACK_IDS = [
+  'monza',
+  'monaco',
+  'interlagos',
+  'silverstone',
+  'spa',
+  'suzuka',
+] as const;
 /** Wins inverted into a 6-digit field (supports up to 999_999 wins). */
 const WINS_PAD = 1_000_000;
 /**
@@ -70,8 +82,18 @@ const MAX_LAP_ROUNDS = 999_999;
  */
 export const MAX_PLAUSIBLE_LAP_MS = 10 * 60 * 1000;
 
-export function nicknameKey(nickname: string): string {
-  return `${LEADERBOARD_SEASON}#${nickname.trim().toLowerCase()}`;
+export function isLeaderboardTrackId(trackId: string): boolean {
+  return (LEADERBOARD_TRACK_IDS as readonly string[]).includes(trackId);
+}
+
+export function nicknameKey(nickname: string, trackId: string): string {
+  return `${LEADERBOARD_SEASON}#${nickname.trim().toLowerCase()}#${trackId}`;
+}
+
+/** Last segment of `s3#ana#monza`. Empty when the row has no track. */
+export function trackIdFromKey(key: string): string {
+  const trackId = key.split('#').pop() ?? '';
+  return isLeaderboardTrackId(trackId) ? trackId : '';
 }
 
 /** Drop non-positive / absurd wall-clock "best laps" (legacy TURNS pollution). */
@@ -107,8 +129,8 @@ export function buildRankKey(
 
 /** Same ordering as buildRankKey — used to sort Top 10 in memory (covers stale keys). */
 export function compareLeaderboardEntries(
-  a: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'>,
-  b: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname'>
+  a: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname' | 'trackId'>,
+  b: Pick<Top10Entry, 'wins' | 'bestLapMs' | 'bestLapRounds' | 'nickname' | 'trackId'>
 ): number {
   if (b.wins !== a.wins) return b.wins - a.wins;
   const aLap = sanitizeBestLapMs(a.bestLapMs) ?? Number.POSITIVE_INFINITY;
@@ -117,14 +139,19 @@ export function compareLeaderboardEntries(
   const aRounds = a.bestLapRounds ?? Number.POSITIVE_INFINITY;
   const bRounds = b.bestLapRounds ?? Number.POSITIVE_INFINITY;
   if (aRounds !== bRounds) return aRounds - bRounds;
-  return a.nickname.localeCompare(b.nickname);
+  const byName = a.nickname.localeCompare(b.nickname);
+  if (byName !== 0) return byName;
+  return (a.trackId ?? '').localeCompare(b.trackId ?? '');
 }
 
 function clampDelta(raw: RaceStatDelta): RaceStatDelta | null {
   const nickname = raw.nickname?.trim() ?? '';
+  const trackId = typeof raw.trackId === 'string' ? raw.trackId.trim() : '';
   if (!nickname || nickname.length > 20) return null;
+  if (!isLeaderboardTrackId(trackId)) return null;
   return {
     nickname,
+    trackId,
     races: Math.max(0, Math.min(1, Math.floor(Number(raw.races) || 0))),
     wins: Math.max(0, Math.min(1, Math.floor(Number(raw.wins) || 0))),
     podiums: Math.max(0, Math.min(1, Math.floor(Number(raw.podiums) || 0))),
@@ -162,7 +189,7 @@ export async function applyRaceStatDelta(raw: RaceStatDelta): Promise<void> {
     return;
   }
 
-  const key = nicknameKey(delta.nickname);
+  const key = nicknameKey(delta.nickname, delta.trackId);
   const now = Date.now();
 
   const afterCounters = await ddb.send(
@@ -170,12 +197,13 @@ export async function applyRaceStatDelta(raw: RaceStatDelta): Promise<void> {
       TableName: TABLE,
       Key: { nicknameKey: key },
       UpdateExpression:
-        'ADD races :r, wins :w, podiums :p SET displayName = :name, updatedAt = :now, board = :board',
+        'ADD races :r, wins :w, podiums :p SET displayName = :name, trackId = :track, updatedAt = :now, board = :board',
       ExpressionAttributeValues: {
         ':r': delta.races,
         ':w': delta.wins,
         ':p': delta.podiums,
         ':name': delta.nickname,
+        ':track': delta.trackId,
         ':now': now,
         ':board': BOARD,
       },
@@ -264,14 +292,17 @@ export async function getTop10(): Promise<Top10Entry[]> {
     })
   );
 
-  const entries = ((result.Items ?? []) as LeaderboardRecord[]).map((row) => ({
-    nickname: row.displayName || row.nicknameKey,
-    races: row.races ?? 0,
-    wins: row.wins ?? 0,
-    podiums: row.podiums ?? 0,
-    bestLapMs: sanitizeBestLapMs(row.bestLapMs),
-    bestLapRounds: row.bestLapRounds,
-  }));
+  const entries = ((result.Items ?? []) as LeaderboardRecord[])
+    .map((row) => ({
+      nickname: row.displayName || row.nicknameKey,
+      trackId: row.trackId || trackIdFromKey(row.nicknameKey),
+      races: row.races ?? 0,
+      wins: row.wins ?? 0,
+      podiums: row.podiums ?? 0,
+      bestLapMs: sanitizeBestLapMs(row.bestLapMs),
+      bestLapRounds: row.bestLapRounds,
+    }))
+    .filter((row) => isLeaderboardTrackId(row.trackId));
 
   // Wins first, then plausible best-lap time, then fewest rounds.
   entries.sort(compareLeaderboardEntries);

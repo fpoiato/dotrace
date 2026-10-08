@@ -3,5 +3,5 @@ export const environment = {
   wsUrl: 'wss://localhost/ws',
   apiUrl: 'http://localhost:3001',
   appUrl: 'http://localhost:4200',
-  version: '1.11.43-dev',
+  version: '1.11.44-dev',
 };

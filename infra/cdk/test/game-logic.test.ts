@@ -1115,11 +1115,13 @@ describe('lap splits and session ranking', () => {
     const state = createInitialState([ana, bob], 'a');
     state.gameMode = 'TIMED';
     state.raceStartedAt = startedAt;
+    state.trackId = 'interlagos';
     state.players = [ana, bob];
 
     const deltas = buildRaceStatDeltas(state);
     expect(deltas).toHaveLength(2);
     expect(deltas.find((d) => d.nickname === 'Ana')).toMatchObject({
+      trackId: 'interlagos',
       races: 1,
       wins: 1,
       podiums: 1,
@@ -1127,6 +1129,7 @@ describe('lap splits and session ranking', () => {
       bestLapRounds: 5,
     });
     expect(deltas.find((d) => d.nickname === 'Bob')).toMatchObject({
+      trackId: 'interlagos',
       races: 1,
       wins: 0,
       podiums: 0,
@@ -1170,8 +1173,10 @@ describe('lap splits and session ranking', () => {
 });
 
 describe('global leaderboard rank keys', () => {
-  it('normalizes nicknames case-insensitively', () => {
-    expect(nicknameKey('  Ana ')).toBe('s2#ana');
+  it('normalizes nicknames case-insensitively and keys by track', () => {
+    expect(nicknameKey('  Ana ', 'monza')).toBe('s3#ana#monza');
+    expect(nicknameKey('Ana', 'spa')).toBe('s3#ana#spa');
+    expect(nicknameKey('Ana', 'monza')).not.toBe(nicknameKey('Ana', 'spa'));
   });
 
   it('orders higher wins before lower wins (ascending rankKey)', () => {
