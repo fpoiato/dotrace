@@ -1777,9 +1777,10 @@ export function remapReplayLogConnectionId(
   );
 }
 
-/** Per-race delta sent to the server to persist global nickname stats. */
+/** Per-race delta sent to the server to persist nickname stats on one track. */
 export interface RaceStatDelta {
   nickname: string;
+  trackId: string;
   races: number;
   wins: number;
   podiums: number;
@@ -1787,9 +1788,10 @@ export interface RaceStatDelta {
   bestLapRounds?: number;
 }
 
-/** One row in the global Top 10 leaderboard. */
+/** One row in the global Top 10. Same nickname may appear once per track. */
 export interface Top10Entry {
   nickname: string;
+  trackId: string;
   races: number;
   wins: number;
   podiums: number;
@@ -1818,6 +1820,7 @@ export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
     .map((p) => {
       const delta: RaceStatDelta = {
         nickname: p.nickname,
+        trackId: state.trackId,
         races: 1,
         wins: !p.disqualified && p.finishOrder === 1 ? 1 : 0,
         podiums:

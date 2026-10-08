@@ -12,7 +12,7 @@ function sanitizeBestLapMs(ms: number | undefined): number | undefined {
   return n > MAX_PLAUSIBLE_LAP_MS ? undefined : n;
 }
 
-/** Wins → best lap → fewest rounds → name (matches server Top 10). */
+/** Wins → best lap → fewest rounds → name → track (matches server Top 10). */
 function compareTop10(a: Top10Entry, b: Top10Entry): number {
   if (b.wins !== a.wins) return b.wins - a.wins;
   const aLap = sanitizeBestLapMs(a.bestLapMs) ?? Number.POSITIVE_INFINITY;
@@ -21,7 +21,9 @@ function compareTop10(a: Top10Entry, b: Top10Entry): number {
   const aRounds = a.bestLapRounds ?? Number.POSITIVE_INFINITY;
   const bRounds = b.bestLapRounds ?? Number.POSITIVE_INFINITY;
   if (aRounds !== bRounds) return aRounds - bRounds;
-  return a.nickname.localeCompare(b.nickname);
+  const byName = a.nickname.localeCompare(b.nickname);
+  if (byName !== 0) return byName;
+  return (a.trackId ?? '').localeCompare(b.trackId ?? '');
 }
 
 @Injectable({ providedIn: 'root' })
@@ -48,8 +50,10 @@ export class LeaderboardService {
       const entries = raw
         .map((row) => ({
           ...row,
+          trackId: row.trackId ?? '',
           bestLapMs: sanitizeBestLapMs(row.bestLapMs),
         }))
+        .filter((row) => row.trackId.length > 0)
         .sort(compareTop10)
         .slice(0, 10);
       this.top10Subject.next(entries);
