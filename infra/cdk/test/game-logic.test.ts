@@ -1676,7 +1676,7 @@ describe('DRS and ERS', () => {
 
   it('places DRS zones on asphalt, off the stripe and off the lap checkpoint', () => {
     const several = new Map([
-      ['monza', 2],
+      ['monza', 3],
       ['monaco', 3],
       ['interlagos', 2],
     ]);
