@@ -1787,7 +1787,7 @@ describe('fuel and pit lane', () => {
     expect(fuelEnabled(5)).toBe(false);
     expect(fuelEnabled(6)).toBe(true);
     expect(fuelBurn(6, false)).toBeGreaterThan(fuelBurn(2, false));
-    expect(fuelBurn(6, true)).toBe(Math.floor(fuelBurn(6, false) / 2));
+    expect(fuelBurn(6, true)).toBe(Math.round((fuelBurn(6, false) / 2) * 10) / 10);
   });
 
   it('puts a colored stall detour on every circuit', () => {
@@ -1812,7 +1812,7 @@ describe('fuel and pit lane', () => {
     expect(moves.every((m) => gearOf(m.velocity) <= PIT_MAX_GEAR)).toBe(true);
 
     settleFuel(player, 5, false);
-    expect(player.fuel).toBe(6);
+    expect(player.fuel).toBe(9.6);
     player.driveThroughOwed = 1;
     expect(settlePitVisit(player, track, 'pitbox', 3)).toBe('stop');
     expect(player.fuel).toBe(FUEL_TANK);
