@@ -81,6 +81,10 @@ export interface BoardSummary {
     lap: number;
     finished: boolean;
   }[];
+  /** Undefined when the race does not use fuel. */
+  fuel?: number;
+  driveThroughOwed?: number;
+  pitBox?: Vector2D;
 }
 
 function rectCenter(rect: { x0: number; y0: number; x1: number; y1: number }): Vector2D {
@@ -191,6 +195,9 @@ export function buildBoardSummary(
         lap: p.lap,
         finished: p.finishOrder !== undefined,
       })),
+    fuel: player.fuel,
+    driveThroughOwed: player.driveThroughOwed,
+    pitBox: player.pitBoxIndex === undefined ? undefined : track.pitBoxes?.[player.pitBoxIndex],
   };
 }
 

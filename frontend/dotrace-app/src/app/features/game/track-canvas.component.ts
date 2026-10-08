@@ -666,6 +666,7 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
 
     this.drawPaper(ctx, track);
     this.drawGrass(ctx, track);
+    this.drawPitLane(ctx, track);
     this.drawFinishStripe(ctx, track);
     this.drawDrsZones(ctx, track);
     this.drawTrackBorders(ctx, track);
@@ -727,6 +728,23 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
           ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
         }
       }
+    }
+  }
+
+  /** Grey pit lane beside the longest straight, stalls in each car's color. */
+  private drawPitLane(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+    ctx.fillStyle = '#94a3b8';
+    for (let y = 0; y < track.height; y++) {
+      for (let x = 0; x < track.width; x++) {
+        const tile = track.grid[y][x];
+        if (tile === 'pit' || tile === 'pitbox') ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      }
+    }
+    const players = [...(this.state?.players ?? [])].sort((a, b) => (a.pitBoxIndex ?? 99) - (b.pitBoxIndex ?? 99));
+    for (const box of track.pitBoxes ?? []) {
+      const owner = players.find((p) => p.pitBoxIndex !== undefined && track.pitBoxes?.[p.pitBoxIndex]?.x === box.x && track.pitBoxes?.[p.pitBoxIndex]?.y === box.y);
+      ctx.fillStyle = owner?.color ?? '#e2e8f0';
+      ctx.fillRect(box.x * CELL + 2, box.y * CELL + 2, CELL - 4, CELL - 4);
     }
   }
 

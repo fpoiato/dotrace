@@ -44,6 +44,11 @@ import {
   buildRaceStatDeltas,
   zeroVector,
   buildRaceTelemetry,
+  fuelEnabled,
+  FUEL_TANK,
+  isLapOption,
+  settleFuel,
+  settlePitVisit,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
 import { RoomContext, RoomService } from './room.service';
@@ -144,19 +149,18 @@ export class GameEngineService implements OnDestroy {
 
   selectLaps(laps: number): void {
     if (!this.isHost) return;
-    if (![1, 2, 3].includes(laps)) return;
+    if (!isLapOption(laps)) return;
     const state = this.state ?? this.bootstrapLobbyState();
     state.totalLaps = laps;
     this.session.save({ laps });
     this.setStateAndRelay('STATE_SYNC', state);
   }
 
-  selectGameMode(mode: GameMode): void {
+  selectGameMode(_mode: GameMode): void {
     if (!this.isHost) return;
-    if (mode !== 'TURNS' && mode !== 'TIMED') return;
     const state = this.state ?? this.bootstrapLobbyState();
-    state.gameMode = mode;
-    this.session.save({ gameMode: mode });
+    state.gameMode = 'TURNS';
+    this.session.save({ gameMode: 'TURNS' });
     this.setStateAndRelay('STATE_SYNC', state);
   }
 
@@ -171,7 +175,7 @@ export class GameEngineService implements OnDestroy {
     const trackId = prev?.trackId || saved?.trackId || '';
     if (!trackId || !getTrackById(trackId)) return;
     const totalLaps = prev?.totalLaps ?? saved?.laps ?? 1;
-    const gameMode = prev?.gameMode ?? saved?.gameMode ?? 'TURNS';
+    const gameMode = 'TURNS';
     // Keep party-session ranking across rematches in the same room.
     const sessionStats = prev?.sessionStats;
 
@@ -184,8 +188,8 @@ export class GameEngineService implements OnDestroy {
       room.connectionId
     );
     state.trackId = trackId;
-    state.totalLaps = [1, 2, 3].includes(totalLaps) ? totalLaps : 1;
-    state.gameMode = gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
+    state.totalLaps = isLapOption(totalLaps) ? totalLaps : 1;
+    state.gameMode = gameMode;
     if (sessionStats?.length) state.sessionStats = sessionStats;
 
     const track = getTrackById(trackId)!;
@@ -314,6 +318,12 @@ export class GameEngineService implements OnDestroy {
       player.drsZonesUsed = [];
       player.ersCharge = 0;
       player.ersActive = false;
+      player.fuel = fuelEnabled(state.totalLaps) ? FUEL_TANK : undefined;
+      player.pitBoxIndex = idx;
+      player.driveThroughArmed = false;
+      player.driveThroughOwed = 0;
+      player.pitHoldUntilRound = undefined;
+      player.disqualified = false;
       player.trail = [{ ...start }];
       player.lap = 1;
     });
@@ -392,6 +402,8 @@ export class GameEngineService implements OnDestroy {
     }
     settleBoostFromGears(player, previousGear, gearOf(player.velocity));
     player.ersActive = limits.spendErs;
+    settleFuel(player, gearOf(player.velocity), limits.spendErs);
+    settlePitVisit(player, track, tile, state.round);
 
     if (grassShortcut) {
       applyGrassPenalty(player, state);
@@ -417,6 +429,12 @@ export class GameEngineService implements OnDestroy {
         player.lap += 1;
         beginNextLap(player);
         player.trail = [{ ...landing }];
+      } else if ((player.driveThroughOwed ?? 0) > 0) {
+        player.disqualified = true;
+        player.finishOrder = 100 + state.players.length;
+        player.finishRound = state.round;
+        player.finishedAt = now;
+        this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname, dsq: true });
       } else {
         const pos = state.podium.length + 1;
         player.finishOrder = pos;
@@ -448,6 +466,9 @@ export class GameEngineService implements OnDestroy {
       grassCuts: player.grassCuts ?? 0,
       gearPenaltyUntilRound: player.gearPenaltyUntilRound,
       stopUntil: player.stopUntil,
+      fuel: player.fuel,
+      driveThroughOwed: player.driveThroughOwed,
+      disqualified: player.disqualified,
     });
 
     if (this.tryEndRace(state)) return true;
@@ -472,7 +493,32 @@ export class GameEngineService implements OnDestroy {
     if (state.currentTurnIndex <= prevIndex) {
       state.round += 1;
     }
+    if (this.servePitHold(state)) return;
     this.setStateAndRelay('TURN_ADVANCED', state, meta);
+  }
+
+  /** A car in its own box sits out exactly one following round, then is released. */
+  private servePitHold(state: GameState): boolean {
+    const id = state.turnOrder[state.currentTurnIndex];
+    const player = state.players.find((p) => p.connectionId === id);
+    if (!player || player.finishOrder !== undefined) return false;
+    if (player.pitHoldUntilRound === undefined || state.round > player.pitHoldUntilRound) return false;
+    player.velocity = zeroVector();
+    player.pitHoldUntilRound = undefined;
+    pushReplayMove(state, {
+      round: state.round,
+      connectionId: player.connectionId,
+      position: { ...player.position },
+      velocity: { ...player.velocity },
+      isOffTrack: player.isOffTrack,
+      lap: player.lap,
+      fuel: player.fuel,
+      driveThroughOwed: player.driveThroughOwed,
+      disqualified: player.disqualified,
+      grassCuts: player.grassCuts ?? 0,
+    });
+    this.advanceTurn(state, { pitStop: player.nickname });
+    return true;
   }
 
   /**
@@ -522,8 +568,8 @@ export class GameEngineService implements OnDestroy {
       );
     const state = createInitialState(players, room.connectionId);
     state.trackId = current.trackId || '';
-    state.totalLaps = [1, 2, 3].includes(current.totalLaps) ? current.totalLaps : 1;
-    state.gameMode = current.gameMode === 'TIMED' ? 'TIMED' : 'TURNS';
+    state.totalLaps = isLapOption(current.totalLaps) ? current.totalLaps : 1;
+    state.gameMode = 'TURNS';
     if (current.sessionStats?.length) state.sessionStats = current.sessionStats;
     this.session.save({
       trackId: state.trackId || undefined,
@@ -543,8 +589,8 @@ export class GameEngineService implements OnDestroy {
     const state = createInitialState(players, room.connectionId);
     const saved = this.session.load();
     if (saved?.trackId) state.trackId = saved.trackId;
-    if (saved?.laps) state.totalLaps = saved.laps;
-    if (saved?.gameMode) state.gameMode = saved.gameMode;
+    if (saved?.laps && isLapOption(saved.laps)) state.totalLaps = saved.laps;
+    state.gameMode = 'TURNS';
     this.emit(state);
     return state;
   }

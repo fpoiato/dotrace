@@ -191,6 +191,142 @@ function sealRumbleGaps(grid: TileType[][], maxGap = 4): void {
   for (const [x, y] of fill) grid[y][x] = 'rumble';
 }
 
+
+const PIT_OFFSET = 9;
+const PIT_RADIUS = 1.55;
+const PIT_BOXES = 12;
+
+/** Longest nearly-straight run on the racing line. */
+function longestStraight(centerline: Vector2D[]): { a: Vector2D; b: Vector2D } {
+  const pts = centerline.filter((p, i) => {
+    if (i === 0) return true;
+    const prev = centerline[i - 1];
+    return prev.x !== p.x || prev.y !== p.y;
+  });
+  if (pts.length < 2) return { a: centerline[0], b: centerline[Math.min(1, centerline.length - 1)] };
+
+  let bestLen = -1;
+  let bestA = pts[0];
+  let bestB = pts[1];
+  let runStart = 0;
+  const dirOf = (i: number) => {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: (b.x - a.x) / len, y: (b.y - a.y) / len, len };
+  };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const head = dirOf(runStart);
+    const step = dirOf(i);
+    const aligned = head.x * step.x + head.y * step.y;
+    const endsRun = aligned < 0.985 || i === pts.length - 2;
+    if (!endsRun) continue;
+    const end = aligned < 0.985 ? i : i + 1;
+    const a = pts[runStart];
+    const b = pts[end];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len > bestLen) {
+      bestLen = len;
+      bestA = a;
+      bestB = b;
+    }
+    runStart = end;
+    if (end === i + 1 && i < pts.length - 2) {
+      // continue from the segment that broke alignment
+    }
+  }
+  return { a: bestA, b: bestB };
+}
+
+function stampPitDisc(grid: TileType[][], cx: number, cy: number): void {
+  const h = grid.length;
+  const w = grid[0].length;
+  const r = PIT_RADIUS;
+  const minY = Math.max(0, Math.floor(cy - r));
+  const maxY = Math.min(h - 1, Math.ceil(cy + r));
+  const minX = Math.max(0, Math.floor(cx - r));
+  const maxX = Math.min(w - 1, Math.ceil(cx + r));
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      if (dx * dx + dy * dy > r * r) continue;
+      const tile = grid[y][x];
+      if (tile === 'grass' || tile === 'rumble') grid[y][x] = 'pit';
+    }
+  }
+}
+
+/**
+ * Pit lane beside the longest straight: a detour, not a shortcut.
+ * Entry and exit step out from the asphalt; twelve stalls sit on the lane.
+ */
+function attachPitLane(grid: TileType[][], centerline: Vector2D[]): Vector2D[] {
+  const straight = longestStraight(centerline);
+  const dx = straight.b.x - straight.a.x;
+  const dy = straight.b.y - straight.a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy;
+  const py = ux;
+  const h = grid.length;
+  const w = grid[0].length;
+
+  const sideCost = (sign: number): number => {
+    let cost = 0;
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16;
+      const x = straight.a.x + ux * len * t + px * PIT_OFFSET * sign;
+      const y = straight.a.y + uy * len * t + py * PIT_OFFSET * sign;
+      if (x < 2 || y < 2 || x >= w - 2 || y >= h - 2) cost += 8;
+      const tile = grid[Math.round(y)]?.[Math.round(x)];
+      if (tile === 'track' || tile === 'finish') cost += 3;
+    }
+    return cost;
+  };
+  const sign = sideCost(1) <= sideCost(-1) ? 1 : -1;
+
+  const pointAt = (t: number, offset: number): Vector2D => ({
+    x: straight.a.x + ux * len * t + px * offset * sign,
+    y: straight.a.y + uy * len * t + py * offset * sign,
+  });
+
+  const carve = (from: Vector2D, to: Vector2D) => {
+    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+    const steps = Math.max(1, Math.ceil(dist * 3));
+    for (let s = 0; s <= steps; s++) {
+      const u = s / steps;
+      stampPitDisc(grid, from.x + (to.x - from.x) * u, from.y + (to.y - from.y) * u);
+    }
+  };
+
+  // Ramp out, run the lane, ramp back. Offset 4 kisses the track edge so a
+  // gear-3 car can enter; 9 sits clear of the racing line.
+  for (let i = 0; i <= 8; i++) {
+    const t = 0.08 + (0.12 * i) / 8;
+    carve(pointAt(t, 4), pointAt(t, PIT_OFFSET));
+  }
+  carve(pointAt(0.12, PIT_OFFSET), pointAt(0.88, PIT_OFFSET));
+  for (let i = 0; i <= 8; i++) {
+    const t = 0.8 + (0.12 * i) / 8;
+    carve(pointAt(t, PIT_OFFSET), pointAt(t, 4));
+  }
+
+  const boxes: Vector2D[] = [];
+  for (let i = 0; i < PIT_BOXES; i++) {
+    const t = 0.3 + (0.4 * i) / (PIT_BOXES - 1);
+    const at = pointAt(t, PIT_OFFSET);
+    const x = Math.round(at.x);
+    const y = Math.round(at.y);
+    if (grid[y]?.[x] === 'pit' || grid[y]?.[x] === 'grass' || grid[y]?.[x] === 'rumble') {
+      grid[y][x] = 'pitbox';
+      boxes.push({ x, y });
+    }
+  }
+  return boxes;
+}
+
 function buildCircuit(spec: CircuitSpec): TrackDefinition {
   const width = spec.width ?? GRID_W;
   const height = spec.height ?? GRID_H;
@@ -201,6 +337,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
   sealRumbleGaps(grid);
   sealRumbleGaps(grid);
   stampFinish(grid, spec.finish.x0, spec.finish.x1, spec.finish.y0, spec.finish.y1);
+  const pitBoxes = attachPitLane(grid, spec.centerline);
   return {
     id: spec.id,
     nameKey: spec.nameKey,
@@ -212,6 +349,7 @@ function buildCircuit(spec: CircuitSpec): TrackDefinition {
     centerline: spec.centerline.map((p) => ({ ...p })),
     checkpoint: spec.checkpoint,
     drsZones: spec.drsZones?.map((z) => ({ ...z })),
+    pitBoxes,
   };
 }
 
@@ -406,8 +544,8 @@ const MONZA: CircuitSpec = {
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
-  // Two straights. Race is left. Off the grid, the stripe, and the Lesmo checkpoint.
-  // Pit straight, Curva Grande after the Rettifilo, and the Serraglio.
+  // Pit straight, the long right-hand Curva Grande after the Rettifilo, and
+  // the Serraglio. Off the grid, the stripe, and the Lesmo checkpoint.
   drsZones: [
     { x0: 127, y0: 108, x1: 196, y1: 128 },
     { x0: 16, y0: 38, x1: 46, y1: 100 },

@@ -144,5 +144,12 @@
   "common.error": "Algo deu errado",
   "common.close": "Fechar",
   "common.copied": "Copiado!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "lobby.fuelHint": "Acima de 5 voltas o tanque conta. Marcha alta gasta mais; ERS economiza. O desvio na reta maior é o box.",
+  "game.fuel": "Combustível",
+  "game.driveThrough": "Drive-through obrigatório ({{n}}). Sem reabastecer.",
+  "game.pitHold": "Parado no box nesta rodada.",
+  "game.dsq": "DSQ",
+  "howto.8.title": "Combustível e boxes",
+  "howto.8.body": "Em corridas de 6 voltas ou mais o tanque à direita do pad esvazia a cada turno. Marchas altas gastam mais; o ERS corta o gasto pela metade. Sem combustível a marcha máxima é 1. O desvio na maior reta é o box: limite de marcha 3. Parar na vaga da sua cor enche o tanque e te segura 1 rodada. Passar direto é drive-through e não reabastece. Três bandeiras pretas e brancas exigem um drive-through; terminar sem cumprir desclassifica."
 }

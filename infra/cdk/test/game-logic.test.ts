@@ -64,6 +64,14 @@ import {
   retargetLocalPlayer,
   createInitialState,
   buildRaceStatDeltas,
+  fuelBurn,
+  fuelEnabled,
+  FUEL_TANK,
+  PIT_MAX_GEAR,
+  settleFuel,
+  settlePitVisit,
+  isLapOption,
+  LAP_OPTIONS,
 } from '../../../shared/ws-types';
 import { TRACKS } from '../../../shared/tracks';
 import { buildRankKey, compareLeaderboardEntries, nicknameKey } from '../lambda/src/lib/leaderboard';
@@ -1764,5 +1772,64 @@ describe('DRS and ERS', () => {
         }
       }
     }
+  });
+});
+
+describe('fuel and pit lane', () => {
+  it('offers the long-race lap counts and burns more in higher gears', () => {
+    expect(isLapOption(25)).toBe(true);
+    expect(LAP_OPTIONS).toEqual([1, 2, 3, 4, 5, 10, 15, 20, 25]);
+    expect(fuelEnabled(5)).toBe(false);
+    expect(fuelEnabled(6)).toBe(true);
+    expect(fuelBurn(6, false)).toBeGreaterThan(fuelBurn(2, false));
+    expect(fuelBurn(6, true)).toBe(Math.floor(fuelBurn(6, false) / 2));
+  });
+
+  it('puts a colored stall detour on every circuit', () => {
+    for (const track of TRACKS) {
+      expect(track.pitBoxes?.length).toBe(12);
+      for (const box of track.pitBoxes ?? []) {
+        expect(track.grid[box.y][box.x]).toBe('pitbox');
+      }
+      const pitCells = track.grid.flat().filter((tile) => tile === 'pit' || tile === 'pitbox').length;
+      expect(pitCells).toBeGreaterThan(40);
+    }
+  });
+
+  it('caps pit speed at 3, refills only the own stall, and disqualifies an unserved drive-through', () => {
+    const track = TRACKS[0];
+    const player = createLobbyPlayer('p1', 'A', true, 0, '#EF4444');
+    player.pitBoxIndex = 0;
+    player.fuel = 10;
+    player.position = { ...(track.pitBoxes?.[0] as { x: number; y: number }) };
+    player.velocity = { x: 4, y: 0 };
+    const moves = getValidMoves(player, track, [], 1);
+    expect(moves.every((m) => gearOf(m.velocity) <= PIT_MAX_GEAR)).toBe(true);
+
+    settleFuel(player, 5, false);
+    expect(player.fuel).toBe(6);
+    player.driveThroughOwed = 1;
+    expect(settlePitVisit(player, track, 'pitbox', 3)).toBe('stop');
+    expect(player.fuel).toBe(FUEL_TANK);
+    expect(player.driveThroughOwed).toBe(0);
+    expect(player.pitHoldUntilRound).toBe(4);
+
+    const passer = createLobbyPlayer('p2', 'B', false, 1, '#3B82F6');
+    passer.pitBoxIndex = 1;
+    passer.fuel = 4;
+    passer.driveThroughOwed = 1;
+    passer.position = { x: 1, y: 1 };
+    passer.driveThroughArmed = true;
+    expect(settlePitVisit(passer, track, 'track', 2)).toBe('exit');
+    expect(passer.fuel).toBe(4);
+    expect(passer.driveThroughOwed).toBe(0);
+
+    const state = createInitialState([player], player.connectionId);
+    state.phase = 'GAME_ROUND';
+    applyGrassPenalty(player, state);
+    applyGrassPenalty(player, state);
+    applyGrassPenalty(player, state);
+    expect(player.grassCuts).toBe(3);
+    expect(player.driveThroughOwed).toBe(1);
   });
 });

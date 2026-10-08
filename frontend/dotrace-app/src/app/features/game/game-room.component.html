@@ -180,7 +180,37 @@
               </button>
             }
             </div>
+            @if (myPlayer(state); as me) {
+              @if (me.fuel !== undefined) {
+                <div
+                  class="flex w-3 flex-col-reverse gap-0.5"
+                  role="meter"
+                  [attr.aria-label]="'game.fuel' | translate"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  [attr.aria-valuenow]="me.fuel"
+                >
+                  @for (pip of fuelPips; track pip) {
+                    <span class="relative min-h-2 flex-1 overflow-hidden rounded-sm border border-amber-400/80 bg-slate-900">
+                      <span
+                        class="absolute inset-x-0 bottom-0 bg-amber-400"
+                        [style.height.%]="fuelPipFill(me, pip) * 100"
+                      ></span>
+                    </span>
+                  }
+                </div>
+              }
+            }
           </div>
+          @if (myPlayer(state); as me) {
+            @if ((me.driveThroughOwed ?? 0) > 0) {
+              <p class="mt-1 text-center text-[11px] font-semibold text-amber-300">
+                {{ 'game.driveThrough' | translate: { n: me.driveThroughOwed } }}
+              </p>
+            } @else if (me.pitHoldUntilRound !== undefined && state.round <= me.pitHoldUntilRound) {
+              <p class="mt-1 text-center text-[11px] font-semibold text-amber-300">{{ 'game.pitHold' | translate }}</p>
+            }
+          }
           @if (game.isMyTurn()) {
             <p class="race-hint mt-1 text-center text-[11px] leading-tight text-slate-400">
               @if (state.gameMode === 'TIMED') {
@@ -209,7 +239,9 @@
                   <span class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20" [style.background]="row.color"></span>
                   <span class="max-w-[5.5rem] truncate font-medium text-white">{{ row.nickname }}</span>
                   <span class="font-mono text-[10px] text-slate-400">
-                    @if (row.finishOrder !== undefined) {
+                    @if (row.disqualified) {
+                      {{ 'game.dsq' | translate }}
+                    } @else if (row.finishOrder !== undefined) {
                       &#35;{{ row.finishOrder }}
                     } @else {
                       {{ row.lap }}/{{ state.totalLaps }}

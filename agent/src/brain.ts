@@ -140,6 +140,16 @@ export class HeuristicBrain implements MoveBrain {
       if (move.grassShortcut) score -= 10_000;
       if (move.landingTile === 'grass' || move.landingTile === 'rumble') score -= 5_000;
 
+      const pit = summary.pitBox;
+      const needPit =
+        (summary.fuel !== undefined && summary.fuel < 28) || (summary.driveThroughOwed ?? 0) > 0;
+      if (needPit && pit) {
+        const dist = Math.max(Math.abs(move.landing.x - pit.x), Math.abs(move.landing.y - pit.y));
+        score += (48 - dist) * 60;
+        if (move.landingTile === 'pit' || move.landingTile === 'pitbox') score += 500;
+        if (move.landing.x === pit.x && move.landing.y === pit.y) score += 8_000;
+      }
+
       // Soft gear cap: discourage (don't hard-filter) moves above difficulty max.
       if (move.gear > t.maxGear) score -= 400 * (move.gear - t.maxGear);
 
