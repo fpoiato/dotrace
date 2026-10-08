@@ -1,5 +1,5 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
-import { BehaviorSubject, Subscription } from 'rxjs';
+import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
 import {
   GameMode,
@@ -85,9 +85,11 @@ export class GameEngineService implements OnDestroy {
   private localConnectionId: string | null = null;
   private hostRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private gridOrderTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Re-broadcast the board while an old socket AI is the one who must move. */
+  /** Re-broadcast / retry when the seat on the clock has not moved. */
   private turnNudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly TURN_NUDGE_MS = 5_000;
+  /** Human phones listen for this and show the "jogue agora!" countdown. */
+  readonly playNow$ = new Subject<string>();
   /** Fast local moves once only bots are left, so the human is not waiting on Lambda. */
   private rushTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly AI_RUSH_MS = 70;
@@ -812,6 +814,7 @@ export class GameEngineService implements OnDestroy {
     const state = relay.state;
     if (!state.gameMode) state.gameMode = 'TURNS';
     if (!state.replayLog) state.replayLog = [];
+    this.notePlayNow(relay.meta);
     this.emit(state);
   }
 
@@ -853,6 +856,9 @@ export class GameEngineService implements OnDestroy {
         this.forceEndRace();
         break;
       }
+      case 'WAKE_OPPONENTS':
+        this.wakeCurrentSeat();
+        break;
     }
   }
 
@@ -870,10 +876,9 @@ export class GameEngineService implements OnDestroy {
   }
 
   /**
-   * If an AI seat stays on the clock, push the board again. A missed
-   * TURN_ADVANCED otherwise leaves the phone on "Aguardando …" while the
-   * Lambda waits for a turn it never heard about. A handoff replacement
-   * also needs this push: it joins with an empty board.
+   * If the seat on the clock has not moved, poke it. On-demand bots (`ai#`)
+   * used to be skipped here, so a hung PLAY_AI_TURN left the race frozen
+   * with no button and no retry. Humans get a play-now ping; bots get stuck.
    */
   private armTurnNudge(state: GameState): void {
     if (this.turnNudgeTimer) {
@@ -882,18 +887,59 @@ export class GameEngineService implements OnDestroy {
     }
     if (!this.isHost || state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
     const seat = state.turnOrder[state.currentTurnIndex];
-    if (!seat || seat === this.myId || seat.startsWith('ai#')) return;
-    const current = state.players.find((player) => player.connectionId === seat);
-    if (!current || !isAiPilotNickname(current.nickname)) return;
+    if (!seat) return;
     const round = state.round;
+    const index = state.currentTurnIndex;
     this.turnNudgeTimer = setTimeout(() => {
       this.turnNudgeTimer = null;
       const latest = this.state;
       if (!latest || latest.phase !== 'GAME_ROUND' || isTimedMode(latest)) return;
-      if (latest.round !== round) return;
+      if (latest.round !== round || latest.currentTurnIndex !== index) return;
       if (latest.turnOrder[latest.currentTurnIndex] !== seat) return;
-      this.setStateAndRelay('STATE_SYNC', latest);
+      this.wakeCurrentSeat();
     }, GameEngineService.TURN_NUDGE_MS);
+  }
+
+  /**
+   * Waiting player asked to poke the seat on the clock. Host does it;
+   * everyone else forwards the same action.
+   */
+  wakeOpponents(): void {
+    const room = this.roomService.room;
+    if (!room) return;
+    if (!this.isHost) {
+      void this.api
+        .postAction('FORWARD_TO_HOST', { action: 'WAKE_OPPONENTS' }, room.roomCode)
+        .catch((err) => console.warn('Wake forward failed', err));
+      return;
+    }
+    this.wakeCurrentSeat();
+  }
+
+  private wakeCurrentSeat(): void {
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
+    const seat = state.turnOrder[state.currentTurnIndex];
+    if (!seat) return;
+    const player = state.players.find((candidate) => candidate.connectionId === seat);
+    if (!player || player.finishOrder !== undefined) return;
+    if (this.isBotSeat(player)) {
+      if (seat.startsWith('ai#')) this.requestAiMove(player, 1, true);
+      this.setStateAndRelay('STATE_SYNC', state, { stuck: true, seat });
+      return;
+    }
+    this.playNow$.next(seat);
+    this.setStateAndRelay('STATE_SYNC', state, { playNow: true, seat });
+  }
+
+  private notePlayNow(meta?: Record<string, unknown>): void {
+    if (meta?.['playNow'] === true && typeof meta['seat'] === 'string') {
+      this.playNow$.next(meta['seat']);
+    }
+  }
+
+  private isBotSeat(player: Player): boolean {
+    return player.connectionId.startsWith('ai#') || isAiPilotNickname(player.nickname);
   }
 
   currentPlayer(): Player | null {
@@ -1047,9 +1093,9 @@ export class GameEngineService implements OnDestroy {
     this.applyMove(player.connectionId, best.velocity, boost);
   }
 
-  private requestAiMove(player: Player, attempt = 1): void {
+  private requestAiMove(player: Player, attempt = 1, stuck = false): void {
     const seatId = player.connectionId;
-    if (this.aiInFlight.has(seatId)) return;
+    if (this.aiInFlight.has(seatId) && !stuck) return;
     const state = this.state;
     const room = this.roomService.room;
     if (!state || !room || !canPlayerMove(state, seatId)) return;
@@ -1061,7 +1107,7 @@ export class GameEngineService implements OnDestroy {
       this.aiFollowUps.delete(seatId);
     }
     const base = aiTurnToken(state, current);
-    const token = attempt > 1 ? `${base}:2` : base;
+    const token = stuck ? `${base}:stuck` : attempt > 1 ? `${base}:2` : base;
     this.aiInFlight.add(seatId);
     void this.api
       .postAction<{ velocity?: Vector2D }>(
@@ -1102,7 +1148,7 @@ export class GameEngineService implements OnDestroy {
     if (!Number.isInteger(velocity.x) || !Number.isInteger(velocity.y)) return;
     if (!canPlayerMove(latest, seatId)) return;
     const expected = aiTurnToken(latest, player);
-    if (token !== expected && token !== `${expected}:2`) return;
+    if (token !== expected && token !== `${expected}:2` && token !== `${expected}:stuck`) return;
     const applied = this.applyMove(seatId, velocity, requestedBoost(boost));
     if (!applied) {
       if (attempt === 1) {

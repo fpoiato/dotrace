@@ -163,6 +163,12 @@ class AgentiveClient {
 
     this.lastGameState = ctx.gameState;
 
+    // A stuck nudge means the previous submit never landed. Drop the in-flight
+    // guard and send again instead of waiting on a move the host never saw.
+    if (ctx.stuck && ctx.isMyTurn) {
+      console.log('[STUCK] turn idle — retrying move');
+      this.moveInFlight = false;
+    }
     if (!ctx.isMyTurn || this.moveInFlight) return;
 
     const acceleration = this.brain.computeNextMove(ctx.car, ctx.track, trackDef);

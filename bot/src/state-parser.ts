@@ -29,6 +29,8 @@ export interface TurnContext {
   track: TrackState;
   isMyTurn: boolean;
   relayType: string;
+  /** Host says this seat has been idle and should submit again. */
+  stuck: boolean;
 }
 
 function toCarState(player: Player, round: number): CarState {
@@ -65,6 +67,10 @@ export function parseRelayEnvelope(
   const gameState = payload.state;
   const myPlayer = gameState.players.find((p) => p.connectionId === connectionId);
   if (!myPlayer) return null;
+  const stuckSeat = payload.meta?.['seat'];
+  const stuck =
+    payload.meta?.['stuck'] === true &&
+    (stuckSeat === undefined || stuckSeat === connectionId);
 
   return {
     gameState,
@@ -73,6 +79,7 @@ export function parseRelayEnvelope(
     track: toTrackState(gameState, trackWidth, trackHeight),
     isMyTurn: canPlayerMove(gameState, connectionId),
     relayType: payload.type,
+    stuck,
   };
 }
 
