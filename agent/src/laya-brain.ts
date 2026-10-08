@@ -9,6 +9,7 @@ import { HeuristicBrain, MoveBrain } from './brain';
 import { supervisedChoice } from './bedrock-dataset';
 import { LAYA_DECIDE_MODEL, layaDecideBody, LayaScene } from './laya-scene';
 import { applySceneChoice } from './scene-choice';
+import { adviseBoost, boostCap, playBoost, type BoostPick } from './boost-advice';
 import type { AnnotatedMove, BoardSummary } from './tools';
 
 export interface LayaEndpoint {
@@ -17,7 +18,7 @@ export interface LayaEndpoint {
 }
 
 export interface LayaDecideResponse {
-  answers?: { move?: { choice?: unknown } };
+  answers?: { move?: { choice?: unknown }; boost?: { choice?: unknown } };
   state_truncated?: boolean;
 }
 
@@ -67,7 +68,7 @@ export class LayaBrain implements MoveBrain {
     // Asking Ollaya and then discarding the answer is what made each turn slow.
     const labeled = supervisedChoice(scene);
     if (labeled) {
-      return applySceneChoice('Laya', scene, moves, labeled, await heuristic());
+      return this.tagBoost(summary, applySceneChoice('Laya', scene, moves, labeled, await heuristic()));
     }
 
     let target: LayaEndpoint | null;
@@ -76,30 +77,65 @@ export class LayaBrain implements MoveBrain {
     } catch (err) {
       console.warn('[BRAIN] Laya endpoint lookup failed — using heuristic:', errText(err));
       this.onFailure?.();
-      return heuristic();
+      return this.tagBoost(summary, await heuristic());
     }
-    if (!target?.url) return heuristic();
+    if (!target?.url) return this.tagBoost(summary, await heuristic());
 
     try {
       const body = await this.decide(target, scene);
       if (body.state_truncated) {
         console.warn('[BRAIN] Laya state was truncated — using heuristic');
-        return heuristic();
+        return this.tagBoost(summary, await heuristic());
       }
       const choice = body.answers?.move?.choice;
       const heuristicPick = await heuristic();
-      return applySceneChoice(
+      const driven = applySceneChoice(
         'Laya',
         scene,
         moves,
         typeof choice === 'string' ? choice : null,
         heuristicPick
       );
+      return this.tagBoost(summary, driven, body.answers?.boost?.choice);
     } catch (err) {
       console.warn('[BRAIN] Laya call failed — using heuristic:', errText(err));
       this.onFailure?.();
-      return heuristic();
+      return this.tagBoost(summary, await heuristic());
     }
+  }
+
+  /** Attach the boost the stretch pays for. A live answer cannot waste a bar the advice saved. */
+  private tagBoost(summary: BoardSummary, move: AnnotatedMove, answered?: unknown): AnnotatedMove {
+    const facts = {
+      gear: summary.gear,
+      nextGear: move.gear,
+      clearAhead: move.clearAhead,
+      overspeed:
+        move.overspeed ||
+        move.grassShortcut ||
+        move.landingTile === 'grass' ||
+        move.landingTile === 'rumble',
+      gearLimited: summary.gearLimited,
+      drsArmed: !!summary.drsArmed,
+      drsActive: !!summary.drsActive,
+      ersCharge: summary.ersCharge ?? 0,
+      gap: summary.scene?.state.gap === 'lead' || typeof summary.scene?.state.gap === 'number'
+        ? (summary.scene.state.gap as number | 'lead')
+        : 'lead',
+      blue: typeof summary.scene?.state.blue === 'number' ? summary.scene.state.blue : 0,
+      bendCells: summary.situation.cellsToCorner,
+      fuel: summary.fuel,
+      pit: move.landingTile === 'pit' || move.landingTile === 'pitbox',
+    };
+    const advice = adviseBoost(facts);
+    const live = isBoostPick(answered) ? answered : null;
+    const pick =
+      this.difficulty === 'hard' || this.difficulty === 'pro'
+        ? acceptBoost(live, advice)
+        : playBoost(this.difficulty, advice, facts);
+    move.boostPick = pick;
+    move.boostCap = boostCap(this.difficulty);
+    return move;
   }
 
   private async decide(target: LayaEndpoint, scene: LayaScene): Promise<LayaDecideResponse> {
@@ -117,6 +153,18 @@ export class LayaBrain implements MoveBrain {
     }
     return (await response.json()) as LayaDecideResponse;
   }
+}
+
+function isBoostPick(value: unknown): value is BoostPick {
+  return value === 'save' || value === 'drs' || value === 'ers' || value === 'both';
+}
+
+/** A live answer may save a bar. It may not spend one the stretch does not pay for. */
+function acceptBoost(live: BoostPick | null, advice: BoostPick): BoostPick {
+  if (!live || live === advice) return advice;
+  if (live === 'save') return 'save';
+  if (advice === 'both' && (live === 'drs' || live === 'ers')) return live;
+  return advice;
 }
 
 function errText(err: unknown): string {

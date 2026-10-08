@@ -135,6 +135,13 @@ describe('laya scene', () => {
     expect(body.questions.move.instructions).toContain('hold is the next 3 turns');
     expect(body.questions.move.instructions).toContain('Grid is only the road ahead');
     expect(body.questions.move.instructions).toContain('Nothing behind');
+    expect(body.questions.boost.instructions).toContain('state.boost');
+    expect(body.questions.boost.criteria.drs).toContain('open wing');
+    expect(scene.state.drs).toBe('shut');
+    expect(scene.state.ers).toBe(0);
+    expect(scene.state.gap === 'lead' || typeof scene.state.gap === 'number').toBe(true);
+    expect(scene.state.blue).toEqual(expect.any(Number));
+    expect(['save', 'drs', 'ers', 'both']).toContain(scene.state.boost);
     const ahead = String(scene.state.grid).split('\n').find((line) => line.includes('@'));
     expect(ahead?.endsWith('@')).toBe(true);
   });

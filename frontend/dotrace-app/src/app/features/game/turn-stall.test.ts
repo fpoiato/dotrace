@@ -3,7 +3,7 @@
  * Run: npx tsx frontend/dotrace-app/src/app/features/game/turn-stall.test.ts
  */
 import { GameState } from '../../core/models/ws-types';
-import { PLAY_NOW_SECONDS, TURN_STALL_MS, isBotPlayer, turnStallKey } from './turn-stall';
+import { BOT_STALL_MS, PLAY_NOW_SECONDS, TURN_STALL_MS, isBotPlayer, stallWindowMs, turnStallKey } from './turn-stall';
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -17,8 +17,11 @@ const state = {
   turnOrder: ['human', 'ai#laya'],
 } as GameState;
 
-assert(TURN_STALL_MS === 5_000, 'stall window is 5s');
+assert(TURN_STALL_MS === 5_000, 'human stall window is 5s');
+assert(BOT_STALL_MS === 30_000, 'bot stall window waits out the AI request');
 assert(PLAY_NOW_SECONDS === 5, 'human countdown is 5s');
+assert(stallWindowMs({ connectionId: 'human', nickname: 'Fernando' } as never) === TURN_STALL_MS, 'human window');
+assert(stallWindowMs({ connectionId: 'ai#laya', nickname: 'Laya · Fácil' } as never) === BOT_STALL_MS, 'bot window');
 assert(turnStallKey(state) === '3:1:ai#laya', 'key follows the seat on the clock');
 assert(turnStallKey({ ...state, phase: 'LOBBY' } as GameState) === null, 'lobby is not a stall');
 assert(

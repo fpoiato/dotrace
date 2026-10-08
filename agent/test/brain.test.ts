@@ -160,10 +160,35 @@ describe('HeuristicBrain', () => {
 });
 
 describe('pilot boost and pit', () => {
-  it('opens DRS and ERS when the step accelerates', () => {
+  it('opens DRS on a blue straight with a rival and keeps the battery', () => {
     const { summary } = fixtures();
-    const armed = { ...summary, gear: 4, drsArmed: true, drsActive: false, ersCharge: 2 };
+    const armed = {
+      ...summary,
+      gear: 4,
+      drsArmed: true,
+      drsActive: false,
+      ersCharge: 2,
+      situation: { ...summary.situation, cellsToCorner: null },
+      scene: { ...summary.scene, state: { ...summary.scene.state, gap: 3, blue: 6 } },
+    };
     const chosen = fakeMove({ index: 1, gear: 5, velocity: { x: 5, y: 0 }, clearAhead: 8 });
+    const out = withBoost(armed, [chosen], chosen);
+    expect(out.drs).toBe(true);
+    expect(out.ers).toBe(false);
+  });
+
+  it('spends both only at gear 6 with a close rival still in the zone', () => {
+    const { summary } = fixtures();
+    const armed = {
+      ...summary,
+      gear: 6,
+      drsArmed: true,
+      drsActive: false,
+      ersCharge: 2,
+      situation: { ...summary.situation, cellsToCorner: null },
+      scene: { ...summary.scene, state: { ...summary.scene.state, gap: 3, blue: 6 } },
+    };
+    const chosen = fakeMove({ index: 1, gear: 6, velocity: { x: 6, y: 0 }, clearAhead: 10 });
     const out = withBoost(armed, [chosen], chosen);
     expect(out.drs).toBe(true);
     expect(out.ers).toBe(true);

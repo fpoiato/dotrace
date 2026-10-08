@@ -19,6 +19,7 @@ import {
 } from './difficulty';
 import { BEDROCK_LAYA_SYSTEM, layaPromptText } from './bedrock-dataset';
 import { parseMoveLabel } from './laya-scene';
+import { adviseBoost } from './boost-advice';
 import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
 import { FUEL_RESERVE } from '../../shared/ws-types';
@@ -273,41 +274,97 @@ function needsPit(summary: BoardSummary): boolean {
   return through && dist <= 14;
 }
 
-/** Open DRS and spend ERS when the step accelerates, or when gear 7–8 is the faster legal line. */
+/** Open DRS or spend ERS only when the stretch pays for it. A +1 on the wing does not cost a bar. */
 export function withBoost(
   summary: BoardSummary,
   moves: AnnotatedMove[],
   chosen: AnnotatedMove
 ): AnnotatedMove {
-  if (summary.gearLimited) return chosen;
-  if (chosen.landingTile === 'pit' || chosen.landingTile === 'pitbox') return chosen;
-  const drsReady = !!summary.drsArmed && !summary.drsActive;
-  const ersReady = (summary.ersCharge ?? 0) >= 1;
-  if (!drsReady && !ersReady) return chosen;
+  if (summary.gearLimited) return stripBoost(chosen);
+  if (chosen.landingTile === 'pit' || chosen.landingTile === 'pitbox') return stripBoost(chosen);
+  const facts = boostFacts(summary, chosen);
+  const pick = chosen.boostPick ?? adviseBoost(facts);
+  if (pick === 'save') return plainMove(moves, chosen);
 
+  const drsReady = facts.drsArmed && !facts.drsActive;
+  const ersReady = facts.ersCharge >= 1;
+  const wantDrs = (pick === 'drs' || pick === 'both') && drsReady;
+  const wantErs = (pick === 'ers' || pick === 'both') && ersReady;
+  if (!wantDrs && !wantErs) return stripBoost(chosen);
+
+  const cap = chosen.boostCap ?? 8;
   const faster = moves
     .filter(
       (move) =>
-        (move.drs || move.ers) &&
         move.gear > chosen.gear &&
-        move.gear > summary.gear &&
-        !move.grassShortcut &&
-        !move.overspeed &&
-        move.clearAhead >= move.gear &&
-        move.landingTile !== 'grass' &&
-        move.landingTile !== 'rumble' &&
-        move.landingTile !== 'pit' &&
-        move.landingTile !== 'pitbox'
+        move.gear <= cap &&
+        (wantDrs ? !!move.drs : !move.drs) &&
+        (wantErs ? !!move.ers : !move.ers) &&
+        boostSafe(summary, move)
     )
     .sort((a, b) => b.gear - a.gear || b.clearAhead - a.clearAhead)[0];
-  const pick = faster ?? chosen;
-  const accelerating = pick.gear > summary.gear || pick.gear > 6;
-  if (!accelerating && !pick.drs && !pick.ers) return pick;
+  const base = faster ?? chosen;
   return {
-    ...pick,
-    drs: drsReady || !!pick.drs,
-    ers: ersReady || !!pick.ers,
+    ...base,
+    drs: wantDrs,
+    ers: wantErs,
+    boostPick: pick,
+    boostCap: cap,
   };
+}
+
+function stripBoost(move: AnnotatedMove): AnnotatedMove {
+  return { ...move, drs: false, ers: false };
+}
+
+function plainMove(moves: AnnotatedMove[], chosen: AnnotatedMove): AnnotatedMove {
+  const same = moves.find(
+    (move) =>
+      move.velocity.x === chosen.velocity.x &&
+      move.velocity.y === chosen.velocity.y &&
+      !move.drs &&
+      !move.ers
+  );
+  if (same) return stripBoost(same);
+  const fallback = moves
+    .filter((move) => !move.drs && !move.ers && !move.grassShortcut && move.landingTile !== 'grass')
+    .sort(
+      (a, b) =>
+        Math.abs(a.gear - chosen.gear) - Math.abs(b.gear - chosen.gear) || b.clearAhead - a.clearAhead
+    )[0];
+  return stripBoost(fallback ?? chosen);
+}
+
+function boostFacts(summary: BoardSummary, chosen: AnnotatedMove) {
+  const state = summary.scene?.state ?? {};
+  const gap = state.gap === 'lead' || typeof state.gap === 'number' ? state.gap : 'lead';
+  return {
+    gear: summary.gear,
+    nextGear: chosen.gear,
+    clearAhead: chosen.clearAhead,
+    overspeed:
+      chosen.overspeed ||
+      chosen.grassShortcut ||
+      chosen.landingTile === 'grass' ||
+      chosen.landingTile === 'rumble',
+    gearLimited: summary.gearLimited,
+    drsArmed: !!summary.drsArmed,
+    drsActive: !!summary.drsActive,
+    ersCharge: summary.ersCharge ?? 0,
+    gap,
+    blue: typeof state.blue === 'number' ? state.blue : 0,
+    bendCells: summary.situation.cellsToCorner,
+    fuel: summary.fuel,
+    pit: chosen.landingTile === 'pit' || chosen.landingTile === 'pitbox',
+  };
+}
+
+function boostSafe(summary: BoardSummary, move: AnnotatedMove): boolean {
+  if (move.grassShortcut || move.overspeed) return false;
+  if (move.landingTile !== 'track' && move.landingTile !== 'finish') return false;
+  if (move.clearAhead < move.gear) return false;
+  const bend = summary.situation.cellsToCorner;
+  return bend == null || bend > (move.gear * (move.gear + 1)) / 2;
 }
 
 /**
