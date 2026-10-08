@@ -359,8 +359,8 @@ export const LAP_OPTIONS = [1, 2, 3, 4, 5, 10, 15, 20, 25] as const;
 /** Races longer than this use fuel and the pit lane. */
 export const FUEL_RACE_MIN_LAPS = 6;
 export const FUEL_TANK = 100;
-/** Burn per turn by gear. Index is the gear the car travels at. */
-export const FUEL_BURN_BY_GEAR = [0, 1, 1, 2, 3, 4, 5, 6] as const;
+/** Burn per turn by gear. Index is the gear the car travels at. One tenth of the first tuning. */
+export const FUEL_BURN_BY_GEAR = [0, 0.1, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6] as const;
 export const PIT_MAX_GEAR = 3;
 export const FLAGS_PER_DRIVE_THROUGH = 3;
 
@@ -380,7 +380,8 @@ export function isPitTile(tile: TileType | null | undefined): boolean {
 export function fuelBurn(gear: number, spentErs: boolean): number {
   const idx = Math.max(0, Math.min(FUEL_BURN_BY_GEAR.length - 1, gear));
   const base = FUEL_BURN_BY_GEAR[idx];
-  return spentErs ? Math.floor(base / 2) : base;
+  const burned = spentErs ? base / 2 : base;
+  return Math.round(burned * 10) / 10;
 }
 
 export function settleFuel(player: Player, gear: number, spentErs: boolean): void {
