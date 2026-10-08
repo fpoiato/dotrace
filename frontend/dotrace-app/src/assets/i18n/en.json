@@ -59,7 +59,7 @@
   "game.drs": "DRS",
   "game.drsActive": "DRS open",
   "game.drsArmed": "DRS ready",
-  "game.drsHint": "Open DRS on the next move (gear 7)",
+  "game.drsHint": "Open DRS in the blue zone, within 6 squares of the car ahead (gear 8)",
   "game.ers": "ERS",
   "game.ersHint": "Spend 1 ERS bar — the 9 buttons step by 2, except the 3 backwards",
   "game.ersCharge": "ERS charge",

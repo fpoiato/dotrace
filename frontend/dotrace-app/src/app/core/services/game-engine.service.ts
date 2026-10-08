@@ -49,6 +49,7 @@ import {
   isLapOption,
   settleFuel,
   settlePitVisit,
+  closeDrsOutsideZone,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
 import { RoomContext, RoomService } from './room.service';
@@ -356,9 +357,9 @@ export class GameEngineService implements OnDestroy {
     const track = getTrackById(state.trackId);
     if (!track) return false;
 
-    // DRS opens before the gear check so gear 7 is legal on this move only
-    // when the button was actually armed. A rejected vector rolls that back
-    // and does not spend ERS.
+    // DRS opens before the gear check so gear 8 is legal on this move only
+    // when the button was actually armed in the blue zone. A rejected vector
+    // rolls that back and does not spend ERS.
     const armedBefore = player.drsArmed;
     const activeBefore = player.drsActive;
     const chargeBefore = player.ersCharge;
@@ -403,6 +404,7 @@ export class GameEngineService implements OnDestroy {
       player.isOffTrack = false;
     }
     settleBoostFromGears(player, previousGear, gearOf(player.velocity));
+    closeDrsOutsideZone(player, track);
     player.ersActive = limits.spendErs;
     settleFuel(player, gearOf(player.velocity), limits.spendErs);
     settlePitVisit(player, track, tile, state.round);
