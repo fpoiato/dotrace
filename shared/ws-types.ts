@@ -250,7 +250,9 @@ export type ClientAction =
   | 'RECORD_RACE_START'
   | 'GET_TOP10'
   | 'SPAWN_AI_PLAYER'
-  | 'PLAY_AI_TURN';
+  | 'PLAY_AI_TURN'
+  | 'SAVE_LIVE_REPLAY'
+  | 'GET_LIVE_REPLAY';
 
 export type RelayEventType =
   | 'STATE_SYNC'

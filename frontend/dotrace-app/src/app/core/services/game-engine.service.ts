@@ -1,7 +1,7 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
-import { REPLAY_CHUNK, replayChunks, slimBoard } from '../../features/game/relay-board';
+import { replayChunks, slimBoard } from '../../features/game/relay-board';
 import {
   GameMode,
   GameState,
@@ -816,7 +816,23 @@ export class GameEngineService implements OnDestroy {
     return adoptNicknameConnection(state, nickname, connectionId);
   }
 
+  /** Replay lives in Dynamo. The socket only said the race ended. */
+  private loadLiveReplay(): void {
+    const room = this.roomService.room;
+    if (!room || !this.state) return;
+    void this.api
+      .postAction<{ moves?: unknown[] }>('GET_LIVE_REPLAY', {}, room.roomCode)
+      .then((response) => {
+        const moves = (response.payload as { moves?: unknown[] } | undefined)?.moves;
+        if (!this.state || !Array.isArray(moves) || moves.length === 0) return;
+        this.state.replayLog = moves as GameState['replayLog'];
+        this.emit(this.state);
+      })
+      .catch((err) => console.warn('Replay load failed', err));
+  }
+
   private applyRelay(relay: RelayPayload): void {
+
     if (this.isHost) return;
     const chunk = relay.meta?.['replayMoves'];
     if (Array.isArray(chunk) && this.state) {
@@ -833,6 +849,7 @@ export class GameEngineService implements OnDestroy {
     if (!state.replayLog) state.replayLog = [];
     this.notePlayNow(relay.meta);
     this.emit(state);
+    if (relay.type === 'GAME_OVER') this.loadLiveReplay();
   }
 
   private handlePlayerAction(action: Record<string, unknown>): void {
@@ -901,18 +918,9 @@ export class GameEngineService implements OnDestroy {
   private sendReplayChunks(state: GameState): void {
     const room = this.roomService.room;
     if (!room?.isHost) return;
-    const chunks = replayChunks(state.replayLog);
-    chunks.forEach((moves, index) => {
+    replayChunks(state.replayLog).forEach((moves, index) => {
       void this.api
-        .postAction(
-          'RELAY',
-          {
-            type: 'STATE_SYNC',
-            state: slimBoard(state),
-            meta: { replayMoves: moves, replaySeq: index * REPLAY_CHUNK },
-          },
-          room.roomCode
-        )
+        .postAction('SAVE_LIVE_REPLAY', { index, moves }, room.roomCode)
         .catch((err) => console.warn('Replay chunk failed', err));
     });
   }
