@@ -173,6 +173,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   penaltyCountdownSec = 0;
   /** Waiting players can poke a seat that has not moved for 5s. */
   showWakeButton = false;
+  waking = false;
   /** Countdown on the human whose turn has gone quiet. */
   playNowSeconds = 0;
   private stallKey = '';
@@ -229,6 +230,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   wakeOpponents(): void {
+    this.waking = true;
     this.game.wakeOpponents();
   }
 
@@ -245,6 +247,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     if (key === this.stallKey) return;
     this.stallKey = key;
     this.showWakeButton = false;
+    this.waking = false;
     this.clearPlayNow();
     if (this.stallTimer) clearTimeout(this.stallTimer);
     this.stallTimer = setTimeout(() => {
