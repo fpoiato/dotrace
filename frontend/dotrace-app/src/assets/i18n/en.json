@@ -147,6 +147,8 @@
   "common.host": "Host",
   "lobby.fuelHint": "Above 5 laps the tank counts. Higher gears burn more; ERS saves fuel. The detour on the longest straight is the pit lane.",
   "game.fuel": "Fuel",
+  "game.fuelReserve": "Fuel reserve",
+  "game.fuelReserveAlert": "{{name}} on reserve",
   "game.driveThrough": "Drive-through required ({{n}}). Does not refuel.",
   "game.pitHold": "Stopped in the box this round.",
   "game.dsq": "DSQ",

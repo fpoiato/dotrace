@@ -21,6 +21,7 @@ import { BEDROCK_LAYA_SYSTEM, layaPromptText } from './bedrock-dataset';
 import { parseMoveLabel } from './laya-scene';
 import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
+import { FUEL_RESERVE } from '../../shared/ws-types';
 
 export interface MoveBrain {
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove>;
@@ -141,13 +142,26 @@ export class HeuristicBrain implements MoveBrain {
       if (move.landingTile === 'grass' || move.landingTile === 'rumble') score -= 5_000;
 
       const pit = summary.pitBox;
-      const needPit =
-        (summary.fuel !== undefined && summary.fuel < 28) || (summary.driveThroughOwed ?? 0) > 0;
-      if (needPit && pit) {
+      const reserve = summary.fuel !== undefined && summary.fuel <= FUEL_RESERVE;
+      const through = (summary.driveThroughOwed ?? 0) > 0;
+      const onPitTile = move.landingTile === 'pit' || move.landingTile === 'pitbox';
+      const hereDist = pit
+        ? Math.max(Math.abs(summary.position.x - pit.x), Math.abs(summary.position.y - pit.y))
+        : Number.POSITIVE_INFINITY;
+      const commitFuel = !!pit && reserve && (summary.fuel! <= 12 || hereDist <= 22 || !!summary.onPit);
+      const commitThrough = !!pit && through && !reserve && (hereDist <= 14 || !!summary.onPit);
+      if (pit && (commitFuel || commitThrough)) {
         const dist = Math.max(Math.abs(move.landing.x - pit.x), Math.abs(move.landing.y - pit.y));
-        score += (48 - dist) * 60;
-        if (move.landingTile === 'pit' || move.landingTile === 'pitbox') score += 500;
-        if (move.landing.x === pit.x && move.landing.y === pit.y) score += 8_000;
+        score += (48 - dist) * (commitFuel ? 180 : 90);
+        if (onPitTile) score += commitFuel ? 4_000 : 3_000;
+        if (!Number.isFinite(move.pathDistance)) score += 10_000;
+        if (commitFuel && move.landing.x === pit.x && move.landing.y === pit.y) {
+          score += 100_000;
+          if (move.gear === 0) score += 5_000;
+        }
+        if (commitThrough && move.landing.x === pit.x && move.landing.y === pit.y && move.gear === 0) {
+          score -= 8_000;
+        }
       }
 
       // Soft gear cap: discourage (don't hard-filter) moves above difficulty max.
@@ -197,8 +211,14 @@ export class HeuristicBrain implements MoveBrain {
 
       if (move.pathProgress < 0) score -= 100;
 
-      if (move.clearAhead >= 5 && !move.overspeed) {
+      if (move.clearAhead >= 5 && !move.overspeed && !commitFuel) {
         score += move.gear * 4 * aggression;
+      }
+      if ((move.drs || move.ers) && move.gear > currentGear && !move.overspeed && !commitFuel && !commitThrough) {
+        score += (80 + (move.gear - currentGear) * 30) * aggression;
+      }
+      if (move.gear > 6 && move.clearAhead >= move.gear && !move.overspeed) {
+        score += 120 * aggression;
       }
 
       score += ((move.index * 31 + salt) % 11) * 0.05;
@@ -237,6 +257,105 @@ export class HeuristicBrain implements MoveBrain {
     const pick = (salt + pool[0]!.move.index) % alt.length;
     return alt[pick]!.move;
   }
+}
+
+function needsPit(summary: BoardSummary): boolean {
+  if (!summary.pitBox) return false;
+  const reserve = summary.fuel !== undefined && summary.fuel <= FUEL_RESERVE;
+  const through = (summary.driveThroughOwed ?? 0) > 0;
+  if (!reserve && !through) return false;
+  const dist = Math.max(
+    Math.abs(summary.position.x - summary.pitBox.x),
+    Math.abs(summary.position.y - summary.pitBox.y)
+  );
+  if (summary.onPit) return true;
+  if (reserve && (summary.fuel! <= 12 || dist <= 22)) return true;
+  return through && dist <= 14;
+}
+
+/** Open DRS and spend ERS when the step accelerates, or when gear 7–8 is the faster legal line. */
+export function withBoost(
+  summary: BoardSummary,
+  moves: AnnotatedMove[],
+  chosen: AnnotatedMove
+): AnnotatedMove {
+  if (summary.gearLimited) return chosen;
+  if (chosen.landingTile === 'pit' || chosen.landingTile === 'pitbox') return chosen;
+  const drsReady = !!summary.drsArmed && !summary.drsActive;
+  const ersReady = (summary.ersCharge ?? 0) >= 1;
+  if (!drsReady && !ersReady) return chosen;
+
+  const faster = moves
+    .filter(
+      (move) =>
+        (move.drs || move.ers) &&
+        move.gear > chosen.gear &&
+        move.gear > summary.gear &&
+        !move.grassShortcut &&
+        !move.overspeed &&
+        move.clearAhead >= move.gear &&
+        move.landingTile !== 'grass' &&
+        move.landingTile !== 'rumble' &&
+        move.landingTile !== 'pit' &&
+        move.landingTile !== 'pitbox'
+    )
+    .sort((a, b) => b.gear - a.gear || b.clearAhead - a.clearAhead)[0];
+  const pick = faster ?? chosen;
+  const accelerating = pick.gear > summary.gear || pick.gear > 6;
+  if (!accelerating && !pick.drs && !pick.ers) return pick;
+  return {
+    ...pick,
+    drs: drsReady || !!pick.drs,
+    ers: ersReady || !!pick.ers,
+  };
+}
+
+/**
+ * Pit before the model line when the tank is on reserve or a drive-through
+ * is due on this pass. Otherwise attach DRS/ERS to an accelerating step.
+ */
+export async function applyPilotPolicy(
+  summary: BoardSummary,
+  moves: AnnotatedMove[],
+  chosen: AnnotatedMove
+): Promise<AnnotatedMove> {
+  const pit = summary.pitBox;
+  if (pit && summary.fuel !== undefined && summary.fuel <= FUEL_RESERVE) {
+    const stall = moves.filter((move) => move.landing.x === pit.x && move.landing.y === pit.y);
+    if (stall.length > 0) {
+      stall.sort((a, b) => a.gear - b.gear);
+      return stall[0]!;
+    }
+  }
+  if (
+    pit &&
+    (summary.driveThroughOwed ?? 0) > 0 &&
+    !(summary.fuel !== undefined && summary.fuel <= FUEL_RESERVE) &&
+    needsPit(summary)
+  ) {
+    const lane = moves.filter(
+      (move) =>
+        (move.landingTile === 'pit' || move.landingTile === 'pitbox') &&
+        (move.velocity.x !== 0 || move.velocity.y !== 0) &&
+        !(move.landing.x === pit.x && move.landing.y === pit.y)
+    );
+    if (lane.length > 0) {
+      lane.sort(
+        (a, b) =>
+          Math.max(Math.abs(a.landing.x - pit.x), Math.abs(a.landing.y - pit.y)) -
+          Math.max(Math.abs(b.landing.x - pit.x), Math.abs(b.landing.y - pit.y))
+      );
+      return lane[0]!;
+    }
+  }
+  if (needsPit(summary)) {
+    const planned = await new HeuristicBrain({ styleOrSeed: 'pit', difficulty: 'pro' }).pickMove(
+      summary,
+      moves
+    );
+    return planned;
+  }
+  return withBoost(summary, moves, chosen);
 }
 
 // --------------------------------------------------------------- bedrock

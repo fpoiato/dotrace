@@ -5,8 +5,10 @@ import {
   ConverseClient,
   DIFFICULTY_TUNING,
   HeuristicBrain,
+  applyPilotPolicy,
   isDominatedByHeuristic,
   styleFromSeed,
+  withBoost,
 } from '../src/brain';
 import { BEDROCK_LAYA_SYSTEM, layaPromptText } from '../src/bedrock-dataset';
 import { LAYA_MOVE_INSTRUCTIONS } from '../src/laya-scene';
@@ -154,6 +156,77 @@ describe('HeuristicBrain', () => {
     // diverge; either way both stay legal and non-stationary.
     expect(easy.velocity.x !== 0 || easy.velocity.y !== 0).toBe(true);
     expect(pro.grassShortcut).toBe(false);
+  });
+});
+
+describe('pilot boost and pit', () => {
+  it('opens DRS and ERS when the step accelerates', () => {
+    const { summary } = fixtures();
+    const armed = { ...summary, gear: 4, drsArmed: true, drsActive: false, ersCharge: 2 };
+    const chosen = fakeMove({ index: 1, gear: 5, velocity: { x: 5, y: 0 }, clearAhead: 8 });
+    const out = withBoost(armed, [chosen], chosen);
+    expect(out.drs).toBe(true);
+    expect(out.ers).toBe(true);
+  });
+
+  it('keeps the wing closed while braking', () => {
+    const { summary } = fixtures();
+    const armed = { ...summary, gear: 4, drsArmed: true, drsActive: false, ersCharge: 2 };
+    const chosen = fakeMove({ index: 1, gear: 3, velocity: { x: 3, y: 0 } });
+    const out = withBoost(armed, [chosen], chosen);
+    expect(out.drs).toBeFalsy();
+    expect(out.ers).toBeFalsy();
+  });
+
+  it('stops on the colored pit box once the tank is on reserve', async () => {
+    const { summary } = fixtures();
+    const box = { x: 4, y: 4 };
+    const reserve = { ...summary, fuel: 20, pitBox: box, position: { x: 4, y: 5 }, onPit: true };
+    const racing = fakeMove({ index: 0, landing: { x: 12, y: 12 }, pathProgress: 4, gear: 3 });
+    const stall = fakeMove({
+      index: 1,
+      landing: box,
+      landingTile: 'pitbox',
+      velocity: { x: 0, y: 0 },
+      gear: 0,
+      pathDistance: Number.POSITIVE_INFINITY,
+      pathProgress: 0,
+    });
+    const chosen = await applyPilotPolicy(reserve, [racing, stall], racing);
+    expect(chosen.landing).toEqual(box);
+  });
+
+  it('passes the pit lane on the next approach when a drive-through is owed', async () => {
+    const { summary } = fixtures();
+    const box = { x: 8, y: 8 };
+    const owed = {
+      ...summary,
+      fuel: 80,
+      driveThroughOwed: 1,
+      pitBox: box,
+      position: { x: 8, y: 12 },
+      onPit: false,
+      gear: 2,
+    };
+    const stay = fakeMove({
+      index: 0,
+      landing: { x: 20, y: 20 },
+      pathProgress: 2,
+      gear: 3,
+      landingTile: 'track',
+    });
+    const lane = fakeMove({
+      index: 1,
+      landing: { x: 8, y: 9 },
+      landingTile: 'pit',
+      pathProgress: 0,
+      pathDistance: Number.POSITIVE_INFINITY,
+      gear: 2,
+      velocity: { x: 0, y: -1 },
+    });
+    const chosen = await applyPilotPolicy(owed, [stay, lane], stay);
+    expect(chosen.landingTile).toBe('pit');
+    expect(chosen.gear).not.toBe(0);
   });
 });
 

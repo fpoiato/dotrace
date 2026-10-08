@@ -864,8 +864,17 @@ export async function handleClientAction(
       }
 
       let velocity: { x?: number; y?: number } | undefined;
+      let drs = false;
+      let ers = false;
       try {
-        velocity = (JSON.parse(raw) as { velocity?: { x?: number; y?: number } }).velocity;
+        const parsed = JSON.parse(raw) as {
+          velocity?: { x?: number; y?: number };
+          drs?: boolean;
+          ers?: boolean;
+        };
+        velocity = parsed.velocity;
+        drs = parsed.drs === true;
+        ers = parsed.ers === true;
       } catch {
         velocity = undefined;
       }
@@ -887,6 +896,8 @@ export async function handleClientAction(
             nickname: seat.nickname,
             token: token.trim(),
             velocity: { x: velocity.x, y: velocity.y },
+            drs,
+            ers,
           },
           roomCode: code,
         },
