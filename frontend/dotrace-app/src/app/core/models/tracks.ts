@@ -1081,4 +1081,6 @@ export const TILE_COLORS: Record<TileType, string> = {
   grass: PAPER_COLORS.grass,
   finish: PAPER_COLORS.finish,
   rumble: PAPER_COLORS.grass,
+  pit: "#94a3b8",
+  pitbox: "#e2e8f0",
 };
