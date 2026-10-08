@@ -23,6 +23,7 @@ import {
   ttl24h,
 } from './ddb';
 import { applyRaceStatDeltas, getTop10, RaceStatDelta } from './leaderboard';
+import { recordRaceFinished, recordRaceStarted } from './race-counter';
 import { requestOllayaPower } from './ollaya-control';
 import { WsEnvelope } from './response';
 import { GameState } from '../../../../../shared/ws-types';
@@ -619,14 +620,41 @@ export async function handleClientAction(
       break;
     }
 
-    case 'SUBMIT_RACE_STATS': {
+    case 'RECORD_RACE_START': {
       if (!(await isHost(connectionId))) break;
-      const { stats } = (payload ?? {}) as { stats?: RaceStatDelta[] };
-      if (!Array.isArray(stats) || stats.length === 0) break;
-      const applied = await applyRaceStatDeltas(stats);
+      const hostConn = await getConnection(connectionId);
+      const { raceStartedAt } = (payload ?? {}) as { raceStartedAt?: number };
+      if (!hostConn || typeof raceStartedAt !== 'number') break;
+      const recorded = await recordRaceStarted(hostConn.roomCode, raceStartedAt);
       await replyToCaller(
         connectionId,
-        { action: 'RACE_STATS_SAVED', payload: { applied } },
+        { action: 'RACE_COUNTER_SAVED', payload: { recorded, kind: 'start' } },
+        result,
+        pushToCaller
+      );
+      break;
+    }
+
+    case 'SUBMIT_RACE_STATS': {
+      if (!(await isHost(connectionId))) break;
+      const { stats, raceStartedAt, durationMs } = (payload ?? {}) as {
+        stats?: RaceStatDelta[];
+        raceStartedAt?: number;
+        durationMs?: number;
+      };
+      const applied =
+        Array.isArray(stats) && stats.length > 0 ? await applyRaceStatDeltas(stats) : 0;
+      let raceRecorded = false;
+      if (typeof raceStartedAt === 'number' && typeof durationMs === 'number') {
+        const hostConn = await getConnection(connectionId);
+        if (hostConn) {
+          raceRecorded = await recordRaceFinished(hostConn.roomCode, raceStartedAt, durationMs);
+        }
+      }
+      if (applied === 0 && !raceRecorded && !Array.isArray(stats)) break;
+      await replyToCaller(
+        connectionId,
+        { action: 'RACE_STATS_SAVED', payload: { applied, raceRecorded } },
         result,
         pushToCaller
       );
