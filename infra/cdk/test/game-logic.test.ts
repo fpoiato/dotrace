@@ -1675,11 +1675,16 @@ describe('DRS and ERS', () => {
   });
 
   it('places DRS zones on asphalt, off the stripe and off the lap checkpoint', () => {
-    const several = new Set(['monza', 'monaco', 'interlagos']);
+    const several = new Map([
+      ['monza', 2],
+      ['monaco', 3],
+      ['interlagos', 2],
+    ]);
     for (const track of TRACKS) {
       const zones = track.drsZones ?? [];
       expect(zones.length).toBeGreaterThanOrEqual(1);
-      if (several.has(track.id)) expect(zones).toHaveLength(2);
+      const expected = several.get(track.id);
+      if (expected !== undefined) expect(zones).toHaveLength(expected);
       expect(track.checkpoint).toBeDefined();
       for (let i = 0; i < zones.length; i++) {
         const zone = zones[i];

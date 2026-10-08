@@ -79,6 +79,8 @@ export class GameEngineService implements OnDestroy {
   private rushTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly AI_RUSH_MS = 70;
   private readonly aiFollowUps = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Seats with a PLAY_AI_TURN already in flight, so a nudge cannot double-request. */
+  private readonly aiInFlight = new Set<string>();
   private static readonly AI_TURN_TIMEOUT_MS = 28_000;
   private static readonly AI_TIMED_GAP_MS = 400;
   private static readonly AI_RETRY_MS = 1_800;
