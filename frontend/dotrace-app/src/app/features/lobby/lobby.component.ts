@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { GAME_MODES, GameMode, MAX_PLAYERS, Player } from '../../core/models/ws-types';
+import { LAP_OPTIONS, MAX_PLAYERS, Player } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -33,10 +33,8 @@ export class LobbyComponent implements OnInit, OnDestroy {
 
   selectedTrackId = '';
   selectedLaps = 1;
-  selectedGameMode: GameMode = 'TURNS';
   selectedDifficulty: AiDifficulty = 'pro';
-  readonly lapOptions = [1, 2, 3];
-  readonly gameModes = GAME_MODES;
+  readonly lapOptions = LAP_OPTIONS;
   readonly difficulties: AiDifficulty[] = ['easy', 'medium', 'hard', 'pro'];
   readonly practiceHintKey = 'lobby.practiceHint';
   readonly maxPlayers = MAX_PLAYERS;
@@ -65,7 +63,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
       this.game.state$.subscribe((state) => {
         if (state?.trackId) this.selectedTrackId = state.trackId;
         if (state?.totalLaps) this.selectedLaps = state.totalLaps;
-        if (state?.gameMode) this.selectedGameMode = state.gameMode;
         if (state && state.phase !== 'LOBBY') {
           void this.router.navigate(['/game']);
         }
@@ -157,11 +154,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
   selectLaps(laps: number): void {
     this.selectedLaps = laps;
     this.game.selectLaps(laps);
-  }
-
-  selectGameMode(mode: GameMode): void {
-    this.selectedGameMode = mode;
-    this.game.selectGameMode(mode);
   }
 
   startRace(): void {

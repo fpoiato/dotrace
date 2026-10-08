@@ -115,6 +115,9 @@ export class MiniMapComponent implements OnChanges, OnDestroy {
         } else if (tile === 'finish') {
           ctx.fillStyle = (x + y) % 2 === 0 ? PAPER_COLORS.finishDark : '#ffffff';
           ctx.fillRect(x * s, y * s, s, s);
+        } else if (tile === 'pit' || tile === 'pitbox') {
+          ctx.fillStyle = tile === 'pitbox' ? '#f59e0b' : '#64748b';
+          ctx.fillRect(x * s, y * s, s, s);
         }
       }
     }

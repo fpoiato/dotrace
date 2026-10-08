@@ -40,37 +40,23 @@
           (trackSelected)="selectTrack($event)"
         />
 
-        <div class="mb-2 grid grid-cols-[6.75rem_minmax(0,1fr)] items-end gap-2">
-          <div>
-            <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.laps' | translate }}</p>
-            <div class="grid grid-cols-3 gap-1">
-              @for (n of lapOptions; track n) {
-                <button
-                  type="button"
-                  (click)="selectLaps(n)"
-                  class="min-h-10 rounded-lg border-2 text-base font-bold transition"
-                  [class]="selectedLaps === n ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
-                >
-                  {{ n }}
-                </button>
-              }
-            </div>
+        <div class="mb-2">
+          <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.laps' | translate }}</p>
+          <div class="grid grid-cols-5 gap-1">
+            @for (n of lapOptions; track n) {
+              <button
+                type="button"
+                (click)="selectLaps(n)"
+                class="min-h-10 rounded-lg border-2 text-base font-bold transition"
+                [class]="selectedLaps === n ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
+              >
+                {{ n }}
+              </button>
+            }
           </div>
-          <div>
-            <p class="mb-1 text-[11px] font-medium text-slate-400">{{ 'lobby.gameMode' | translate }}</p>
-            <div class="grid grid-cols-2 gap-1">
-              @for (mode of gameModes; track mode) {
-                <button
-                  type="button"
-                  (click)="selectGameMode(mode)"
-                  class="min-h-10 whitespace-nowrap rounded-lg border-2 px-1 text-[11px] font-semibold leading-tight transition"
-                  [class]="selectedGameMode === mode ? 'border-orange-500 bg-orange-500/20' : 'border-slate-600'"
-                >
-                  {{ 'lobby.mode.' + mode | translate }}
-                </button>
-              }
-            </div>
-          </div>
+          @if (selectedLaps > 5) {
+            <p class="mt-1 text-[11px] leading-tight text-amber-300">{{ 'lobby.fuelHint' | translate }}</p>
+          }
         </div>
       </div>
     } @else {
@@ -80,10 +66,7 @@
           {{ 'lobby.selectTrack' | translate }}: {{ trackName(selectedTrackId) | translate }}
         </p>
       }
-      <p class="shrink-0 text-sm text-orange-300">{{ 'lobby.laps' | translate }}: {{ selectedLaps }}</p>
-      <p class="mb-2 shrink-0 text-sm text-orange-300">
-        {{ 'lobby.gameMode' | translate }}: {{ 'lobby.mode.' + selectedGameMode | translate }}
-      </p>
+      <p class="mb-2 shrink-0 text-sm text-orange-300">{{ 'lobby.laps' | translate }}: {{ selectedLaps }}</p>
     }
 
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">

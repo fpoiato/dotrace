@@ -12,7 +12,7 @@ export interface Vector2D {
   y: number;
 }
 
-export type TileType = 'track' | 'grass' | 'finish' | 'rumble';
+export type TileType = 'track' | 'grass' | 'finish' | 'rumble' | 'pit' | 'pitbox';
 
 export interface CheckpointRect {
   x0: number;
@@ -53,6 +53,11 @@ export interface TrackDefinition {
    * enters and leaves the box. Each cut is perpendicular to the track sides.
    */
   drsZones?: CheckpointRect[];
+  /**
+   * Pit stalls on the detour beside the longest straight, in grid order.
+   * Index matches the car's start-line slot (pitBoxIndex).
+   */
+  pitBoxes?: Vector2D[];
 }
 
 export interface Player {
@@ -103,6 +108,18 @@ export interface Player {
   ersCharge?: number;
   /** Last accepted move spent an ERS bar. Cleared on this car's next move. */
   ersActive?: boolean;
+  /** Remaining fuel. Undefined when the race is 5 laps or shorter. */
+  fuel?: number;
+  /** Start-line slot; selects this car's colored pit stall. */
+  pitBoxIndex?: number;
+  /** In pit lane with a drive-through still to serve. Cleared on exit or a stop. */
+  driveThroughArmed?: boolean;
+  /** Drive-throughs still owed (one per 3 black-and-white flags). */
+  driveThroughOwed?: number;
+  /** Inclusive round the car must sit still after stopping in its own box. */
+  pitHoldUntilRound?: number;
+  /** Finished the race without serving a required drive-through. */
+  disqualified?: boolean;
 }
 
 export type GamePhase = 'LOBBY' | 'GRID_ORDER' | 'GAME_ROUND' | 'GAME_OVER';
@@ -156,6 +173,10 @@ export interface MoveRecord {
   gearPenaltyUntilRound?: number;
   /** TIMED mode: epoch ms before the player may move again. */
   stopUntil?: number;
+  /** Remaining fuel after this move, when the race uses fuel. */
+  fuel?: number;
+  driveThroughOwed?: number;
+  disqualified?: boolean;
 }
 
 /** Maximum number of move records stored in the replay log. */
@@ -333,7 +354,80 @@ export type PlayerGameAction = SubmitMoveAction | SelectTrackAction;
 export const MAX_PLAYERS = 12;
 // A lone host may start a race as solo practice mode.
 export const MIN_PLAYERS = 1;
-export const LAP_OPTIONS = [1, 2, 3] as const;
+export const LAP_OPTIONS = [1, 2, 3, 4, 5, 10, 15, 20, 25] as const;
+
+/** Races longer than this use fuel and the pit lane. */
+export const FUEL_RACE_MIN_LAPS = 6;
+export const FUEL_TANK = 100;
+/** Burn per turn by gear. Index is the gear the car travels at. */
+export const FUEL_BURN_BY_GEAR = [0, 1, 1, 2, 3, 4, 5, 6] as const;
+export const PIT_MAX_GEAR = 3;
+export const FLAGS_PER_DRIVE_THROUGH = 3;
+
+export function isLapOption(laps: number): boolean {
+  return (LAP_OPTIONS as readonly number[]).includes(laps);
+}
+
+export function fuelEnabled(totalLaps: number): boolean {
+  return totalLaps >= FUEL_RACE_MIN_LAPS;
+}
+
+export function isPitTile(tile: TileType | null | undefined): boolean {
+  return tile === 'pit' || tile === 'pitbox';
+}
+
+/** Higher gears burn more. Spending ERS this move halves the burn, rounding down. */
+export function fuelBurn(gear: number, spentErs: boolean): number {
+  const idx = Math.max(0, Math.min(FUEL_BURN_BY_GEAR.length - 1, gear));
+  const base = FUEL_BURN_BY_GEAR[idx];
+  return spentErs ? Math.floor(base / 2) : base;
+}
+
+export function settleFuel(player: Player, gear: number, spentErs: boolean): void {
+  if (player.fuel === undefined) return;
+  player.fuel = Math.max(0, player.fuel - fuelBurn(gear, spentErs));
+}
+
+export function ownPitBox(track: TrackDefinition, player: Player): Vector2D | undefined {
+  if (player.pitBoxIndex === undefined) return undefined;
+  return track.pitBoxes?.[player.pitBoxIndex];
+}
+
+/**
+ * Own stall refills the tank, holds the car for the rest of this round plus
+ * the next, and serves one drive-through. Passing through arms a drive-through;
+ * leaving the lane without stopping serves it and does not refuel.
+ */
+export function settlePitVisit(
+  player: Player,
+  track: TrackDefinition,
+  tile: TileType | null,
+  round: number
+): 'stop' | 'through' | 'exit' | 'none' {
+  const box = ownPitBox(track, player);
+  const onOwnBox = !!box && player.position.x === box.x && player.position.y === box.y;
+  if (onOwnBox) {
+    if (player.fuel !== undefined) player.fuel = FUEL_TANK;
+    player.velocity = { x: 0, y: 0 };
+    player.pitHoldUntilRound = round + 1;
+    player.driveThroughArmed = false;
+    if ((player.driveThroughOwed ?? 0) > 0) {
+      player.driveThroughOwed = (player.driveThroughOwed ?? 0) - 1;
+    }
+    return 'stop';
+  }
+  if (isPitTile(tile)) {
+    if ((player.driveThroughOwed ?? 0) > 0) player.driveThroughArmed = true;
+    return 'through';
+  }
+  if (player.driveThroughArmed) {
+    player.driveThroughOwed = Math.max(0, (player.driveThroughOwed ?? 0) - 1);
+    player.driveThroughArmed = false;
+    return 'exit';
+  }
+  return 'none';
+}
+
 export const ROOM_CODE_LENGTH = 5;
 export const PODIUM_SIZE = 3;
 
@@ -1194,6 +1288,9 @@ export function segmentCrossesRumble(
 export function applyGrassPenalty(player: Player, state: GameState, now = Date.now()): void {
   const isRepeat = (player.grassCuts ?? 0) > 0;
   player.grassCuts = (player.grassCuts ?? 0) + 1;
+  if (player.grassCuts % FLAGS_PER_DRIVE_THROUGH === 0) {
+    player.driveThroughOwed = (player.driveThroughOwed ?? 0) + 1;
+  }
   player.velocity = zeroVector();
 
   if (isTimedMode(state)) {
@@ -1280,14 +1377,19 @@ export function getValidMoves(
   const gearLimited = isGearLimited(player, round);
   const delta = gearLimited ? MAX_GEAR_DELTA : maxDelta;
   const cap = gearLimited ? 1 : maxGear;
+  const outOfFuel = player.fuel !== undefined && player.fuel <= 0;
+  const here = getTileAt(track, position.x, position.y);
   const opponents = others ? activeRacers(others, player.connectionId) : [];
 
   for (let dvx = -delta; dvx <= delta; dvx++) {
     for (let dvy = -delta; dvy <= delta; dvy++) {
       const next: Vector2D = { x: velocity.x + dvx, y: velocity.y + dvy };
       if (!isValidGearChange(velocity, next, gearLimited, delta, cap)) continue;
+      if (outOfFuel && gearOf(next) > 1) continue;
       const landing = landingPosition(position, next);
-      if (getTileAt(track, landing.x, landing.y) === null) continue;
+      const landingTile = getTileAt(track, landing.x, landing.y);
+      if (landingTile === null) continue;
+      if ((isPitTile(here) || isPitTile(landingTile)) && gearOf(next) > PIT_MAX_GEAR) continue;
       if (opponents.some((o) => o.position.x === landing.x && o.position.y === landing.y)) {
         continue;
       }
@@ -1363,6 +1465,7 @@ export interface LiveStandingRow {
   finishOrder?: number;
   isOffTrack: boolean;
   passedCheckpoint: boolean;
+  disqualified?: boolean;
 }
 
 /**
@@ -1401,6 +1504,7 @@ export function buildLiveStandings(
     finishOrder: p.finishOrder,
     isOffTrack: p.isOffTrack,
     passedCheckpoint: !!p.passedCheckpoint,
+    disqualified: !!p.disqualified,
   }));
 }
 
@@ -1530,8 +1634,8 @@ export function updateSessionStats(state: GameState): void {
     entry.nickname = p.nickname;
     entry.color = p.color;
     entry.races += 1;
-    if (p.finishOrder === 1) entry.wins += 1;
-    if (p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE) entry.podiums += 1;
+    if (!p.disqualified && p.finishOrder === 1) entry.wins += 1;
+    if (!p.disqualified && p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE) entry.podiums += 1;
 
     // Wall-clock splits only count in TIMED mode. In TURNS they include waiting
     // for other players and look like total race time on the leaderboard.
@@ -1715,8 +1819,9 @@ export function buildRaceStatDeltas(state: GameState): RaceStatDelta[] {
       const delta: RaceStatDelta = {
         nickname: p.nickname,
         races: 1,
-        wins: p.finishOrder === 1 ? 1 : 0,
-        podiums: p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
+        wins: !p.disqualified && p.finishOrder === 1 ? 1 : 0,
+        podiums:
+          !p.disqualified && p.finishOrder !== undefined && p.finishOrder <= PODIUM_SIZE ? 1 : 0,
       };
       if (isTimedMode(state)) {
         const lapMs = bestLapMs(p, state.raceStartedAt);

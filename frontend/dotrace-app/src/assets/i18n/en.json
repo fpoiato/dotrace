@@ -144,5 +144,12 @@
   "common.error": "Something went wrong",
   "common.close": "Close",
   "common.copied": "Copied!",
-  "common.host": "Host"
+  "common.host": "Host",
+  "lobby.fuelHint": "Above 5 laps the tank counts. Higher gears burn more; ERS saves fuel. The detour on the longest straight is the pit lane.",
+  "game.fuel": "Fuel",
+  "game.driveThrough": "Drive-through required ({{n}}). Does not refuel.",
+  "game.pitHold": "Stopped in the box this round.",
+  "game.dsq": "DSQ",
+  "howto.8.title": "Fuel and pits",
+  "howto.8.body": "In races of 6 laps or more the tank to the right of the pad drops every turn. Higher gears burn more; ERS halves the burn. At empty the max gear is 1. The detour on the longest straight is the pit lane: gear cap 3. Stopping in the stall of your color fills the tank and holds you for 1 round. Driving through does not refuel. Three black-and-white flags require a drive-through; finishing without serving it is a disqualification."
 }

@@ -60,7 +60,8 @@ export class BotBrain {
 
         const landing = landingPosition(position, nextVelocity);
         if (!this.isInBounds(landing, trackState)) continue;
-        if (getTileAt(track, landing.x, landing.y) === null) continue;
+        const tile = getTileAt(track, landing.x, landing.y);
+        if (tile === null || tile === 'pit' || tile === 'pitbox') continue;
 
         candidates.push({ dx, dy, nextVelocity, landing });
       }

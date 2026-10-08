@@ -153,6 +153,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   /** Next SUBMIT_MOVE spends one ERS bar. */
   ersIntent = false;
   readonly ersPips = [0, 1, 2, 3];
+  readonly fuelPips = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
   private boostStamp = '';
   /** Seconds left on a timed grass penalty (drives the popup countdown). */
   penaltyCountdownSec = 0;
@@ -354,6 +355,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     if (index < full) return 1;
     if (index > full) return 0;
     return charge - full;
+  }
+
+  fuelPipFill(me: Player, index: number): number {
+    const fuel = me.fuel ?? 0;
+    const slice = fuel - index * 10;
+    return Math.max(0, Math.min(1, slice / 10));
   }
 
   pad(option: PadOption): void {
