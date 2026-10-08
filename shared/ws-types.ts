@@ -378,7 +378,7 @@ export function isPitTile(tile: TileType | null | undefined): boolean {
   return tile === 'pit' || tile === 'pitbox';
 }
 
-/** Higher gears burn more. Spending ERS this move halves the burn, rounding down. */
+/** Higher gears burn more. Spending ERS this move halves the burn, rounding to a tenth. */
 export function fuelBurn(gear: number, spentErs: boolean): number {
   const idx = Math.max(0, Math.min(FUEL_BURN_BY_GEAR.length - 1, gear));
   const base = FUEL_BURN_BY_GEAR[idx];
