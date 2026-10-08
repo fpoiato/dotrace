@@ -1,5 +1,5 @@
 import { AsyncPipe } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
@@ -122,7 +122,8 @@ const PAD_GLYPHS: Record<string, string> = {
       .fuel-reserve {
         color: #fbbf24;
       }
-      .play-now {
+      .play-now,
+      .wake-opponents {
         animation: play-now-pulse 1s ease-in-out infinite;
       }
       @keyframes play-now-pulse {
@@ -152,6 +153,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private readonly ws = inject(WebSocketService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly zone = inject(NgZone);
 
   readonly state$ = this.game.state$;
   readonly roomCtx$ = this.room.room$;
@@ -232,12 +234,13 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   wakeOpponents(): void {
     this.waking = true;
     this.game.wakeOpponents();
+    this.cdr.detectChanges();
   }
 
   /**
    * Human stall is 5s: waiters get the wake button, the seat on the clock
-   * gets "Jogue agora!". A bot that is still thinking does not count — the
-   * button waits until the AI request has had time to fail.
+   * gets "Jogue agora!". A bot shows the same button after 6s so a hung
+   * request cannot hide it for the whole AI timeout.
    */
   private watchTurnStall(state: GameState | null): void {
     const key = turnStallKey(state);
@@ -253,15 +256,19 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     if (this.stallTimer) clearTimeout(this.stallTimer);
     const wait = stallWindowMs(this.game.currentPlayer());
     this.stallTimer = setTimeout(() => {
-      this.stallTimer = null;
-      if (this.stallKey !== key) return;
-      const current = this.game.currentPlayer();
-      if (this.game.isMyTurn() && !isBotPlayer(current)) {
-        this.startPlayNow();
-      } else {
-        this.showWakeButton = true;
-      }
-      this.cdr.markForCheck();
+      // Socket updates arm this timer outside Angular. Without zone.run the
+      // button is set and never painted, so a stuck turn looks button-less.
+      this.zone.run(() => {
+        this.stallTimer = null;
+        if (this.stallKey !== key) return;
+        const current = this.game.currentPlayer();
+        if (this.game.isMyTurn() && !isBotPlayer(current)) {
+          this.startPlayNow();
+        } else {
+          this.showWakeButton = true;
+        }
+        this.cdr.detectChanges();
+      });
     }, wait);
   }
 
@@ -271,12 +278,14 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.haptic.playNow();
     if (this.playNowTimer) clearInterval(this.playNowTimer);
     this.playNowTimer = setInterval(() => {
-      this.playNowSeconds -= 1;
-      if (this.playNowSeconds <= 0) {
-        this.clearPlayNow();
-        if (this.stallKey) this.showWakeButton = true;
-      }
-      this.cdr.markForCheck();
+      this.zone.run(() => {
+        this.playNowSeconds -= 1;
+        if (this.playNowSeconds <= 0) {
+          this.clearPlayNow();
+          if (this.stallKey) this.showWakeButton = true;
+        }
+        this.cdr.detectChanges();
+      });
     }, 1_000);
     this.cdr.markForCheck();
   }

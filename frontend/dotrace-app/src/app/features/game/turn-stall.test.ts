@@ -18,7 +18,7 @@ const state = {
 } as GameState;
 
 assert(TURN_STALL_MS === 5_000, 'human stall window is 5s');
-assert(BOT_STALL_MS === 30_000, 'bot stall window waits out the AI request');
+assert(BOT_STALL_MS === 6_000, 'bot wake button shows before a hung AI request');
 assert(PLAY_NOW_SECONDS === 5, 'human countdown is 5s');
 assert(stallWindowMs({ connectionId: 'human', nickname: 'Fernando' } as never) === TURN_STALL_MS, 'human window');
 assert(stallWindowMs({ connectionId: 'ai#laya', nickname: 'Laya · Fácil' } as never) === BOT_STALL_MS, 'bot window');
