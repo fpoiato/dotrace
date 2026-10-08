@@ -88,8 +88,8 @@ export class GameEngineService implements OnDestroy {
   /** Re-broadcast / retry when the seat on the clock has not moved. */
   private turnNudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly TURN_NUDGE_MS = 5_000;
-  /** Past the AI request timeout, so a thinking Laya is not played locally. */
-  private static readonly BOT_NUDGE_MS = 30_000;
+  /** Host plays the bot locally if the seat is still waiting. A retry in flight is not an excuse to drop the nudge. */
+  private static readonly BOT_NUDGE_MS = 12_000;
   /** Human phones listen for this and show the "jogue agora!" countdown. */
   readonly playNow$ = new Subject<string>();
   /** Fast local moves once only bots are left, so the human is not waiting on Lambda. */
@@ -98,7 +98,7 @@ export class GameEngineService implements OnDestroy {
   private readonly aiFollowUps = new Map<string, ReturnType<typeof setTimeout>>();
   /** Seats with a PLAY_AI_TURN already in flight, so a nudge cannot double-request. */
   private readonly aiInFlight = new Set<string>();
-  private static readonly AI_TURN_TIMEOUT_MS = 28_000;
+  private static readonly AI_TURN_TIMEOUT_MS = 10_000;
   private static readonly AI_TIMED_GAP_MS = 400;
   private static readonly AI_RETRY_MS = 1_800;
   /** Old host to purge from game state once we (the new host) recover a snapshot. */
@@ -893,8 +893,9 @@ export class GameEngineService implements OnDestroy {
 
   /**
    * If the seat on the clock has not moved, poke it. Humans get a play-now
-   * ping at 5s. A bot with a request in flight is thinking, not stuck — the
-   * local play waits until that request has had time to fail.
+   * ping at 5s. A bot gets a local move at 12s. A request still in flight
+   * is not a reason to drop the only nudge — that retry loop is why the
+   * race stayed frozen with no button.
    */
   private armTurnNudge(state: GameState): void {
     if (this.turnNudgeTimer) {
@@ -908,15 +909,21 @@ export class GameEngineService implements OnDestroy {
     const wait = player && this.isBotSeat(player) ? GameEngineService.BOT_NUDGE_MS : GameEngineService.TURN_NUDGE_MS;
     const round = state.round;
     const index = state.currentTurnIndex;
-    this.turnNudgeTimer = setTimeout(() => {
-      this.turnNudgeTimer = null;
-      const latest = this.state;
-      if (!latest || latest.phase !== 'GAME_ROUND' || isTimedMode(latest)) return;
-      if (latest.round !== round || latest.currentTurnIndex !== index) return;
-      if (latest.turnOrder[latest.currentTurnIndex] !== seat) return;
-      if (this.aiInFlight.has(seat)) return;
-      this.wakeCurrentSeat();
-    }, wait);
+    this.turnNudgeTimer = setTimeout(() => this.nudgeStuckSeat(seat, round, index, false), wait);
+  }
+
+  /** One shot used to land while the AI retry was in flight and then never run again. */
+  private nudgeStuckSeat(seat: string, round: number, index: number, force: boolean): void {
+    this.turnNudgeTimer = null;
+    const latest = this.state;
+    if (!latest || latest.phase !== 'GAME_ROUND' || isTimedMode(latest)) return;
+    if (latest.round !== round || latest.currentTurnIndex !== index) return;
+    if (latest.turnOrder[latest.currentTurnIndex] !== seat) return;
+    if (!force && this.aiInFlight.has(seat)) {
+      this.turnNudgeTimer = setTimeout(() => this.nudgeStuckSeat(seat, round, index, true), 2_000);
+      return;
+    }
+    this.wakeCurrentSeat();
   }
 
   /**
@@ -1159,9 +1166,13 @@ export class GameEngineService implements OnDestroy {
       })
       .catch((err) => {
         console.warn('AI turn failed', err);
+        if (stuck || attempt >= 2) {
+          this.playLocalBotMove();
+          return;
+        }
         this.scheduleAi(seatId, GameEngineService.AI_RETRY_MS, () => {
           const again = this.state?.players.find((candidate) => candidate.connectionId === seatId);
-          if (again) this.requestAiMove(again, attempt);
+          if (again) this.requestAiMove(again, attempt + 1);
         });
       })
       .finally(() => {

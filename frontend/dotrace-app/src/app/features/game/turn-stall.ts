@@ -4,10 +4,10 @@ import { GameState, Player, isAiPilotNickname, isTimedMode } from '../../core/mo
 export const TURN_STALL_MS = 5_000;
 
 /**
- * A bot seat is thinking, not stuck, until the AI request has had time to
- * fail. Laya often takes longer than the human window.
+ * A bot seat is thinking, not stuck, for a short beat. Longer than this the
+ * waiter must see the wake button — a hung AI request used to hide it for 30s.
  */
-export const BOT_STALL_MS = 30_000;
+export const BOT_STALL_MS = 6_000;
 
 /** Countdown shown to the human who should move. */
 export const PLAY_NOW_SECONDS = 5;
