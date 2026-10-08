@@ -360,9 +360,11 @@ const MONZA: CircuitSpec = {
     { at: { x: 125, y: 126 }, dir: { x: -1, y: 0 } },
   ],
   checkpoint: { x0: 20, y0: 6, x1: 52, y1: 20 },
-  // Two straights. Race is left. Off the grid, the stripe, and the Lesmo checkpoint.
+  // Pit straight, the long right-hand Curva Grande after the Rettifilo, and
+  // the Serraglio. Off the grid, the stripe, and the Lesmo checkpoint.
   drsZones: [
     { x0: 127, y0: 108, x1: 196, y1: 128 },
+    { x0: 16, y0: 38, x1: 46, y1: 100 },
     { x0: 70, y0: 26, x1: 118, y1: 78 },
   ],
 };
