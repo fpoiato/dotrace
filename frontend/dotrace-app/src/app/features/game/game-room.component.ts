@@ -15,6 +15,7 @@ import {
   boostLimits,
   canPlayerMove,
   formatRaceTime,
+  fuelOnReserve,
   getTileAt,
   ERS_MAX_DELTA,
   getValidMoves,
@@ -117,6 +118,9 @@ const PAD_GLYPHS: Record<string, string> = {
       .penalty-chip {
         animation: penalty-chip-in 160ms ease-out;
       }
+      .fuel-reserve {
+        color: #fbbf24;
+      }
       @keyframes penalty-chip-in {
         from {
           opacity: 0;
@@ -143,6 +147,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly state$ = this.game.state$;
   readonly roomCtx$ = this.room.room$;
   readonly formatRaceTime = formatRaceTime;
+  readonly fuelOnReserve = fuelOnReserve;
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;
@@ -419,6 +424,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   myPlayer(state: GameState): Player | undefined {
     const id = this.room.room?.connectionId;
     return state.players.find((p) => p.connectionId === id);
+  }
+
+  reserveCars(state: GameState): Player[] {
+    return state.players.filter(
+      (player) => player.finishOrder === undefined && fuelOnReserve(player.fuel)
+    );
   }
 
   /** Race order for the in-race classification panel (color + position). */

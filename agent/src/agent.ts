@@ -11,7 +11,7 @@
 import { getTrackById } from '../../shared/tracks';
 import { HttpClient } from '../../bot/src/http-client';
 import { WsClient } from '../../bot/src/ws-client';
-import { BedrockBrain, HeuristicBrain, MoveBrain } from './brain';
+import { BedrockBrain, HeuristicBrain, MoveBrain, applyPilotPolicy } from './brain';
 import { LayaBrain } from './laya-brain';
 import { LAYA_DECIDE_MODEL } from './laya-scene';
 import { AgentConfig, loadConfig } from './config';
@@ -123,12 +123,17 @@ export async function raceLoop(
 
     const summary = buildBoardSummary(player, state, track);
     const moves = listAnnotatedMoves(player, state, track);
-    const chosen = await brain.pickMove(summary, moves);
+    const chosen = await applyPilotPolicy(
+      summary,
+      moves,
+      await brain.pickMove(summary, moves)
+    );
 
     console.log(
       `[MOVE] round=${state.round} lap=${player.lap}/${state.totalLaps} ` +
         `pos=(${player.position.x},${player.position.y}) ` +
         `velocity=(${chosen.velocity.x},${chosen.velocity.y}) ` +
+        `boost=${chosen.drs ? 'DRS' : ''}${chosen.ers ? 'ERS' : ''} ` +
         `landing=(${chosen.landing.x},${chosen.landing.y}) goal=${summary.goal} ` +
         `align=${summary.situation.alignment} progress=${summary.situation.lapProgressPct}% ` +
         `cornerIn=${summary.situation.cellsToCorner ?? '∞'}`
@@ -142,7 +147,7 @@ export async function raceLoop(
       replay: state.replayLog?.length ?? 0,
     };
     try {
-      await session.submitMove(chosen.velocity);
+      await session.submitMove(chosen.velocity, { drs: chosen.drs, ers: chosen.ers });
       // When this pilot is the only one still racing, the host hands the turn
       // straight back. Waiting until it is no longer our turn then hangs.
       await session.waitUntilMoveSettled(before);

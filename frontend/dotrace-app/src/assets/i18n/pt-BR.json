@@ -147,6 +147,8 @@
   "common.host": "Host",
   "lobby.fuelHint": "Acima de 5 voltas o tanque conta. Marcha alta gasta mais; ERS economiza. O desvio na reta maior é o box.",
   "game.fuel": "Combustível",
+  "game.fuelReserve": "Reserva de combustível",
+  "game.fuelReserveAlert": "{{name}} na reserva",
   "game.driveThrough": "Drive-through obrigatório ({{n}}). Sem reabastecer.",
   "game.pitHold": "Parado no box nesta rodada.",
   "game.dsq": "DSQ",

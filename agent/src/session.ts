@@ -302,12 +302,14 @@ export class GameSession {
   }
 
   /** Submit an absolute velocity vector. Host performs final validation. */
-  async submitMove(vector: Vector2D): Promise<void> {
+  async submitMove(vector: Vector2D, boost?: { drs?: boolean; ers?: boolean }): Promise<void> {
     const connectionId = this.ws.getConnectionId();
     if (!connectionId) {
       throw new Error('Not connected');
     }
     const payload: SubmitMoveAction = { action: 'SUBMIT_MOVE', vector };
+    if (boost?.drs) payload.drs = true;
+    if (boost?.ers) payload.ers = true;
     await this.http.postAction('FORWARD_TO_HOST', payload, connectionId, this.roomCode);
   }
 

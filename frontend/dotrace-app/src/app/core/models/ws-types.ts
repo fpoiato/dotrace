@@ -361,6 +361,8 @@ export const LAP_OPTIONS = [1, 2, 3, 4, 5, 10, 15, 20, 25] as const;
 /** Races longer than this use fuel and the pit lane. */
 export const FUEL_RACE_MIN_LAPS = 6;
 export const FUEL_TANK = 100;
+/** At or below a quarter tank the car is on reserve and should pit. */
+export const FUEL_RESERVE = FUEL_TANK / 4;
 /** Burn per turn by gear. Index is the gear the car travels at. One tenth of the first tuning. */
 export const FUEL_BURN_BY_GEAR = [0, 0.1, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] as const;
 export const PIT_MAX_GEAR = 3;
@@ -372,6 +374,10 @@ export function isLapOption(laps: number): boolean {
 
 export function fuelEnabled(totalLaps: number): boolean {
   return totalLaps >= FUEL_RACE_MIN_LAPS;
+}
+
+export function fuelOnReserve(fuel: number | undefined): boolean {
+  return fuel !== undefined && fuel <= FUEL_RESERVE;
 }
 
 export function isPitTile(tile: TileType | null | undefined): boolean {
@@ -1483,6 +1489,9 @@ export interface LiveStandingRow {
   isOffTrack: boolean;
   passedCheckpoint: boolean;
   disqualified?: boolean;
+  /** Remaining fuel, when the race uses it. */
+  fuel?: number;
+  driveThroughOwed?: number;
 }
 
 /**
@@ -1522,6 +1531,8 @@ export function buildLiveStandings(
     isOffTrack: p.isOffTrack,
     passedCheckpoint: !!p.passedCheckpoint,
     disqualified: !!p.disqualified,
+    fuel: p.fuel,
+    driveThroughOwed: p.driveThroughOwed,
   }));
 }
 

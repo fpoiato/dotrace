@@ -16,7 +16,7 @@ import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-sec
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { raceLoop, RaceLoopResult } from '../../../../agent/src/agent';
-import { BedrockBrain, HeuristicBrain, MoveBrain } from '../../../../agent/src/brain';
+import { BedrockBrain, HeuristicBrain, MoveBrain, applyPilotPolicy } from '../../../../agent/src/brain';
 import { LayaBrain } from '../../../../agent/src/laya-brain';
 import { DEFAULT_BEDROCK_MODEL_ID } from '../../../../agent/src/config';
 import { LAYA_DECIDE_MODEL } from '../../../../agent/src/laya-scene';
@@ -210,16 +210,28 @@ async function performHandoff(event: SpawnAiPlayerEvent, session: GameSession): 
   });
 }
 
-function cachedVelocity(seat: ConnectionRecord | undefined, token: string): { x: number; y: number } | null {
+interface CachedMove {
+  x: number;
+  y: number;
+  drs?: boolean;
+  ers?: boolean;
+}
+
+function cachedVelocity(seat: ConnectionRecord | undefined, token: string): CachedMove | null {
   if (classifySeatRead(seat, token) !== 'cached' || !seat) return null;
-  return { x: seat.lastVx as number, y: seat.lastVy as number };
+  return {
+    x: seat.lastVx as number,
+    y: seat.lastVy as number,
+    drs: seat.lastDrs === true,
+    ers: seat.lastErs === true,
+  };
 }
 
 async function pollCachedMove(
   connectionId: string,
   token: string,
   budgetMs: number
-): Promise<{ x: number; y: number } | null> {
+): Promise<CachedMove | null> {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     await sleep(250);
@@ -233,7 +245,7 @@ async function computeMove(
   seat: ConnectionRecord,
   state: GameState,
   nickname: string
-): Promise<{ x: number; y: number }> {
+): Promise<CachedMove> {
   const track = getTrackById(state.trackId);
   if (!track) throw new Error(`Unknown track ${state.trackId}`);
   const player = state.players.find(
@@ -247,11 +259,19 @@ async function computeMove(
     { roomCode: seat.roomCode, nickname: seat.nickname, brain: seat.brain, difficulty },
     difficulty
   );
-  const chosen = await brain.pickMove(buildBoardSummary(player, state, track), moves);
-  return { x: chosen.velocity.x, y: chosen.velocity.y };
+  const summary = buildBoardSummary(player, state, track);
+  const chosen = await applyPilotPolicy(summary, moves, await brain.pickMove(summary, moves));
+  return {
+    x: chosen.velocity.x,
+    y: chosen.velocity.y,
+    drs: !!chosen.drs,
+    ers: !!chosen.ers,
+  };
 }
 
-export async function playTurn(event: PlayTurnEvent): Promise<{ velocity: { x: number; y: number } }> {
+export async function playTurn(
+  event: PlayTurnEvent
+): Promise<{ velocity: { x: number; y: number }; drs?: boolean; ers?: boolean }> {
   if (!event?.roomCode || !event.nickname || !event.token || !event.state) {
     throw new Error('roomCode, nickname, token, and state are required');
   }
@@ -261,17 +281,17 @@ export async function playTurn(event: PlayTurnEvent): Promise<{ velocity: { x: n
     throw new Error('Unknown AI seat');
   }
   const ready = cachedVelocity(seat, event.token);
-  if (ready) return { velocity: ready };
+  if (ready) return { velocity: { x: ready.x, y: ready.y }, drs: ready.drs, ers: ready.ers };
 
   const claim = await claimAiSeat(id, event.token);
   if (claim === 'cached') {
     const again = cachedVelocity(await getConnection(id), event.token);
-    if (again) return { velocity: again };
+    if (again) return { velocity: { x: again.x, y: again.y }, drs: again.drs, ers: again.ers };
     throw new Error('AI seat cache missing');
   }
   if (claim === 'busy') {
     const waited = await pollCachedMove(id, event.token, PLAY_TURN_POLL_MS);
-    if (waited) return { velocity: waited };
+    if (waited) return { velocity: { x: waited.x, y: waited.y }, drs: waited.drs, ers: waited.ers };
     throw new Error('AI seat busy');
   }
 
@@ -279,9 +299,10 @@ export async function playTurn(event: PlayTurnEvent): Promise<{ velocity: { x: n
     const velocity = await computeMove(seat, event.state, event.nickname);
     await saveSeatMove(id, event.token, velocity);
     console.log(
-      `[AI] turn room=${seat.roomCode} nick=${seat.nickname} velocity=(${velocity.x},${velocity.y})`
+      `[AI] turn room=${seat.roomCode} nick=${seat.nickname} velocity=(${velocity.x},${velocity.y}) ` +
+        `drs=${!!velocity.drs} ers=${!!velocity.ers}`
     );
-    return { velocity };
+    return { velocity: { x: velocity.x, y: velocity.y }, drs: velocity.drs, ers: velocity.ers };
   } catch (err) {
     await releaseSeat(id, event.token);
     throw err;
@@ -290,7 +311,7 @@ export async function playTurn(event: PlayTurnEvent): Promise<{ velocity: { x: n
 
 export const handler = async (
   event: SpawnAiPlayerEvent | PlayTurnEvent
-): Promise<{ velocity: { x: number; y: number } } | void> => {
+): Promise<{ velocity: { x: number; y: number }; drs?: boolean; ers?: boolean } | void> => {
   if (event && (event as PlayTurnEvent).action === 'PLAY_TURN') {
     return playTurn(event as PlayTurnEvent);
   }

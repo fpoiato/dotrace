@@ -31,6 +31,8 @@ export interface ConnectionRecord {
   lastToken?: string;
   lastVx?: number;
   lastVy?: number;
+  lastDrs?: boolean;
+  lastErs?: boolean;
   /** Epoch ms while a model call owns this seat. */
   computingUntil?: number;
   computingToken?: string;
@@ -345,7 +347,7 @@ export async function claimAiSeat(
 export async function saveSeatMove(
   connectionId: string,
   token: string,
-  velocity: { x: number; y: number }
+  velocity: { x: number; y: number; drs?: boolean; ers?: boolean }
 ): Promise<void> {
   await ddb.send(
     new UpdateCommand({
@@ -353,11 +355,13 @@ export async function saveSeatMove(
       Key: { connectionId },
       ConditionExpression: 'computingToken = :token',
       UpdateExpression:
-        'SET lastToken = :token, lastVx = :vx, lastVy = :vy REMOVE computingUntil, computingToken',
+        'SET lastToken = :token, lastVx = :vx, lastVy = :vy, lastDrs = :drs, lastErs = :ers REMOVE computingUntil, computingToken',
       ExpressionAttributeValues: {
         ':token': token,
         ':vx': velocity.x,
         ':vy': velocity.y,
+        ':drs': velocity.drs === true,
+        ':ers': velocity.ers === true,
       },
     })
   );

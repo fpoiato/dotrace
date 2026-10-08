@@ -11,11 +11,16 @@ import {
   Player,
   TrackDefinition,
   Vector2D,
+  DRS_MAX_GEAR,
+  ERS_MAX_DELTA,
+  MAX_GEAR,
+  MAX_GEAR_DELTA,
   gearOf,
   getTileAt,
   getValidMoves,
   isGearLimited,
   isGrassShortcut,
+  isPitTile,
   segmentCrossesFinish,
   segmentEntersRect,
 } from '../../shared/ws-types';
@@ -55,6 +60,10 @@ export interface AnnotatedMove {
   clearAhead: number;
   /** True if pure braking from the landing would leave asphalt. */
   overspeed: boolean;
+  /** This velocity is only legal with DRS open (gear 7–8, or a climb of 2). */
+  drs?: boolean;
+  /** This velocity is only legal on the ERS pad (step of 2). */
+  ers?: boolean;
 }
 
 export interface BoardSummary {
@@ -85,6 +94,11 @@ export interface BoardSummary {
   fuel?: number;
   driveThroughOwed?: number;
   pitBox?: Vector2D;
+  /** Standing on the pit lane or a stall. */
+  onPit?: boolean;
+  drsArmed?: boolean;
+  drsActive?: boolean;
+  ersCharge?: number;
 }
 
 function rectCenter(rect: { x0: number; y0: number; x1: number; y1: number }): Vector2D {
@@ -134,11 +148,72 @@ export function listAnnotatedMoves(
   track: TrackDefinition
 ): AnnotatedMove[] {
   const { point } = goalPoint(player, track);
-  const moves = getValidMoves(player, track, state.players, state.round);
   const goals = segmentGoals(track, player.passedCheckpoint ?? false);
   const field = sharedPathCache.get(track, goals);
+  const limited = isGearLimited(player, state.round);
+  const drsReady = !limited && !!player.drsArmed && !player.drsActive;
+  const ersReady = !limited && (player.ersCharge ?? 0) >= 1;
+  const climb = gearOf(player.velocity) < MAX_GEAR;
 
-  return moves.map((move, index) => {
+  const tagged: { velocity: Vector2D; landing: Vector2D; drs?: boolean; ers?: boolean }[] = [];
+  const seen = new Set<string>();
+  const push = (
+    batch: { velocity: Vector2D; landing: Vector2D }[],
+    flags: { drs?: boolean; ers?: boolean }
+  ) => {
+    for (const move of batch) {
+      const key = `${move.velocity.x},${move.velocity.y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tagged.push({ ...move, ...flags });
+    }
+  };
+
+  push(getValidMoves(player, track, state.players, state.round), {});
+  if (drsReady) {
+    push(
+      getValidMoves(
+        player,
+        track,
+        state.players,
+        state.round,
+        DRS_MAX_GEAR,
+        climb ? ERS_MAX_DELTA : MAX_GEAR_DELTA,
+        false
+      ),
+      { drs: true }
+    );
+  }
+  if (ersReady) {
+    push(
+      getValidMoves(
+        player,
+        track,
+        state.players,
+        state.round,
+        MAX_GEAR,
+        ERS_MAX_DELTA,
+        true
+      ),
+      { ers: true }
+    );
+  }
+  if (drsReady && ersReady) {
+    push(
+      getValidMoves(
+        player,
+        track,
+        state.players,
+        state.round,
+        DRS_MAX_GEAR,
+        ERS_MAX_DELTA,
+        true
+      ),
+      { drs: true, ers: true }
+    );
+  }
+
+  return tagged.map((move, index) => {
     const path = annotatePath(track, player.position, move.velocity, move.landing, field);
     return {
       index,
@@ -156,6 +231,8 @@ export function listAnnotatedMoves(
       pathProgress: path.pathProgress,
       clearAhead: path.clearAhead,
       overspeed: path.overspeed,
+      drs: move.drs,
+      ers: move.ers,
     };
   });
 }
@@ -198,6 +275,10 @@ export function buildBoardSummary(
     fuel: player.fuel,
     driveThroughOwed: player.driveThroughOwed,
     pitBox: player.pitBoxIndex === undefined ? undefined : track.pitBoxes?.[player.pitBoxIndex],
+    onPit: isPitTile(getTileAt(track, player.position.x, player.position.y)),
+    drsArmed: player.drsArmed,
+    drsActive: player.drsActive,
+    ersCharge: player.ersCharge,
   };
 }
 

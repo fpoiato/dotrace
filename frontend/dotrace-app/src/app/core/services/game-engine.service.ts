@@ -22,6 +22,7 @@ import {
   getTileAt,
   getValidMoves,
   isGameOver,
+  isGearLimited,
   isGrassShortcut,
   isTimedMode,
   landingPosition,
@@ -45,9 +46,15 @@ import {
   zeroVector,
   buildRaceTelemetry,
   fuelEnabled,
+  FUEL_RESERVE,
   FUEL_TANK,
   isLapOption,
   settleFuel,
+  isPitTile,
+  ownPitBox,
+  DRS_MAX_GEAR,
+  ERS_MAX_DELTA,
+  MAX_GEAR,
   settlePitVisit,
   closeDrsOutsideZone,
 } from '../models/ws-types';
@@ -985,8 +992,31 @@ export class GameEngineService implements OnDestroy {
     }
     const track = getTrackById(state.trackId);
     if (!track) return;
-    const moves = getValidMoves(player, track, state.players, state.round);
+    const limited = isGearLimited(player, state.round);
+    const drs = !limited && !!player.drsArmed && !player.drsActive;
+    const ers = !limited && (player.ersCharge ?? 0) >= 1;
+    const climb = gearOf(player.velocity) < MAX_GEAR;
+    const request = requestedBoost({ drs, ers });
+    const moves = getValidMoves(
+      player,
+      track,
+      state.players,
+      state.round,
+      drs ? DRS_MAX_GEAR : MAX_GEAR,
+      ers || (drs && climb) ? ERS_MAX_DELTA : 1,
+      ers
+    );
     if (moves.length === 0) return;
+    const box = ownPitBox(track, player);
+    const here = getTileAt(track, player.position.x, player.position.y);
+    const onPit = isPitTile(here);
+    const reserve = player.fuel !== undefined && player.fuel <= FUEL_RESERVE;
+    const through = (player.driveThroughOwed ?? 0) > 0;
+    const boxDist = box
+      ? Math.max(Math.abs(player.position.x - box.x), Math.abs(player.position.y - box.y))
+      : Number.POSITIVE_INFINITY;
+    const commitFuel = !!box && reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit);
+    const commitThrough = !!box && through && !reserve && (boxDist <= 14 || onPit);
     let best = moves[0]!;
     let bestScore = -Infinity;
     for (const move of moves) {
@@ -998,12 +1028,23 @@ export class GameEngineService implements OnDestroy {
         score += 10_000;
       }
       if (move.velocity.x === 0 && move.velocity.y === 0) score -= 100;
+      const tile = getTileAt(track, move.landing.x, move.landing.y);
+      if (box && (commitFuel || commitThrough)) {
+        const dist = Math.max(Math.abs(move.landing.x - box.x), Math.abs(move.landing.y - box.y));
+        score += (48 - dist) * (commitFuel ? 180 : 90);
+        if (isPitTile(tile)) score += commitFuel ? 4_000 : 3_000;
+        if (commitFuel && move.landing.x === box.x && move.landing.y === box.y) score += 100_000;
+        if (commitThrough && move.landing.x === box.x && move.landing.y === box.y) score -= 50_000;
+      }
+      if (gearOf(move.velocity) > gearOf(player.velocity) && !commitFuel) score += 40;
       if (score > bestScore) {
         bestScore = score;
         best = move;
       }
     }
-    this.applyMove(player.connectionId, best.velocity);
+    const accelerating = gearOf(best.velocity) > gearOf(player.velocity) || gearOf(best.velocity) > MAX_GEAR;
+    const boost = accelerating && !isPitTile(getTileAt(track, best.landing.x, best.landing.y)) ? request : undefined;
+    this.applyMove(player.connectionId, best.velocity, boost);
   }
 
   private requestAiMove(player: Player, attempt = 1): void {
@@ -1030,7 +1071,11 @@ export class GameEngineService implements OnDestroy {
         GameEngineService.AI_TURN_TIMEOUT_MS
       )
       .then((response) => {
-        this.finishAiMove(seatId, token, response.payload?.velocity, attempt);
+        const payload = response.payload as { velocity?: Vector2D; drs?: boolean; ers?: boolean } | undefined;
+        this.finishAiMove(seatId, token, payload?.velocity, attempt, {
+          drs: payload?.drs === true,
+          ers: payload?.ers === true,
+        });
       })
       .catch((err) => {
         console.warn('AI turn failed', err);
@@ -1048,7 +1093,8 @@ export class GameEngineService implements OnDestroy {
     seatId: string,
     token: string,
     velocity: Vector2D | undefined,
-    attempt: number
+    attempt: number,
+    boost?: BoostRequest
   ): void {
     const latest = this.state;
     const player = latest?.players.find((candidate) => candidate.connectionId === seatId);
@@ -1057,7 +1103,7 @@ export class GameEngineService implements OnDestroy {
     if (!canPlayerMove(latest, seatId)) return;
     const expected = aiTurnToken(latest, player);
     if (token !== expected && token !== `${expected}:2`) return;
-    const applied = this.applyMove(seatId, velocity);
+    const applied = this.applyMove(seatId, velocity, requestedBoost(boost));
     if (!applied) {
       if (attempt === 1) {
         this.scheduleAi(seatId, 0, () => {
