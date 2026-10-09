@@ -22,7 +22,7 @@ import { parseMoveLabel } from './laya-scene';
 import { adviseBoost } from './boost-advice';
 import { applySceneChoice } from './scene-choice';
 import type { AnnotatedMove, BoardSummary } from './tools';
-import { FUEL_RESERVE } from '../../shared/ws-types';
+import { FUEL_RESERVE, pilotIntent, shouldPitForFuel, shouldSaveFuel } from '../../shared/ws-types';
 
 export interface MoveBrain {
   pickMove(summary: BoardSummary, moves: AnnotatedMove[]): Promise<AnnotatedMove>;
@@ -121,6 +121,21 @@ export class HeuristicBrain implements MoveBrain {
     const aggression = styleAgg * t.aggression;
     const caution = styleCau * t.caution;
     const gearBias = styleBias + t.gearBias;
+    const intent = pilotIntent(this.style.seed);
+    const lapCells = summary.lapCells ?? 160;
+    const gap = summary.scene?.state.gap;
+    const attack = typeof gap === 'number' && gap <= 6;
+    const saveFuel =
+      summary.fuel !== undefined &&
+      shouldSaveFuel(intent.fuelPlan, summary.fuel, summary.situation.cellsToGoal, lapCells);
+    const pitBox = summary.pitBox;
+    const hereDist = pitBox
+      ? Math.max(Math.abs(summary.position.x - pitBox.x), Math.abs(summary.position.y - pitBox.y))
+      : Number.POSITIVE_INFINITY;
+    const forecast =
+      summary.fuel !== undefined &&
+      !!pitBox &&
+      shouldPitForFuel(intent.fuelPlan, summary.fuel, summary.situation.cellsToGoal, lapCells, hereDist);
 
     const targetGear = Math.max(
       1,
@@ -149,7 +164,9 @@ export class HeuristicBrain implements MoveBrain {
       const hereDist = pit
         ? Math.max(Math.abs(summary.position.x - pit.x), Math.abs(summary.position.y - pit.y))
         : Number.POSITIVE_INFINITY;
-      const commitFuel = !!pit && reserve && (summary.fuel! <= 12 || hereDist <= 22 || !!summary.onPit);
+      const commitFuel =
+        !!pit &&
+        ((reserve && (summary.fuel! <= 12 || hereDist <= 22 || !!summary.onPit)) || forecast);
       const commitThrough = !!pit && through && !reserve && (hereDist <= 14 || !!summary.onPit);
       if (pit && (commitFuel || commitThrough)) {
         const dist = Math.max(Math.abs(move.landing.x - pit.x), Math.abs(move.landing.y - pit.y));
@@ -220,6 +237,20 @@ export class HeuristicBrain implements MoveBrain {
       }
       if (move.gear > 6 && move.clearAhead >= move.gear && !move.overspeed) {
         score += 120 * aggression;
+      }
+
+      const hx = summary.situation.raceHeading.x;
+      const hy = summary.situation.raceHeading.y;
+      const side =
+        hx * (move.landing.y - summary.position.y) - hy * (move.landing.x - summary.position.x);
+      score += side * intent.side * 8;
+      if (saveFuel && move.gear > 4 && !commitFuel) score -= 70 * (move.gear - 4);
+      if (saveFuel && move.gear >= 2 && move.gear <= 4 && !move.overspeed) score += 24;
+      if (attack && intent.lateBrake && move.gear >= currentGear && !move.overspeed && !commitFuel) {
+        score += 18 * intent.push;
+      }
+      if (!intent.lateBrake && (summary.situation.cellsToCorner ?? 99) < 8 && move.gear < currentGear) {
+        score += 16;
       }
 
       score += ((move.index * 31 + salt) % 11) * 0.05;

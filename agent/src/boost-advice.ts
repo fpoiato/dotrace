@@ -40,7 +40,7 @@ export function adviseBoost(facts: BoostFacts): BoostPick {
   const runway = facts.clearAhead >= Math.max(4, facts.nextGear);
   const attack = facts.gap !== 'lead' && facts.gap <= 6;
   const armed = facts.drsArmed && !facts.drsActive;
-  const wantDrs = armed && attack && straight && runway && facts.blue >= 4 && facts.nextGear >= facts.gear;
+  const wantDrs = armed && attack && straight && runway && facts.blue >= 3 && facts.nextGear >= facts.gear;
 
   const charge = facts.ersCharge;
   const saveLast = charge < 1.5 && bend != null && bend < 16;

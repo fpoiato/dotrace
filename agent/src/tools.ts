@@ -23,6 +23,7 @@ import {
   isPitTile,
   segmentCrossesFinish,
   segmentEntersRect,
+  estimateLapCells,
 } from '../../shared/ws-types';
 import { buildLayaScene, type LayaScene } from './laya-scene';
 import {
@@ -103,6 +104,8 @@ export interface BoardSummary {
   drsArmed?: boolean;
   drsActive?: boolean;
   ersCharge?: number;
+  /** Centerline cells in a lap, for the fuel forecast. */
+  lapCells?: number;
 }
 
 function rectCenter(rect: { x0: number; y0: number; x1: number; y1: number }): Vector2D {
@@ -283,6 +286,7 @@ export function buildBoardSummary(
     drsArmed: player.drsArmed,
     drsActive: player.drsActive,
     ersCharge: player.ersCharge,
+    lapCells: estimateLapCells(track),
   };
 }
 

@@ -1,4 +1,4 @@
-import { createInitialState, createLobbyPlayer } from '../../shared/ws-types';
+import { createInitialState, createLobbyPlayer, fuelBurn, pilotIntent, shouldPitForFuel, shouldSaveFuel } from '../../shared/ws-types';
 import { getTrackById } from '../../shared/tracks';
 import {
   BedrockBrain,
@@ -101,6 +101,19 @@ describe('HeuristicBrain', () => {
     const b = styleFromSeed('Bot Turbo');
     expect(a).not.toEqual(b);
     expect(a.salt).not.toBe(b.salt);
+    const left = pilotIntent('Bot Alfa');
+    const right = pilotIntent('Bot Turbo');
+    expect(left).not.toEqual(right);
+    expect(['early', 'stretch', 'save']).toContain(left.fuelPlan);
+  });
+
+  it('notices a tank that cannot finish the next lap, and lets a save plan lift', () => {
+    expect(fuelBurn(8, false)).toBeGreaterThan(fuelBurn(6, false) * 2);
+    expect(shouldPitForFuel('early', 36, 12, 480, 30)).toBe(true);
+    expect(shouldPitForFuel('stretch', 70, 12, 480, 30)).toBe(false);
+    expect(shouldPitForFuel('save', 36, 12, 480, 30)).toBe(false);
+    expect(shouldSaveFuel('save', 36, 12, 480)).toBe(true);
+    expect(shouldSaveFuel('stretch', 36, 12, 480)).toBe(false);
   });
 
   it('caps easy gear softer than pro on an open straight', async () => {
