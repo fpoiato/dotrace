@@ -116,7 +116,39 @@ export class GameEngineService implements OnDestroy {
    * has no highlighted squares" bug.
    */
   private emit(state: GameState): void {
+    this.noteSeatClock(state);
     this.stateSubject.next(structuredClone(state));
+  }
+
+  /** Wall clock for the seat on the turn. A hidden phone freezes timers, not this. */
+  private seatKey = '';
+  private seatSince = 0;
+  private lastRecover = 0;
+
+  private noteSeatClock(state: GameState): void {
+    if (state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
+    const seat = state.turnOrder[state.currentTurnIndex];
+    const key = `${state.round}:${state.currentTurnIndex}:${seat}`;
+    if (key === this.seatKey) return;
+    this.seatKey = key;
+    this.seatSince = Date.now();
+  }
+
+  /**
+   * A pause of a few seconds used to leave round 94 stuck: background timers
+   * never fired. Recover from the clock as soon as the page runs again.
+   */
+  recoverIfStale(): void {
+    const state = this.state;
+    if (!state || state.phase !== 'GAME_ROUND' || isTimedMode(state)) return;
+    this.noteSeatClock(state);
+    if (!this.seatSince) return;
+    const player = this.currentPlayer();
+    const limit = player && this.isBotSeat(player) ? 6_000 : 5_000;
+    if (Date.now() - this.seatSince < limit) return;
+    if (Date.now() - this.lastRecover < 4_000) return;
+    this.lastRecover = Date.now();
+    this.wakeOpponents();
   }
 
   get isHost(): boolean {
