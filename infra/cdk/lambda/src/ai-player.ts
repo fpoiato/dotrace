@@ -18,6 +18,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { raceLoop, RaceLoopResult } from '../../../../agent/src/agent';
 import { BedrockBrain, HeuristicBrain, MoveBrain, applyPilotPolicy } from '../../../../agent/src/brain';
 import { LayaBrain } from '../../../../agent/src/laya-brain';
+import { loadLiveBoard } from './lib/live-board';
 import { DEFAULT_BEDROCK_MODEL_ID } from '../../../../agent/src/config';
 import { LAYA_DECIDE_MODEL } from '../../../../agent/src/laya-scene';
 import {
@@ -63,7 +64,8 @@ export interface PlayTurnEvent {
   roomCode: string;
   nickname: string;
   token: string;
-  state: GameState;
+  /** Omitted when the board was stored in Dynamo for this room. */
+  state?: GameState;
 }
 
 const PLAY_TURN_POLL_MS = 12_000;
@@ -272,9 +274,11 @@ async function computeMove(
 export async function playTurn(
   event: PlayTurnEvent
 ): Promise<{ velocity: { x: number; y: number }; drs?: boolean; ers?: boolean }> {
-  if (!event?.roomCode || !event.nickname || !event.token || !event.state) {
-    throw new Error('roomCode, nickname, token, and state are required');
+  if (!event?.roomCode || !event.nickname || !event.token) {
+    throw new Error('roomCode, nickname, and token are required');
   }
+  const board = event.state ?? (await loadLiveBoard(event.roomCode));
+  if (!board) throw new Error('roomCode, nickname, token, and state are required');
   const id = aiSeatId(event.roomCode, event.nickname);
   const seat = await getConnection(id);
   if (!seat || seat.roomCode !== event.roomCode.toUpperCase()) {
@@ -296,7 +300,7 @@ export async function playTurn(
   }
 
   try {
-    const velocity = await computeMove(seat, event.state, event.nickname);
+    const velocity = await computeMove(seat, board as GameState, event.nickname);
     await saveSeatMove(id, event.token, velocity);
     console.log(
       `[AI] turn room=${seat.roomCode} nick=${seat.nickname} velocity=(${velocity.x},${velocity.y}) ` +

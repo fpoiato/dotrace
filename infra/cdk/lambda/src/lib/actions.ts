@@ -27,6 +27,7 @@ import { recordRaceFinished, recordRaceStarted } from './race-counter';
 import { requestOllayaPower } from './ollaya-control';
 import { WsEnvelope } from './response';
 import { GameState } from '../../../../../shared/ws-types';
+import { loadReplayChunks, saveLiveBoard, saveReplayChunk } from './live-board';
 
 const PLAYER_COLOR_HOST = '#EF4444';
 
@@ -81,6 +82,30 @@ async function replyToCaller(
  * returned in `ActionResult.response` instead of being posted to their socket;
  * peer notifications still go over WebSocket.
  */
+
+/** A full replay plus pen trails crosses the 128KB WebSocket frame around round 58. */
+function slimRelay(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') return payload;
+  const body = payload as { state?: unknown; meta?: { replayMoves?: unknown[] } };
+  if (body.state) body.state = slimRelayState(body.state);
+  if (Array.isArray(body.meta?.replayMoves) && body.meta.replayMoves.length > 80) {
+    body.meta.replayMoves = body.meta.replayMoves.slice(0, 80);
+  }
+  return body;
+}
+
+function slimRelayState(state: unknown): unknown {
+  if (!state || typeof state !== 'object') return state;
+  const board = state as { replayLog?: unknown; players?: { trail?: unknown[] }[] };
+  delete board.replayLog;
+  for (const player of board.players ?? []) {
+    if (Array.isArray(player.trail) && player.trail.length > 48) {
+      player.trail = player.trail.slice(-48);
+    }
+  }
+  return board;
+}
+
 export async function handleClientAction(
   connectionId: string,
   body: WsEnvelope,
@@ -540,9 +565,14 @@ export async function handleClientAction(
         );
       }
 
+      const slim = slimRelay(payload) as { state?: unknown; meta?: { replayMoves?: unknown[] } };
+      if (slim?.meta) delete slim.meta.replayMoves;
+      await saveLiveBoard(hostConn.roomCode, slim?.state).catch((err) =>
+        console.warn('[live-board] save failed', err)
+      );
       const envelope: WsEnvelope = {
         action: 'RELAY',
-        payload,
+        payload: slim,
         roomCode: hostConn.roomCode,
       };
       result.response = { action: 'RELAY_ACK', payload: { ok: true }, roomCode: hostConn.roomCode };
@@ -585,7 +615,7 @@ export async function handleClientAction(
 
       await sendToConnection(targetHostId, {
         action: 'HOST_STATE_RESPONSE',
-        payload: { state, fromId: connectionId },
+        payload: { state: slimRelayState(state), fromId: connectionId },
         roomCode: responder.roomCode,
       });
       result.response = {
@@ -658,6 +688,30 @@ export async function handleClientAction(
         result,
         pushToCaller
       );
+      break;
+    }
+
+    case 'SAVE_LIVE_REPLAY': {
+      if (!(await isHost(connectionId))) break;
+      const hostConn = await getConnection(connectionId);
+      if (!hostConn) break;
+      const body = (payload ?? {}) as { index?: number; moves?: unknown[] };
+      const index = Number(body.index ?? 0);
+      if (!Number.isInteger(index) || index < 0 || index > 40 || !Array.isArray(body.moves)) break;
+      await saveReplayChunk(hostConn.roomCode, index, body.moves);
+      result.response = { action: 'RELAY_ACK', payload: { ok: true }, roomCode: hostConn.roomCode };
+      break;
+    }
+
+    case 'GET_LIVE_REPLAY': {
+      const conn = await getConnection(connectionId);
+      if (!conn) break;
+      const moves = await loadReplayChunks(conn.roomCode);
+      result.response = {
+        action: 'RELAY_ACK',
+        payload: { moves },
+        roomCode: conn.roomCode,
+      };
       break;
     }
 
@@ -824,6 +878,9 @@ export async function handleClientAction(
       }
 
       const code = hostConn.roomCode;
+      await saveLiveBoard(code, boardForBrain(state)).catch((err) =>
+        console.warn('[live-board] AI save failed', err)
+      );
       const seat = await getConnection(aiSeatId(code, name));
       if (!seat || seat.roomCode !== code) {
         await replyToCaller(
@@ -845,7 +902,6 @@ export async function handleClientAction(
               roomCode: code,
               nickname: seat.nickname,
               token: token.trim(),
-              state: boardForBrain(state),
             })
           ),
         })

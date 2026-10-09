@@ -141,9 +141,11 @@ export class DotRaceWsStack extends Stack {
     connectionsTable.grantReadWriteData(messageFn);
     connectionsTable.grantReadWriteData(httpFn);
     replaysTable.grantReadWriteData(httpFn);
+    replaysTable.grantReadWriteData(messageFn);
     leaderboardTable.grantReadWriteData(messageFn);
     leaderboardTable.grantReadWriteData(httpFn);
     httpFn.addEnvironment('REPLAYS_TABLE', replaysTable.tableName);
+    messageFn.addEnvironment('REPLAYS_TABLE', replaysTable.tableName);
 
     const webSocketApi = new WebSocketApi(this, 'DotRaceWebSocketApi', {
       connectRouteOptions: {
@@ -270,6 +272,8 @@ export class DotRaceWsStack extends Stack {
     );
 
     connectionsTable.grantReadWriteData(aiPlayerFn);
+    replaysTable.grantReadData(aiPlayerFn);
+    aiPlayerFn.addEnvironment('REPLAYS_TABLE', replaysTable.tableName);
     httpFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFunctionName);
     messageFn.addEnvironment('AI_PLAYER_FUNCTION_NAME', aiPlayerFunctionName);
     // Literal ARN — grantInvoke(aiPlayerFn) would reintroduce the CFN cycle.

@@ -1,6 +1,7 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
+import { replayChunks, slimBoard } from '../../features/game/relay-board';
 import {
   GameMode,
   GameState,
@@ -645,7 +646,11 @@ export class GameEngineService implements OnDestroy {
     if (!state || !room || room.isHost) return;
     if (state.phase === 'LOBBY') return;
     void this.api
-      .postAction('HOST_STATE_RESPONSE', { targetHostId: requesterId, state }, room.roomCode)
+      .postAction(
+        'HOST_STATE_RESPONSE',
+        { targetHostId: requesterId, state: slimBoard(state) },
+        room.roomCode
+      )
       .catch((err) => console.warn('Host state response failed', err));
   }
 
@@ -811,13 +816,40 @@ export class GameEngineService implements OnDestroy {
     return adoptNicknameConnection(state, nickname, connectionId);
   }
 
+  /** Replay lives in Dynamo. The socket only said the race ended. */
+  private loadLiveReplay(): void {
+    const room = this.roomService.room;
+    if (!room || !this.state) return;
+    void this.api
+      .postAction<{ moves?: unknown[] }>('GET_LIVE_REPLAY', {}, room.roomCode)
+      .then((response) => {
+        const moves = (response.payload as { moves?: unknown[] } | undefined)?.moves;
+        if (!this.state || !Array.isArray(moves) || moves.length === 0) return;
+        this.state.replayLog = moves as GameState['replayLog'];
+        this.emit(this.state);
+      })
+      .catch((err) => console.warn('Replay load failed', err));
+  }
+
   private applyRelay(relay: RelayPayload): void {
+
     if (this.isHost) return;
+    const chunk = relay.meta?.['replayMoves'];
+    if (Array.isArray(chunk) && this.state) {
+      const seq = Number(relay.meta?.['replaySeq'] ?? 0);
+      const log = this.state.replayLog ?? [];
+      if (seq === log.length) {
+        this.state.replayLog = log.concat(chunk);
+        this.emit(this.state);
+      }
+      return;
+    }
     const state = relay.state;
     if (!state.gameMode) state.gameMode = 'TURNS';
     if (!state.replayLog) state.replayLog = [];
     this.notePlayNow(relay.meta);
     this.emit(state);
+    if (relay.type === 'GAME_OVER') this.loadLiveReplay();
   }
 
   private handlePlayerAction(action: Record<string, unknown>): void {
@@ -873,22 +905,24 @@ export class GameEngineService implements OnDestroy {
     const telemetry = buildRaceTelemetry(state);
     const relayMeta = telemetry ? { ...meta, telemetry } : meta;
     void this.api
-      .postAction('RELAY', { type, state: this.relayBoard(state, type), meta: relayMeta }, room.roomCode)
+      .postAction('RELAY', { type, state: slimBoard(state), meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
+    if (type === 'GAME_OVER') this.sendReplayChunks(state);
   }
 
   /**
-   * Live relays were carrying the whole replay. Around round 43 that crosses
-   * the WebSocket frame limit, the broadcast dies, and a wake never lands.
-   * The host keeps the full log; guests only need the board.
+   * The finish frame used to carry the whole replay. By round 58 that crosses
+   * the WebSocket limit again, the broadcast dies, and the race looks frozen.
+   * Guests get the log in small chunks after the board.
    */
-  private relayBoard(state: GameState, type: RelayPayload['type']): GameState {
-    const copy = structuredClone(state);
-    if (type !== 'GAME_OVER') delete copy.replayLog;
-    for (const player of copy.players) {
-      if (player.trail && player.trail.length > 48) player.trail = player.trail.slice(-48);
-    }
-    return copy;
+  private sendReplayChunks(state: GameState): void {
+    const room = this.roomService.room;
+    if (!room?.isHost) return;
+    replayChunks(state.replayLog).forEach((moves, index) => {
+      void this.api
+        .postAction('SAVE_LIVE_REPLAY', { index, moves }, room.roomCode)
+        .catch((err) => console.warn('Replay chunk failed', err));
+    });
   }
 
   /**
