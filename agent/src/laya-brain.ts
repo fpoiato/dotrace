@@ -141,12 +141,19 @@ export class LayaBrain implements MoveBrain {
   private async decide(target: LayaEndpoint, scene: LayaScene): Promise<LayaDecideResponse> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (target.apiKey) headers.Authorization = `Bearer ${target.apiKey}`;
+    const body = JSON.stringify(layaDecideBody(scene, this.model));
+    const started = Date.now();
+    console.log(
+      `[AI] weigh layaBytes=${Buffer.byteLength(body)} options=${scene.options?.length ?? 0} ` +
+        `model=${this.model} timeoutMs=${this.timeoutMs}`
+    );
     const response = await this.fetchImpl(`${target.url.replace(/\/$/, '')}/api/decide`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(layaDecideBody(scene, this.model)),
+      body,
       signal: AbortSignal.timeout(this.timeoutMs),
     });
+    console.log(`[AI] weigh layaStatus=${response.status} layaMs=${Date.now() - started}`);
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`Ollaya ${response.status}: ${text.slice(0, 180)}`);
