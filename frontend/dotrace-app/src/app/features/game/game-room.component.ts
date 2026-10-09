@@ -180,6 +180,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   playNowSeconds = 0;
   private stallKey = '';
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
+  private removeResumeRecovery: (() => void) | null = null;
   private playNowTimer: ReturnType<typeof setInterval> | null = null;
   /** Recent grass penalties, newest first. Shown to every client. */
   penaltyFlags: { id: number; nickname: string; color: string }[] = [];
@@ -204,6 +205,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.game.ensureLobbyState();
     this.armAudioUnlock();
 
+    this.armResumeRecovery();
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
       this.game.state$.subscribe((state) => {
@@ -229,6 +231,22 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         if (seat === this.room.room?.connectionId) this.startPlayNow();
       })
     );
+  }
+
+
+  /** Hidden tabs freeze setTimeout. The clock check runs on resume and every second. */
+  private armResumeRecovery(): void {
+    if (typeof document === 'undefined') return;
+    const tick = () => this.game.recoverIfStale();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = setInterval(tick, 1_000);
+    this.removeResumeRecovery = () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(timer);
+    };
   }
 
   wakeOpponents(): void {
@@ -495,6 +513,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.removeResumeRecovery?.();
+    this.removeResumeRecovery = null;
     this.clearPenaltyFlags();
     this.clearStopPenaltyTimer();
     this.clearTurnStall();
