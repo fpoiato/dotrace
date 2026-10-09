@@ -958,6 +958,8 @@ export class GameEngineService implements OnDestroy {
       return;
     }
     this.wakeCurrentSeat();
+    // A single poke did not free round 102. Keep recovering until the seat moves.
+    this.turnNudgeTimer = setTimeout(() => this.nudgeStuckSeat(seat, round, index, true), 8_000);
   }
 
   /**
