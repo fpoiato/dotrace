@@ -93,6 +93,9 @@ export class GameEngineService implements OnDestroy {
   private static readonly BOT_NUDGE_MS = 12_000;
   /** Human phones listen for this and show the "jogue agora!" countdown. */
   readonly playNow$ = new Subject<string>();
+  readonly wakeTry$ = new Subject<{ nickname: string; attempt: number }>();
+  private wakeSeat = '';
+  private wakeAttempt = 0;
   /** Fast local moves once only bots are left, so the human is not waiting on Lambda. */
   private rushTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly AI_RUSH_MS = 70;
@@ -1018,6 +1021,12 @@ export class GameEngineService implements OnDestroy {
     const player = state.players.find((candidate) => candidate.connectionId === seat);
     if (!player || player.finishOrder !== undefined) return;
     if (this.isBotSeat(player)) {
+      if (this.wakeSeat !== seat) {
+        this.wakeSeat = seat;
+        this.wakeAttempt = 0;
+      }
+      this.wakeAttempt += 1;
+      this.wakeTry$.next({ nickname: player.nickname, attempt: this.wakeAttempt });
       this.aiInFlight.delete(seat);
       const pending = this.aiFollowUps.get(seat);
       if (pending) {
@@ -1026,7 +1035,7 @@ export class GameEngineService implements OnDestroy {
       }
       // A hung PLAY_AI_TURN is why the button looked dead. Play here.
       if (!this.playLocalBotMove()) {
-        this.setStateAndRelay('STATE_SYNC', state, { stuck: true, seat });
+        this.setStateAndRelay('STATE_SYNC', state, { stuck: true, seat, waking: player.nickname, attempt: this.wakeAttempt });
       }
       return;
     }
@@ -1037,6 +1046,9 @@ export class GameEngineService implements OnDestroy {
   private notePlayNow(meta?: Record<string, unknown>): void {
     if (meta?.['playNow'] === true && typeof meta['seat'] === 'string') {
       this.playNow$.next(meta['seat']);
+    }
+    if (typeof meta?.['waking'] === 'string' && typeof meta?.['attempt'] === 'number') {
+      this.wakeTry$.next({ nickname: meta['waking'], attempt: meta['attempt'] });
     }
   }
 

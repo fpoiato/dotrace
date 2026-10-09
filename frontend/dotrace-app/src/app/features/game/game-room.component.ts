@@ -178,6 +178,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   waking = false;
   /** Countdown on the human whose turn has gone quiet. */
   playNowSeconds = 0;
+  wakeName = '';
+  wakeAttempt = 0;
   private stallKey = '';
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
   private removeResumeRecovery: (() => void) | null = null;
@@ -205,7 +207,16 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.game.ensureLobbyState();
     this.armAudioUnlock();
 
-    this.armResumeRecovery();
+        this.armResumeRecovery();
+    this.subs.push(
+      this.game.wakeTry$.subscribe(({ nickname, attempt }) => {
+        this.zone.run(() => {
+          this.wakeName = nickname;
+          this.wakeAttempt = attempt;
+          this.cdr.detectChanges();
+        });
+      })
+    );
     this.subs.push(
       this.room.listenForLobbyUpdates().subscribe(),
       this.game.state$.subscribe((state) => {
@@ -319,6 +330,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private clearTurnStall(): void {
     this.stallKey = '';
     this.showWakeButton = false;
+    this.wakeName = '';
+    this.wakeAttempt = 0;
     if (this.stallTimer) clearTimeout(this.stallTimer);
     this.stallTimer = null;
     this.clearPlayNow();
