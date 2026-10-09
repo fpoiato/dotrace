@@ -238,9 +238,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Human stall is 5s: waiters get the wake button, the seat on the clock
-   * gets "Jogue agora!". A bot shows the same button after 6s so a hung
-   * request cannot hide it for the whole AI timeout.
+   * Human stall is 5s: the seat on the clock gets "Jogue agora!". Everyone
+   * else auto-wakes, and keeps waking every 8s until the turn moves. A bot
+   * starts that loop after 6s. The button no longer waits for a tap.
    */
   private watchTurnStall(state: GameState | null): void {
     const key = turnStallKey(state);
@@ -255,21 +255,23 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.clearPlayNow();
     if (this.stallTimer) clearTimeout(this.stallTimer);
     const wait = stallWindowMs(this.game.currentPlayer());
-    this.stallTimer = setTimeout(() => {
-      // Socket updates arm this timer outside Angular. Without zone.run the
-      // button is set and never painted, so a stuck turn looks button-less.
-      this.zone.run(() => {
-        this.stallTimer = null;
-        if (this.stallKey !== key) return;
-        const current = this.game.currentPlayer();
-        if (this.game.isMyTurn() && !isBotPlayer(current)) {
-          this.startPlayNow();
-        } else {
-          this.showWakeButton = true;
-        }
-        this.cdr.detectChanges();
-      });
-    }, wait);
+    this.stallTimer = setTimeout(() => this.onStall(key), wait);
+  }
+
+  /** Click the wake for the user, then again until this seat actually moves. */
+  private onStall(key: string): void {
+    this.zone.run(() => {
+      this.stallTimer = null;
+      if (this.stallKey !== key) return;
+      const current = this.game.currentPlayer();
+      if (this.game.isMyTurn() && !isBotPlayer(current)) {
+        this.startPlayNow();
+      } else {
+        this.wakeOpponents();
+      }
+      this.stallTimer = setTimeout(() => this.onStall(key), 8_000);
+      this.cdr.detectChanges();
+    });
   }
 
   private startPlayNow(): void {
@@ -282,7 +284,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.playNowSeconds -= 1;
         if (this.playNowSeconds <= 0) {
           this.clearPlayNow();
-          if (this.stallKey) this.showWakeButton = true;
+          if (this.stallKey) this.wakeOpponents();
         }
         this.cdr.detectChanges();
       });
