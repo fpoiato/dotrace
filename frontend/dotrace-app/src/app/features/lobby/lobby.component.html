@@ -146,6 +146,15 @@
           >
             {{ startLabelKey(players.length) | translate }}
           </button>
+          <button
+            type="button"
+            (click)="watchBots(players)"
+            [disabled]="!canWatch(players)"
+            class="mt-1.5 min-h-11 w-full rounded-xl border-2 border-sky-500 text-sm font-bold text-sky-300 disabled:opacity-40"
+          >
+            {{ (fillingBots ? 'lobby.aiJoining' : 'lobby.watchBots') | translate }}
+          </button>
+          <p class="mt-1 text-center text-[11px] leading-tight text-slate-500">{{ 'lobby.watchBotsHint' | translate }}</p>
         </div>
       }
     }

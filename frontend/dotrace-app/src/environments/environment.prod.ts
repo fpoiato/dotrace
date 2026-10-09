@@ -4,5 +4,5 @@ export const environment = {
   // Injected by CodeBuild from DotRaceWsStack HttpApiUrl output on deploy.
   apiUrl: 'https://placeholder.execute-api.us-east-1.amazonaws.com',
   appUrl: 'https://dotrace.fpoiato.com',
-  version: '1.11.62',
+  version: '1.11.63',
 };

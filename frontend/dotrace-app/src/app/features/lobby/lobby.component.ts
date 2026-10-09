@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { TRACKS, getTrackById } from '../../core/models/tracks';
-import { LAP_OPTIONS, MAX_PLAYERS, Player } from '../../core/models/ws-types';
+import { LAP_OPTIONS, MAX_PLAYERS, Player, isAiPilotNickname } from '../../core/models/ws-types';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { RoomService } from '../../core/services/room.service';
 import { WebSocketService } from '../../core/services/websocket.service';
@@ -38,8 +38,11 @@ export class LobbyComponent implements OnInit, OnDestroy {
   readonly difficulties: AiDifficulty[] = ['easy', 'medium', 'hard', 'pro'];
   readonly practiceHintKey = 'lobby.practiceHint';
   readonly maxPlayers = MAX_PLAYERS;
+  /** Bots placed on the grid when the host asks to watch. */
+  readonly watchField = 4;
   showHowTo = false;
   aiSpawning = false;
+  fillingBots = false;
   aiError = false;
   private readonly subs: Subscription[] = [];
 
@@ -107,7 +110,63 @@ export class LobbyComponent implements OnInit, OnDestroy {
   }
 
   async addBotPilot(players: Player[]): Promise<void> {
-    await this.spawnPilot(players, 'laya', this.botNames);
+    if (this.aiSpawning) return;
+    this.aiSpawning = true;
+    this.aiError = false;
+    try {
+      await this.spawnPilot(players, 'laya', this.botNames);
+      this.aiSpawning = false;
+    } catch (err) {
+      console.warn('AI spawn failed', err);
+      this.aiError = true;
+      this.aiSpawning = false;
+    }
+  }
+
+  canWatch(players: Player[]): boolean {
+    if (!this.selectedTrackId || this.aiSpawning) return false;
+    return this.isBotCount(players) >= 2 || this.canAddAi(players);
+  }
+
+  /**
+   * Fill a small bot field if the host has not already, then start with
+   * every human left in the lobby so the room can watch.
+   */
+  async watchBots(players: Player[]): Promise<void> {
+    if (!this.canWatch(players)) return;
+    this.aiSpawning = true;
+    this.fillingBots = true;
+    this.aiError = false;
+    let roster = players;
+    try {
+      while (this.isBotCount(roster) < this.watchField && this.canAddAi(roster)) {
+        const before = roster.length;
+        await this.spawnPilot(roster, 'laya', this.botNames);
+        roster = this.room.players;
+        if (roster.length === before) break;
+      }
+    } catch (err) {
+      console.warn('Watch bots spawn failed', err);
+      this.aiError = true;
+      this.aiSpawning = false;
+      this.fillingBots = false;
+      return;
+    }
+    this.aiSpawning = false;
+    this.fillingBots = false;
+    if (this.isBotCount(this.room.players) < 2) {
+      this.aiError = true;
+      return;
+    }
+    this.startExhibition();
+  }
+
+  private isBot(player: Player): boolean {
+    return player.connectionId.startsWith('ai#') || isAiPilotNickname(player.nickname);
+  }
+
+  private isBotCount(players: Player[]): number {
+    return players.filter((p) => this.isBot(p)).length;
   }
 
   private async spawnPilot(
@@ -115,7 +174,6 @@ export class LobbyComponent implements OnInit, OnDestroy {
     brain: 'heuristic' | 'laya',
     names: string[]
   ): Promise<void> {
-    if (this.aiSpawning) return;
     const suffix = this.translate.instant(this.difficultyLabelKey(this.selectedDifficulty));
     const taken = new Set(players.map((p) => p.nickname.toLowerCase()));
     const base = names.find(
@@ -123,17 +181,7 @@ export class LobbyComponent implements OnInit, OnDestroy {
     );
     if (!base) return;
     const nickname = `${base} · ${suffix}`;
-
-    this.aiSpawning = true;
-    this.aiError = false;
-    try {
-      await this.room.spawnAiPlayer(nickname, brain, this.selectedDifficulty);
-      this.aiSpawning = false;
-    } catch (err) {
-      console.warn('AI spawn failed', err);
-      this.aiError = true;
-      this.aiSpawning = false;
-    }
+    await this.room.spawnAiPlayer(nickname, brain, this.selectedDifficulty);
   }
 
   reject(id: string): void {
@@ -151,7 +199,12 @@ export class LobbyComponent implements OnInit, OnDestroy {
   }
 
   startRace(): void {
-    this.game.startRace();
+    if (!this.game.startRace()) return;
+    void this.router.navigate(['/game']);
+  }
+
+  private startExhibition(): void {
+    if (!this.game.startRace({ exhibition: true })) return;
     void this.router.navigate(['/game']);
   }
 

@@ -671,9 +671,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     this.showReplay = true;
   }
 
-  /** Humans are done and bots are still out. Ending leaves those bots as DNF. */
+  /** Humans are done and bots are still out. A bots-only race can be stopped by the host. */
   canEndNow(state: GameState): boolean {
     if (state.phase !== 'GAME_ROUND') return false;
+    if (state.exhibition && this.room.room?.isHost) return true;
     const me = this.myPlayer(state);
     if (!me || isAiPilotNickname(me.nickname)) return false;
     const humansOut = state.players.some(
@@ -687,6 +688,13 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   endRaceNow(): void {
     this.game.endRaceNow();
+  }
+
+  /** Furthest lap still on track, so a spectator sees race progress. */
+  leaderLap(state: GameState): number {
+    const racing = state.players.filter((p) => p.finishOrder === undefined);
+    const field = racing.length > 0 ? racing : state.players;
+    return field.reduce((lap, p) => Math.max(lap, p.lap), 1);
   }
 
   closeReplay(): void {

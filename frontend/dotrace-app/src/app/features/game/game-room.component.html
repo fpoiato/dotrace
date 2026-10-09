@@ -8,6 +8,8 @@
           } @else {
             <span class="shrink-0 rounded-full bg-green-600 px-2.5 py-1 font-bold">{{ 'game.yourTurn' | translate }}</span>
           }
+        } @else if (state.exhibition) {
+          <span class="shrink-0 rounded-full bg-sky-600 px-2.5 py-1 font-bold">{{ 'game.watching' | translate }}</span>
         } @else if (state.gameMode === 'TIMED') {
           <span class="shrink-0 text-slate-400">{{ 'game.timedRace' | translate }}</span>
         } @else {
@@ -28,6 +30,10 @@
         @if (myPlayer(state); as me) {
           <span class="shrink-0 rounded-full bg-slate-800 px-2.5 py-1 font-mono text-slate-300">
             {{ 'game.lap' | translate }} {{ me.lap }}/{{ state.totalLaps }}
+          </span>
+        } @else if (state.exhibition) {
+          <span class="shrink-0 rounded-full bg-slate-800 px-2.5 py-1 font-mono text-slate-300">
+            {{ 'game.lap' | translate }} {{ leaderLap(state) }}/{{ state.totalLaps }}
           </span>
         }
         @if (canEndNow(state)) {
@@ -87,6 +93,7 @@
             class="absolute inset-0"
             [state]="state"
             [fill]="true"
+            [followLeader]="!!state.exhibition"
             [drsIntent]="drsIntent"
             [ersIntent]="ersIntent"
           />
@@ -177,6 +184,7 @@
               </button>
             </div>
           }
+          @if (myPlayer(state)) {
           <div class="flex items-stretch justify-center gap-1.5">
             @if (myPlayer(state); as me) {
               <div
@@ -251,6 +259,7 @@
               }
             }
           </div>
+          }
           @if (myPlayer(state); as me) {
             @if ((me.driveThroughOwed ?? 0) > 0) {
               <p class="mt-1 text-center text-[11px] font-semibold text-amber-300">
