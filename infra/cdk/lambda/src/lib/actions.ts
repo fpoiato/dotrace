@@ -878,9 +878,18 @@ export async function handleClientAction(
       }
 
       const code = hostConn.roomCode;
-      await saveLiveBoard(code, boardForBrain(state)).catch((err) =>
+      const postedBytes = Buffer.byteLength(JSON.stringify(state));
+      const brain = boardForBrain(state);
+      const brainBytes = Buffer.byteLength(JSON.stringify(brain));
+      console.log(
+        `[AI] weigh post room=${code} nick=${name} postedBytes=${postedBytes} brainBytes=${brainBytes} ` +
+          `round=${state.round ?? '?'} replay=${state.replayLog?.length ?? 0}`
+      );
+      const saveAt = Date.now();
+      await saveLiveBoard(code, brain).catch((err) =>
         console.warn('[live-board] AI save failed', err)
       );
+      console.log(`[AI] weigh saveMs=${Date.now() - saveAt}`);
       const seat = await getConnection(aiSeatId(code, name));
       if (!seat || seat.roomCode !== code) {
         await replyToCaller(
@@ -892,19 +901,22 @@ export async function handleClientAction(
         break;
       }
 
+      const invokeBody = JSON.stringify({
+        action: 'PLAY_TURN',
+        roomCode: code,
+        nickname: seat.nickname,
+        token: token.trim(),
+      });
+      const invokeAt = Date.now();
       const out = await lambdaClient.send(
         new InvokeCommand({
           FunctionName: functionName,
           InvocationType: 'RequestResponse',
-          Payload: Buffer.from(
-            JSON.stringify({
-              action: 'PLAY_TURN',
-              roomCode: code,
-              nickname: seat.nickname,
-              token: token.trim(),
-            })
-          ),
+          Payload: Buffer.from(invokeBody),
         })
+      );
+      console.log(
+        `[AI] weigh invokeBytes=${Buffer.byteLength(invokeBody)} invokeMs=${Date.now() - invokeAt}`
       );
 
       const raw = out.Payload ? Buffer.from(out.Payload).toString('utf8') : '';

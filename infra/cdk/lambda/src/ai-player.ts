@@ -254,15 +254,20 @@ async function computeMove(
     (candidate) => candidate.nickname.trim().toLowerCase() === nickname.trim().toLowerCase()
   );
   if (!player) throw new Error('AI player missing from board');
+  const listedAt = Date.now();
   const moves = listAnnotatedMoves(player, state, track);
   if (moves.length === 0) throw new Error('No legal moves');
+  console.log(`[AI] weigh moves=${moves.length} listMs=${Date.now() - listedAt}`);
   const difficulty = difficultyFromUnknown(seat.difficulty);
   const brain = buildBrain(
     { roomCode: seat.roomCode, nickname: seat.nickname, brain: seat.brain, difficulty },
     difficulty
   );
   const summary = buildBoardSummary(player, state, track);
+  const summaryBytes = Buffer.byteLength(JSON.stringify(summary));
+  const pickAt = Date.now();
   const chosen = await applyPilotPolicy(summary, moves, await brain.pickMove(summary, moves));
+  console.log(`[AI] weigh summaryBytes=${summaryBytes} pickMs=${Date.now() - pickAt}`);
   return {
     x: chosen.velocity.x,
     y: chosen.velocity.y,
@@ -277,8 +282,16 @@ export async function playTurn(
   if (!event?.roomCode || !event.nickname || !event.token) {
     throw new Error('roomCode, nickname, and token are required');
   }
+  const started = Date.now();
+  const fromEvent = event.state != null;
   const board = event.state ?? (await loadLiveBoard(event.roomCode));
   if (!board) throw new Error('roomCode, nickname, token, and state are required');
+  const boardBytes = Buffer.byteLength(JSON.stringify(board));
+  console.log(
+    `[AI] weigh room=${event.roomCode} nick=${event.nickname} source=${fromEvent ? 'invoke' : 'dynamo'} ` +
+      `boardBytes=${boardBytes} round=${(board as GameState).round ?? '?'} ` +
+      `players=${(board as GameState).players?.length ?? 0} loadMs=${Date.now() - started}`
+  );
   const id = aiSeatId(event.roomCode, event.nickname);
   const seat = await getConnection(id);
   if (!seat || seat.roomCode !== event.roomCode.toUpperCase()) {
@@ -304,7 +317,7 @@ export async function playTurn(
     await saveSeatMove(id, event.token, velocity);
     console.log(
       `[AI] turn room=${seat.roomCode} nick=${seat.nickname} velocity=(${velocity.x},${velocity.y}) ` +
-        `drs=${!!velocity.drs} ers=${!!velocity.ers}`
+        `drs=${!!velocity.drs} ers=${!!velocity.ers} totalMs=${Date.now() - started} boardBytes=${boardBytes}`
     );
     return { velocity: { x: velocity.x, y: velocity.y }, drs: velocity.drs, ers: velocity.ers };
   } catch (err) {
