@@ -1,7 +1,7 @@
 import { AsyncPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { TranslateModule } from '@ngx-translate/core';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { getTrackById } from '../../core/models/tracks';
 import {
@@ -162,6 +162,7 @@ const PAD_GLYPHS: Record<string, string> = {
 export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);
   readonly telemetry = inject(TelemetryService);
+  private readonly i18n = inject(TranslateService);
   private readonly haptic = inject(HapticService);
   private readonly audio = inject(AudioService);
   private readonly room = inject(RoomService);
@@ -175,6 +176,16 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly formatRaceTime = formatRaceTime;
   readonly fuelOnReserve = fuelOnReserve;
   readonly fuelEmpty = fuelEmpty;
+
+  fuelChipLabel(car: Player): string {
+    const key = fuelEmpty(car.fuel) ? 'game.fuelEmptyAlert' : 'game.fuelReserveAlert';
+    return this.i18n.instant(key, { name: car.nickname });
+  }
+
+  fuelMeterLabel(fuel: number | undefined): string {
+    return this.i18n.instant(fuelEmpty(fuel) ? 'game.fuelEmpty' : 'game.fuelReserve');
+  }
+
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;

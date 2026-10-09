@@ -1205,7 +1205,11 @@ export class GameEngineService implements OnDestroy {
       shouldPitForFuel(intent.fuelPlan, player.fuel, cellsToGoal, lapCells, boxDist);
     const saveFuel =
       player.fuel !== undefined && shouldSaveFuel(intent.fuelPlan, player.fuel, cellsToGoal, lapCells);
-    const commitFuel = !!box && ((reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit)) || forecast);
+    const pitReachable = moves.some((move) => isPitTile(getTileAt(track, move.landing.x, move.landing.y)));
+    const commitFuel =
+      !!box &&
+      (pitReachable || boxDist <= 16 || onPit) &&
+      ((reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit)) || forecast);
     const commitThrough = !!box && through && !reserve && (boxDist <= 14 || onPit);
     const ahead = state.players.some(
       (other) =>
@@ -1225,15 +1229,18 @@ export class GameEngineService implements OnDestroy {
       }
       if (move.velocity.x === 0 && move.velocity.y === 0) score -= 100;
       const tile = getTileAt(track, move.landing.x, move.landing.y);
-      if (box && (commitFuel || commitThrough)) {
+      const offRoad = tile === 'grass' || tile === 'rumble' || tile === null;
+      if (offRoad && !onPit) score -= 50_000;
+      if (box && (commitFuel || commitThrough) && !offRoad) {
         const dist = Math.max(Math.abs(move.landing.x - box.x), Math.abs(move.landing.y - box.y));
         score += (48 - dist) * (commitFuel ? 180 : 90);
         if (isPitTile(tile)) score += commitFuel ? 4_000 : 3_000;
         if (commitFuel && move.landing.x === box.x && move.landing.y === box.y) score += 100_000;
         if (commitThrough && move.landing.x === box.x && move.landing.y === box.y) score -= 50_000;
       }
-      const side = (move.landing.y - player.position.y) * intent.side;
-      score += side * 6;
+      if (tile === 'track' || tile === 'finish' || isPitTile(tile)) {
+        score += (move.landing.y - player.position.y) * intent.side * 1.5;
+      }
       if (saveFuel && gearOf(move.velocity) > 4 && !commitFuel) score -= 80 * (gearOf(move.velocity) - 4);
       if (ahead && intent.lateBrake && gearOf(move.velocity) >= gearOf(player.velocity) && !commitFuel) {
         score += 30 * intent.push;
