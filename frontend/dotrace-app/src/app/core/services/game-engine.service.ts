@@ -58,6 +58,10 @@ import {
   MAX_GEAR,
   settlePitVisit,
   closeDrsOutsideZone,
+  estimateLapCells,
+  pilotIntent,
+  shouldPitForFuel,
+  shouldSaveFuel,
 } from '../models/ws-types';
 import { ApiService } from './api.service';
 import { RoomContext, RoomService } from './room.service';
@@ -1192,8 +1196,23 @@ export class GameEngineService implements OnDestroy {
     const boxDist = box
       ? Math.max(Math.abs(player.position.x - box.x), Math.abs(player.position.y - box.y))
       : Number.POSITIVE_INFINITY;
-    const commitFuel = !!box && reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit);
+    const intent = pilotIntent(player.nickname);
+    const lapCells = estimateLapCells(track);
+    const cellsToGoal = Math.max(8, Math.round(lapCells * 0.35));
+    const forecast =
+      player.fuel !== undefined &&
+      !!box &&
+      shouldPitForFuel(intent.fuelPlan, player.fuel, cellsToGoal, lapCells, boxDist);
+    const saveFuel =
+      player.fuel !== undefined && shouldSaveFuel(intent.fuelPlan, player.fuel, cellsToGoal, lapCells);
+    const commitFuel = !!box && ((reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit)) || forecast);
     const commitThrough = !!box && through && !reserve && (boxDist <= 14 || onPit);
+    const ahead = state.players.some(
+      (other) =>
+        other.connectionId !== player.connectionId &&
+        other.finishOrder === undefined &&
+        Math.max(Math.abs(other.position.x - player.position.x), Math.abs(other.position.y - player.position.y)) <= 6
+    );
     let best = moves[0]!;
     let bestScore = -Infinity;
     for (const move of moves) {
@@ -1213,14 +1232,24 @@ export class GameEngineService implements OnDestroy {
         if (commitFuel && move.landing.x === box.x && move.landing.y === box.y) score += 100_000;
         if (commitThrough && move.landing.x === box.x && move.landing.y === box.y) score -= 50_000;
       }
-      if (gearOf(move.velocity) > gearOf(player.velocity) && !commitFuel) score += 40;
+      const side = (move.landing.y - player.position.y) * intent.side;
+      score += side * 6;
+      if (saveFuel && gearOf(move.velocity) > 4 && !commitFuel) score -= 80 * (gearOf(move.velocity) - 4);
+      if (ahead && intent.lateBrake && gearOf(move.velocity) >= gearOf(player.velocity) && !commitFuel) {
+        score += 30 * intent.push;
+      }
+      if (gearOf(move.velocity) > gearOf(player.velocity) && !commitFuel && !saveFuel) score += 40;
       if (score > bestScore) {
         bestScore = score;
         best = move;
       }
     }
     const accelerating = gearOf(best.velocity) > gearOf(player.velocity) || gearOf(best.velocity) > MAX_GEAR;
-    const boost = accelerating && !isPitTile(getTileAt(track, best.landing.x, best.landing.y)) ? request : undefined;
+    const attackBoost = ahead && intent.push >= 1 && !commitFuel && !saveFuel;
+    const boost =
+      (accelerating || attackBoost) && !isPitTile(getTileAt(track, best.landing.x, best.landing.y))
+        ? request
+        : undefined;
     return this.applyMove(player.connectionId, best.velocity, boost);
   }
 

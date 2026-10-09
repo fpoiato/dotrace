@@ -1835,6 +1835,9 @@ describe('fuel and pit lane', () => {
     expect(fuelEnabled(6)).toBe(true);
     expect(fuelBurn(6, false)).toBeGreaterThan(fuelBurn(2, false));
     expect(fuelBurn(6, true)).toBe(Math.round((fuelBurn(6, false) / 2) * 10) / 10);
+    expect(fuelBurn(8, false)).toBeGreaterThan(fuelBurn(6, false) * 2);
+    expect(fuelBurn(7, false)).toBeGreaterThan(fuelBurn(6, false) * 1.5);
+    expect(fuelBurn(1, false)).toBeLessThan(fuelBurn(4, false));
   });
 
   it('puts a colored stall detour on every circuit', () => {

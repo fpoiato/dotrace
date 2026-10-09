@@ -24,11 +24,17 @@ import {
   isDrsAsphalt,
   isGearLimited,
   isGrassShortcut,
+  isPitTile,
   isStrictlyAhead,
   isValidGearChange,
   landingPosition,
+  ownPitBox,
+  estimateLapCells,
+  pilotIntent,
   segmentCrossesFinish,
   segmentEntersRect,
+  shouldPitForFuel,
+  shouldSaveFuel,
 } from '../../shared/ws-types';
 import { adviseBoost, type BoostPick } from './boost-advice';
 import {
@@ -320,6 +326,32 @@ function lineOffset(track: TrackDefinition, point: Vector2D): number {
   return Math.max(Math.abs(nearest.x - point.x), Math.abs(nearest.y - point.y));
 }
 
+/** Signed cells left of the racing line. Positive is left of travel. */
+function signedSide(track: TrackDefinition, point: Vector2D): number {
+  let line = lineCache.get(track.id);
+  if (!line) {
+    line = densifyRacingLine(racingLine(track), 1);
+    lineCache.set(track.id, line);
+  }
+  if (line.length === 0) return 0;
+  let best = 0;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < line.length; i++) {
+    const sample = line[i]!;
+    const d = (sample.x - point.x) ** 2 + (sample.y - point.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  const nearest = line[best]!;
+  const next = line[(best + 1) % line.length]!;
+  const hx = next.x - nearest.x;
+  const hy = next.y - nearest.y;
+  const h = Math.hypot(hx, hy) || 1;
+  return (hx * (point.y - nearest.y) - hy * (point.x - nearest.x)) / h;
+}
+
 /** Heading of the racing line a few cells in front of the car. */
 function headingAhead(track: TrackDefinition, point: Vector2D, cells: number): Vector2D {
   let line = lineCache.get(track.id);
@@ -366,7 +398,16 @@ function forwardScore(
   currentGear: number,
   currentLateral: number,
   situation: TrackSituation,
-  targetHeading: Vector2D
+  targetHeading: Vector2D,
+  fight?: {
+    side: -1 | 0 | 1;
+    lateBrake: boolean;
+    push: number;
+    save: boolean;
+    attack: boolean;
+    landingSide: number;
+    rivalSide: number;
+  }
 ): number {
   const { align, cross } = steerSin(option.velocity, targetHeading);
   const delta = option.gear - currentGear;
@@ -395,6 +436,32 @@ function forwardScore(
   if (roadOk && delta < 0) score -= 14 * -delta;
   if (misaligned && bendSoon && delta >= 0 && currentGear >= 3) score -= 20 * (delta + 1);
   if (misaligned && bendSoon && delta < 0 && align > 0.35) score += 12;
+  if (!fight) return score;
+
+  const want = fight.side * 1.4;
+  if (fight.side !== 0) {
+    score -= Math.abs(fight.landingSide - want) * 8;
+    score += fight.landingSide * fight.side * 4;
+  }
+  if (
+    fight.attack &&
+    Math.abs(fight.rivalSide) > 0.35 &&
+    Math.sign(fight.landingSide) !== Math.sign(fight.rivalSide) &&
+    Math.abs(fight.landingSide) > 0.35
+  ) {
+    score += 14;
+  }
+  const stop = stoppingDistance(Math.max(option.gear, 1));
+  if (fight.attack && fight.lateBrake && cells > stop * 0.7 && option.gear >= currentGear && !option.overspeed) {
+    score += 18 * fight.push;
+  }
+  if (!fight.lateBrake && cells < stoppingDistance(Math.max(currentGear, 1)) * 1.2 && delta < 0) {
+    score += 16;
+  }
+  if (fight.lateBrake && cells < stop * 0.5 && option.gear >= currentGear) score -= 20;
+  if (fight.save && option.gear > 4) score -= 28 * (option.gear - 4);
+  if (fight.save && option.gear >= 2 && option.gear <= 4 && !option.overspeed) score += 12;
+  if (fight.attack && delta > 0 && !option.overspeed) score += 14 * fight.push;
   return score;
 }
 
@@ -575,11 +642,54 @@ export function buildLayaScene(
 
   const look = Math.min(6, situation.cellsToCorner ?? 6);
   const targetHeading = headingAhead(track, position, look);
+  const intent = pilotIntent(player.nickname || player.connectionId);
+  const lapCells = estimateLapCells(track);
+  const box = ownPitBox(track, player);
+  const boxDist = box
+    ? Math.max(Math.abs(position.x - box.x), Math.abs(position.y - box.y))
+    : Number.POSITIVE_INFINITY;
+  const gapNow = rivalGap(player, state, track);
+  const attack = typeof gapNow === 'number' && gapNow <= 6;
+  let rivalSide = 0;
+  if (attack) {
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const opponent of opponents) {
+      if (opponent.finishOrder !== undefined) continue;
+      if (!isStrictlyAhead(opponent, player, track)) continue;
+      const gap = Math.max(
+        Math.abs(opponent.position.x - position.x),
+        Math.abs(opponent.position.y - position.y)
+      );
+      if (gap < nearest) {
+        nearest = gap;
+        rivalSide = signedSide(track, opponent.position);
+      }
+    }
+  }
+  const commitFuel =
+    player.fuel !== undefined &&
+    !!box &&
+    shouldPitForFuel(intent.fuelPlan, player.fuel, situation.cellsToGoal, lapCells, boxDist);
+  const saveFuel =
+    player.fuel !== undefined &&
+    shouldSaveFuel(intent.fuelPlan, player.fuel, situation.cellsToGoal, lapCells);
   let bestIndex = -1;
   let bestScore = Number.NEGATIVE_INFINITY;
   let backIndex = -1;
   let backSteps = Number.POSITIVE_INFINITY;
   pending.forEach((option, index) => {
+    if (commitFuel && box && !option.illegal) {
+      const tile = getTileAt(track, option.landing.x, option.landing.y);
+      if (tile === 'grass' || tile === 'rumble' || tile === null) return;
+      const dist = Math.max(Math.abs(option.landing.x - box.x), Math.abs(option.landing.y - box.y));
+      const onBox = option.landing.x === box.x && option.landing.y === box.y;
+      const score = (64 - dist) * 12 + (isPitTile(tile) ? 240 : 0) + (onBox ? 1_000 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+      return;
+    }
     if (option.bucket === 'forward') {
       const score = forwardScore(
         {
@@ -594,7 +704,16 @@ export function buildLayaScene(
         currentGear,
         currentLateral,
         situation,
-        targetHeading
+        targetHeading,
+        {
+          side: intent.side,
+          lateBrake: intent.lateBrake,
+          push: intent.push,
+          save: saveFuel,
+          attack,
+          landingSide: signedSide(track, option.landing),
+          rivalSide,
+        }
       );
       if (score > bestScore) {
         bestScore = score;
@@ -611,7 +730,10 @@ export function buildLayaScene(
     const velocityText = `${option.velocity.x},${option.velocity.y}`;
     let detail: string;
     if (option.bucket === 'illegal') detail = `illegal ${option.reason}`;
-    else if (option.bucket === 'off') {
+    else if (index === bestIndex) {
+      const gate = option.gate ? ' gate' : '';
+      detail = `best${gate} ${velocityText} g${option.gear} r${option.clearAhead}`;
+    } else if (option.bucket === 'off') {
       detail = `${index === backIndex ? 'back' : 'away'} ${option.steps} ${velocityText}`;
     } else if (option.bucket === 'grass') detail = 'penalty gear 1';
     else if (option.bucket === 'forward') {
@@ -667,7 +789,7 @@ export function buildLayaScene(
         blue,
         bendCells: situation.cellsToCorner,
         fuel: player.fuel,
-        pit: false,
+        pit: commitFuel,
       })
     : 'save';
 
@@ -693,6 +815,9 @@ export function buildLayaScene(
       gap,
       blue,
       boost,
+      plan: intent.fuelPlan,
+      fight: intent.lateBrake ? 'late' : 'lift',
+      side: intent.side,
       ...(player.fuel !== undefined ? { fuel: Math.round(player.fuel) } : {}),
     },
     options,
@@ -700,7 +825,7 @@ export function buildLayaScene(
 }
 
 export const LAYA_MOVE_INSTRUCTIONS =
-  'Vector race. Gear max(|vx|,|vy|) carries, max 6, or 8 with DRS open. Each option adds -1, 0, or +1 to vx and vy. Accelerate up to pace when bend is straight and hold stays on asphalt. Slow down only when bend is inside stopDist. y grows down. dir is the circuit direction. Steer with dir. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, B blue DRS, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
+  'Vector race. Gear max(|vx|,|vy|) carries, max 6, or 8 with DRS open. Each option adds -1, 0, or +1 to vx and vy. Accelerate up to pace when bend is straight and hold stays on asphalt. Slow down only when bend is inside stopDist. Fight gap: late brake and the other side of the line pass. plan early pits with fuel in hand, stretch waits, save short-shifts. y grows down. dir is the circuit direction. Steer with dir. bend, pace, line and aim describe the stretch. hold is the next 3 turns if velocity stays. penalty caps gear at 1 for 3 turns, then 5. Timed mode stops the car. Option: velocity, g gear, r asphalt ahead. Pick best. too fast cannot stop. gate is checkpoint or finish. Grid is only the road ahead of @. . grass, # asphalt, B blue DRS, F finish, C checkpoint, @ you, A other. 1/2/3 are those same 3 turns. Nothing behind @ is drawn. Never pick penalty, wrong way, idle, or illegal. Off asphalt, pick back.';
 
 export const LAYA_BOOST_INSTRUCTIONS =
   'Pick state.boost. DRS arms only on B with a rival within 6 (gap). Open wing allows gear 8 and a +2 climb below gear 6, then closes if you brake or leave B. ers is bars left of 4; one bar is a +2 step and half fuel. save when braking, bend is inside stopDist, gap is lead, or blue is short. drs on a long blue straight. ers only for a +2 the wing cannot give. both only at gear 6, gap<=4, blue>=4.';

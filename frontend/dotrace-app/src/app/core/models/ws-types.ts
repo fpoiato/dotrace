@@ -370,8 +370,8 @@ export const FUEL_RACE_MIN_LAPS = 6;
 export const FUEL_TANK = 100;
 /** At or below a quarter tank the car is on reserve and should pit. */
 export const FUEL_RESERVE = FUEL_TANK / 4;
-/** Burn per turn by gear. Index is the gear the car travels at. One tenth of the first tuning. */
-export const FUEL_BURN_BY_GEAR = [0, 0.1, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] as const;
+/** Burn per turn by gear. Low gears sip, 5–6 are race pace, 7 and 8 drink. */
+export const FUEL_BURN_BY_GEAR = [0, 0.1, 0.1, 0.2, 0.3, 0.4, 0.6, 1.4, 2.2] as const;
 export const PIT_MAX_GEAR = 3;
 export const FLAGS_PER_DRIVE_THROUGH = 3;
 
@@ -391,12 +391,97 @@ export function isPitTile(tile: TileType | null | undefined): boolean {
   return tile === 'pit' || tile === 'pitbox';
 }
 
-/** Higher gears burn more. Spending ERS this move halves the burn, rounding to a tenth. */
+/** Higher gears burn more, and 7–8 burn much more than 6. ERS halves the burn, to a tenth. */
 export function fuelBurn(gear: number, spentErs: boolean): number {
   const idx = Math.max(0, Math.min(FUEL_BURN_BY_GEAR.length - 1, gear));
   const base = FUEL_BURN_BY_GEAR[idx];
   const burned = spentErs ? base / 2 : base;
   return Math.round(burned * 10) / 10;
+}
+
+export type FuelPlan = 'early' | 'stretch' | 'save';
+
+export interface PilotIntent {
+  /** -1 left of the racing line, 0 on it, 1 right of it. */
+  side: -1 | 0 | 1;
+  /** Holds gear deeper into the corner to attack. */
+  lateBrake: boolean;
+  /** 0.75–1.45. Higher pushes gear and spends DRS/ERS to pass. */
+  push: number;
+  fuelPlan: FuelPlan;
+}
+
+/** Stable per nickname so adjacent bots do not drive as clones. */
+export function pilotIntent(seed: string): PilotIntent {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const u = (shift: number) => (h >>> shift) & 255;
+  const planRoll = u(8) % 3;
+  return {
+    side: ((u(0) % 3) - 1) as -1 | 0 | 1,
+    lateBrake: u(16) % 2 === 0,
+    push: 0.75 + (u(24) / 255) * 0.7,
+    fuelPlan: planRoll === 0 ? 'early' : planRoll === 1 ? 'stretch' : 'save',
+  };
+}
+
+/** Centerline length. The corridor is about 7 cells wide. */
+export function estimateLapCells(track: TrackDefinition): number {
+  let asphalt = 0;
+  for (const row of track.grid) {
+    for (const tile of row) {
+      if (tile === 'track' || tile === 'finish') asphalt++;
+    }
+  }
+  return Math.max(40, Math.round(asphalt / 7));
+}
+
+/** Fuel to cover `cells` at this gear. A turn covers about one gear of cells. */
+export function fuelForCells(cells: number, gear: number): number {
+  const pace = Math.max(1, Math.min(8, Math.round(gear)));
+  const turns = Math.ceil(Math.max(0, cells) / pace);
+  return Math.round(turns * fuelBurn(pace, false) * 10) / 10;
+}
+
+/** This lap's remainder plus the next lap — the window a stop has to cover. */
+export function nextLapCells(cellsToGoal: number, lapCells: number): number {
+  return Math.max(0, cellsToGoal) + Math.max(1, lapCells);
+}
+
+/**
+ * Pit before the tank dies on the next lap.
+ * Early stops with fuel still in hand. Stretch waits until the next lap
+ * will not finish at race pace. Save stops only if gear 3 still fails.
+ */
+export function shouldPitForFuel(
+  plan: FuelPlan,
+  fuel: number,
+  cellsToGoal: number,
+  lapCells: number,
+  boxDist: number
+): boolean {
+  const ahead = nextLapCells(cellsToGoal, lapCells);
+  const reachBox = fuelForCells(boxDist + 8, 3);
+  if (fuel <= reachBox || fuel <= 8) return true;
+  const push = fuelForCells(ahead, 5);
+  const coast = fuelForCells(ahead, 3);
+  if (plan === 'early') return fuel < push * 1.45;
+  if (plan === 'stretch') return fuel < push * 1.12;
+  return fuel < coast;
+}
+
+/** Save plan short-shifts when race pace will not finish the next lap. */
+export function shouldSaveFuel(
+  plan: FuelPlan,
+  fuel: number,
+  cellsToGoal: number,
+  lapCells: number
+): boolean {
+  if (plan !== 'save') return false;
+  return fuel < fuelForCells(nextLapCells(cellsToGoal, lapCells), 5);
 }
 
 export function settleFuel(player: Player, gear: number, spentErs: boolean): void {
