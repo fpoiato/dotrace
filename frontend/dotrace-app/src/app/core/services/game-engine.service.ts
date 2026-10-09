@@ -212,16 +212,22 @@ export class GameEngineService implements OnDestroy {
     this.setStateAndRelay('STATE_SYNC', state);
   }
 
-  startRace(): void {
-    if (!this.isHost) return;
+  startRace(options?: { exhibition?: boolean }): boolean {
+    if (!this.isHost) return false;
     const room = this.roomService.room;
     const lobbyPlayers = this.roomService.players.filter((p) => p.status === 'approved');
-    if (!room || lobbyPlayers.length < MIN_PLAYERS) return;
+    if (!room || lobbyPlayers.length < MIN_PLAYERS) return false;
+
+    const exhibition = options?.exhibition === true;
+    const racers = exhibition
+      ? lobbyPlayers.filter((p) => this.isBotSeat(p))
+      : lobbyPlayers;
+    if (exhibition && racers.length < 2) return false;
 
     const saved = this.session.load();
     const prev = this.state;
     const trackId = prev?.trackId || saved?.trackId || '';
-    if (!trackId || !getTrackById(trackId)) return;
+    if (!trackId || !getTrackById(trackId)) return false;
     const totalLaps = prev?.totalLaps ?? saved?.laps ?? 1;
     const gameMode = 'TURNS';
     // Keep party-session ranking across rematches in the same room.
@@ -229,8 +235,9 @@ export class GameEngineService implements OnDestroy {
 
     // Rebuild the roster from players$ (the single source of truth) so anyone
     // approved after the track was selected is included in the race.
+    // An exhibition leaves every human in the lobby and puts only bots on the grid.
     const state = createInitialState(
-      lobbyPlayers.map((p) =>
+      racers.map((p) =>
         createLobbyPlayer(p.connectionId, p.nickname, p.isHost, p.joinOrder, p.color)
       ),
       room.connectionId
@@ -238,6 +245,7 @@ export class GameEngineService implements OnDestroy {
     state.trackId = trackId;
     state.totalLaps = isLapOption(totalLaps) ? totalLaps : 1;
     state.gameMode = gameMode;
+    if (exhibition) state.exhibition = true;
     if (sessionStats?.length) state.sessionStats = sessionStats;
 
     const track = getTrackById(trackId)!;
@@ -254,7 +262,7 @@ export class GameEngineService implements OnDestroy {
       state.raceStartedAt = Date.now();
       this.recordRaceStarted(state.raceStartedAt);
       this.setStateAndRelay('GRID_ORDER_DONE', state);
-      return;
+      return true;
     }
 
     state.phase = 'GRID_ORDER';
@@ -267,6 +275,7 @@ export class GameEngineService implements OnDestroy {
 
     if (this.gridOrderTimer) clearTimeout(this.gridOrderTimer);
     this.gridOrderTimer = setTimeout(() => this.finalizeGridOrder(), 2500);
+    return true;
   }
 
   submitMove(vector: Vector2D, boost?: BoostRequest): void {
@@ -1121,8 +1130,9 @@ export class GameEngineService implements OnDestroy {
     if (player) this.requestAiMove(player);
   }
 
-  /** Humans are done and at least one bot is still out. */
+  /** Humans are done and at least one bot is still out. An exhibition has no humans to wait on. */
   private shouldRushBots(state: GameState): boolean {
+    if (state.exhibition) return false;
     if (state.phase !== 'GAME_ROUND' || isTimedMode(state)) return false;
     const humansOut = state.players.some(
       (p) => !isAiPilotNickname(p.nickname) && p.finishOrder === undefined

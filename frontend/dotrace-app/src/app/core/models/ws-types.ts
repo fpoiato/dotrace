@@ -212,6 +212,11 @@ export interface GameState {
    * Updated once when a race transitions to GAME_OVER; preserved on return-to-lobby.
    */
   sessionStats?: SessionPlayerStats[];
+  /**
+   * Host started a bots-only race and stayed off the grid. Humans watch;
+   * the rush-after-humans path must not skip the bots' own turns.
+   */
+  exhibition?: boolean;
 }
 
 /** Per-player snapshot for telemetry and live standings. */
