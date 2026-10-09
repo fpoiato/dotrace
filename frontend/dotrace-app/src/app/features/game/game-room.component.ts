@@ -16,6 +16,7 @@ import {
   canPlayerMove,
   formatRaceTime,
   fuelOnReserve,
+  fuelEmpty,
   getTileAt,
   ERS_MAX_DELTA,
   getValidMoves,
@@ -122,6 +123,20 @@ const PAD_GLYPHS: Record<string, string> = {
       .fuel-reserve {
         color: #fbbf24;
       }
+      .fuel-empty {
+        color: #ef4444;
+        animation: fuel-empty-blink 0.8s step-end infinite;
+      }
+      @keyframes fuel-empty-blink {
+        50% {
+          opacity: 0.15;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .fuel-empty {
+          animation: none;
+        }
+      }
       .play-now,
       .wake-opponents {
         animation: play-now-pulse 1s ease-in-out infinite;
@@ -159,6 +174,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly roomCtx$ = this.room.room$;
   readonly formatRaceTime = formatRaceTime;
   readonly fuelOnReserve = fuelOnReserve;
+  readonly fuelEmpty = fuelEmpty;
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;

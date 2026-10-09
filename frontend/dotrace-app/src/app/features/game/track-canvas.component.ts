@@ -21,6 +21,7 @@ import {
   boostLimits,
   canPlayerMove,
   gearOf,
+  fuelEmpty,
   getValidMoves,
   isGrassShortcut,
   isKerbGrass,
@@ -673,11 +674,11 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
     this.drawArrows(ctx, track);
     this.drawTrails(ctx, state);
     this.drawValidTargets(ctx, state, track);
-    const boosted = this.drawCars(ctx, state);
-    this.syncBoostPulse(boosted);
+    const pulsing = this.drawCars(ctx, state);
+    this.syncBoostPulse(pulsing);
   }
 
-  /** Keep the boost ring blinking without redrawing the whole sheet every frame. */
+  /** Keep a boost ring or an empty-tank pump blinking. */
   private syncBoostPulse(active: boolean): void {
     if (active && !this.pulsing) {
       this.pulsing = true;
@@ -988,13 +989,14 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
   private drawCars(ctx: CanvasRenderingContext2D, state: GameState): boolean {
     const active = this.activePlayer(state);
     const alpha = this.boostAlpha();
-    let anyBoost = false;
+    let pulse = false;
     for (const player of state.players) {
       if (player.finishOrder !== undefined && state.phase !== 'GAME_OVER') continue;
       const [cx, cy] = this.center(player.position);
       const isActive = player.connectionId === active?.connectionId;
       const boosted = !!player.drsActive || !!player.ersActive;
-      if (boosted) anyBoost = true;
+      const empty = fuelEmpty(player.fuel);
+      if (boosted || empty) pulse = true;
 
       if (boosted) {
         ctx.beginPath();
@@ -1019,8 +1021,28 @@ export class TrackCanvasComponent implements OnChanges, AfterViewInit, OnDestroy
       ctx.strokeStyle = PAPER_COLORS.ink;
       ctx.lineWidth = 1.5;
       ctx.stroke();
+
+      if (empty) this.drawEmptyFuelIcon(ctx, cx, cy);
     }
-    return anyBoost;
+    return pulse;
+  }
+
+  /** Red pump above a dry car. The pulse loop toggles it on and off. */
+  private drawEmptyFuelIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+    const on = performance.now() % 800 < 420;
+    ctx.save();
+    ctx.translate(cx, cy - 13);
+    ctx.globalAlpha = on ? 1 : 0.12;
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-2.4, -3.1, 3.8, 6.1);
+    ctx.fillRect(1.5, -1.2, 1.5, 2.2);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(-1.5, -1.4, 2, 2.2);
+    ctx.restore();
   }
 
   /** Tap → nearest valid landing square within ~1 cell (generous on mobile). */
