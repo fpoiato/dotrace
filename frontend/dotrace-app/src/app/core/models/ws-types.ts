@@ -387,6 +387,11 @@ export function fuelOnReserve(fuel: number | undefined): boolean {
   return fuel !== undefined && fuel <= FUEL_RESERVE;
 }
 
+/** Tank is dry. The board marks that car with a blinking red pump. */
+export function fuelEmpty(fuel: number | undefined): boolean {
+  return fuel !== undefined && fuel <= 0;
+}
+
 export function isPitTile(tile: TileType | null | undefined): boolean {
   return tile === 'pit' || tile === 'pitbox';
 }

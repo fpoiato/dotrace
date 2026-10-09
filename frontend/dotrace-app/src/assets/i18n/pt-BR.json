@@ -152,6 +152,8 @@
   "game.fuel": "Combustível",
   "game.fuelReserve": "Reserva de combustível",
   "game.fuelReserveAlert": "{{name}} na reserva",
+  "game.fuelEmpty": "Sem combustível",
+  "game.fuelEmptyAlert": "{{name}} sem combustível",
   "game.driveThrough": "Drive-through obrigatório ({{n}}). Sem reabastecer.",
   "game.pitHold": "Parado no box nesta rodada.",
   "game.dsq": "DSQ",

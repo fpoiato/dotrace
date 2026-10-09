@@ -67,6 +67,7 @@ import {
   createInitialState,
   buildRaceStatDeltas,
   fuelBurn,
+  fuelEmpty,
   fuelEnabled,
   FUEL_TANK,
   PIT_MAX_GEAR,
@@ -1863,6 +1864,10 @@ describe('fuel and pit lane', () => {
 
     settleFuel(player, 5, false);
     expect(player.fuel).toBe(9.6);
+    expect(fuelEmpty(player.fuel)).toBe(false);
+    player.fuel = 0;
+    expect(fuelEmpty(player.fuel)).toBe(true);
+    expect(fuelEmpty(undefined)).toBe(false);
     player.driveThroughOwed = 1;
     expect(settlePitVisit(player, track, 'pitbox', 3)).toBe('stop');
     expect(player.fuel).toBe(FUEL_TANK);

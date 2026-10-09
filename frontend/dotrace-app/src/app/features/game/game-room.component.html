@@ -107,11 +107,23 @@
             >
               @for (car of reserveCars(state); track car.connectionId) {
                 <div
-                  class="penalty-chip flex items-center gap-2 rounded-md border border-amber-400/50 bg-slate-950/95 px-2 py-1.5 shadow-lg"
+                  class="penalty-chip flex items-center gap-2 rounded-md border bg-slate-950/95 px-2 py-1.5 shadow-lg"
+                  [class.border-red-500]="fuelEmpty(car.fuel)"
+                  [class.bg-red-950/80]="fuelEmpty(car.fuel)"
+                  [class.border-amber-400/50]="!fuelEmpty(car.fuel)"
                   role="status"
-                  [attr.aria-label]="'game.fuelReserveAlert' | translate: { name: car.nickname }"
+                  [attr.aria-label]="
+                    (fuelEmpty(car.fuel) ? 'game.fuelEmptyAlert' : 'game.fuelReserveAlert')
+                      | translate: { name: car.nickname }
+                  "
                 >
-                  <svg class="fuel-reserve h-5 w-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <svg
+                    class="h-5 w-5 shrink-0"
+                    [class.fuel-empty]="fuelEmpty(car.fuel)"
+                    [class.fuel-reserve]="!fuelEmpty(car.fuel)"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
                     <path fill="currentColor" d="M6 3h8a2 2 0 0 1 2 2v2h1.2a2 2 0 0 1 1.8 1.1l1.5 3.2A2 2 0 0 1 20.7 14H19v5a1 1 0 0 1-1 1h-1v1h-2v-1H8v1H6v-1a1 1 0 0 1-1-1V5a2 2 0 0 1 1-2zm0 2v6h8V5H6zm10 4.2V14h3.1l-1.2-2.6A.8.8 0 0 0 17.2 11H16zM6 13v6h10v-6H6z"/>
                   </svg>
                   <span
@@ -230,10 +242,14 @@
                 <div class="flex items-center gap-1">
                   @if (fuelOnReserve(me.fuel)) {
                     <svg
-                      class="fuel-reserve h-5 w-5"
+                      class="h-5 w-5"
+                      [class.fuel-empty]="fuelEmpty(me.fuel)"
+                      [class.fuel-reserve]="!fuelEmpty(me.fuel)"
                       viewBox="0 0 24 24"
                       role="img"
-                      [attr.aria-label]="'game.fuelReserve' | translate"
+                      [attr.aria-label]="
+                        (fuelEmpty(me.fuel) ? 'game.fuelEmpty' : 'game.fuelReserve') | translate
+                      "
                     >
                       <path fill="currentColor" d="M6 3h8a2 2 0 0 1 2 2v2h1.2a2 2 0 0 1 1.8 1.1l1.5 3.2A2 2 0 0 1 20.7 14H19v5a1 1 0 0 1-1 1h-1v1h-2v-1H8v1H6v-1a1 1 0 0 1-1-1V5a2 2 0 0 1 1-2zm0 2v6h8V5H6zm10 4.2V14h3.1l-1.2-2.6A.8.8 0 0 0 17.2 11H16zM6 13v6h10v-6H6z"/>
                     </svg>
@@ -296,7 +312,13 @@
                   >{{ row.rank }}</span>
                   <span class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20" [style.background]="row.color"></span>
                   @if (fuelOnReserve(row.fuel)) {
-                    <svg class="fuel-reserve h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                    <svg
+                      class="h-3.5 w-3.5 shrink-0"
+                      [class.fuel-empty]="fuelEmpty(row.fuel)"
+                      [class.fuel-reserve]="!fuelEmpty(row.fuel)"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
                       <path fill="currentColor" d="M6 3h8a2 2 0 0 1 2 2v2h1.2a2 2 0 0 1 1.8 1.1l1.5 3.2A2 2 0 0 1 20.7 14H19v5a1 1 0 0 1-1 1h-1v1h-2v-1H8v1H6v-1a1 1 0 0 1-1-1V5a2 2 0 0 1 1-2zm0 2v6h8V5H6zm10 4.2V14h3.1l-1.2-2.6A.8.8 0 0 0 17.2 11H16zM6 13v6h10v-6H6z"/>
                     </svg>
                   }

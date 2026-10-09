@@ -152,6 +152,8 @@
   "game.fuel": "Fuel",
   "game.fuelReserve": "Fuel reserve",
   "game.fuelReserveAlert": "{{name}} on reserve",
+  "game.fuelEmpty": "Out of fuel",
+  "game.fuelEmptyAlert": "{{name}} out of fuel",
   "game.driveThrough": "Drive-through required ({{n}}). Does not refuel.",
   "game.pitHold": "Stopped in the box this round.",
   "game.dsq": "DSQ",
