@@ -173,6 +173,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly state$ = this.game.state$;
   readonly roomCtx$ = this.room.room$;
   readonly formatRaceTime = formatRaceTime;
+
+  get isHost(): boolean {
+    return !!this.room.room?.isHost;
+  }
   readonly fuelOnReserve = fuelOnReserve;
   readonly fuelEmpty = fuelEmpty;
   private readonly subs: Subscription[] = [];
@@ -210,6 +214,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
   /** One-shot so reconnect/replay emissions don't restart the anthem. */
   private victoryAnthemPlayed = false;
+  /** Last AI decision traces from the host engine, newest first. */
+  aiDebugLines: string[] = [];
   /** Removes the one-shot gesture listener used to unlock AudioContext. */
   private removeAudioUnlock: (() => void) | null = null;
 
@@ -229,6 +235,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.zone.run(() => {
           this.wakeName = nickname;
           this.wakeAttempt = attempt;
+          this.cdr.detectChanges();
+        });
+      }),
+      this.game.aiDebug$.subscribe((line) => {
+        this.zone.run(() => {
+          this.aiDebugLines = [line, ...this.aiDebugLines].slice(0, 8);
           this.cdr.detectChanges();
         });
       })
