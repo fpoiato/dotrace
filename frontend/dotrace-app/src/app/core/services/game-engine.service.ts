@@ -1,11 +1,12 @@
 import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { getTrackById } from '../models/tracks';
-import { replayChunks, slimBoard } from '../../features/game/relay-board';
+import { REPLAY_CHUNK, replayChunks, slimBoard } from '../../features/game/relay-board';
 import {
   GameMode,
   GameState,
   MIN_PLAYERS,
+  MoveRecord,
   Player,
   PlayerRejoinedPayload,
   RelayPayload,
@@ -28,7 +29,6 @@ import {
   isTimedMode,
   landingPosition,
   nextActiveTurnIndex,
-  pushReplayMove,
   pushTrail,
   racingProgress,
   revertDrsOpen,
@@ -108,6 +108,13 @@ export class GameEngineService implements OnDestroy {
   private readonly aiFollowUps = new Map<string, ReturnType<typeof setTimeout>>();
   /** Seats with a PLAY_AI_TURN already in flight, so a nudge cannot double-request. */
   private readonly aiInFlight = new Set<string>();
+  /**
+   * Move history for the replay. Lives here, never on the live board, so a
+   * long race does not clone or send it. Chunks go to Dynamo as they fill;
+   * the full array is assembled only when someone opens the replay.
+   */
+  private hostReplayLog: MoveRecord[] = [];
+  private flushedReplayChunks = 0;
   private static readonly AI_TURN_TIMEOUT_MS = 10_000;
   private static readonly AI_TIMED_GAP_MS = 400;
   private static readonly AI_RETRY_MS = 1_800;
@@ -134,17 +141,32 @@ export class GameEngineService implements OnDestroy {
    */
   private emit(state: GameState): void {
     this.noteSeatClock(state);
-    // The replay grows without bound. Cloning it on every turn is what froze
-    // round 150: the phone spent the frame copying thousands of moves and the
-    // wake timers never ran. Share one log array across emissions.
-    const log = state.replayLog;
-    delete state.replayLog;
-    const clone = structuredClone(state);
-    if (log) {
-      state.replayLog = log;
-      clone.replayLog = log;
+    // During the race the log is not on the board, so this clone stays small.
+    // It is attached once, after the finish, for the local viewer.
+    this.stateSubject.next(structuredClone(state));
+  }
+
+  /** Append one move to the host log and ship a full chunk when one is ready. */
+  private recordMove(record: Omit<MoveRecord, 'seq'>): void {
+    if (this.hostReplayLog.length >= 2000) return;
+    this.hostReplayLog.push({ seq: this.hostReplayLog.length, ...record });
+    this.flushReplayChunks(false);
+  }
+
+  /** Persist filled chunks. The tail waits for the race to end. */
+  private flushReplayChunks(includeTail: boolean): void {
+    const room = this.roomService.room;
+    if (!room?.isHost) return;
+    const chunks = replayChunks(this.hostReplayLog);
+    const last = includeTail ? chunks.length : Math.floor(this.hostReplayLog.length / REPLAY_CHUNK);
+    for (let index = this.flushedReplayChunks; index < last; index += 1) {
+      const moves = chunks[index];
+      if (!moves?.length) continue;
+      void this.api
+        .postAction('SAVE_LIVE_REPLAY', { index, moves }, room.roomCode)
+        .catch((err) => console.warn('Replay chunk failed', err));
     }
-    this.stateSubject.next(clone);
+    this.flushedReplayChunks = Math.max(this.flushedReplayChunks, last);
   }
 
   /** Wall clock for the seat on the turn. A hidden phone freezes timers, not this. */
@@ -410,10 +432,12 @@ export class GameEngineService implements OnDestroy {
       player.trail = [{ ...start }];
       player.lap = 1;
     });
-    // Record starting positions as seq=0 replay entries.
-    state.replayLog = [];
+    // Starting positions are the first replay entries. The log is not on the board.
+    this.hostReplayLog = [];
+    this.flushedReplayChunks = 0;
+    delete state.replayLog;
     for (const player of ordered) {
-      pushReplayMove(state, {
+      this.recordMove({
         round: 0,
         connectionId: player.connectionId,
         position: { ...player.position },
@@ -540,7 +564,7 @@ export class GameEngineService implements OnDestroy {
     syncDrsArms(state.players, track);
 
     // Record this move for the post-race replay (after all state mutations).
-    pushReplayMove(state, {
+    this.recordMove({
       round: state.round,
       connectionId: senderId,
       position: { ...player.position },
@@ -596,7 +620,7 @@ export class GameEngineService implements OnDestroy {
     if (player.pitHoldUntilRound === undefined || state.round > player.pitHoldUntilRound) return false;
     player.velocity = zeroVector();
     player.pitHoldUntilRound = undefined;
-    pushReplayMove(state, {
+    this.recordMove({
       round: state.round,
       connectionId: player.connectionId,
       position: { ...player.position },
@@ -982,7 +1006,11 @@ export class GameEngineService implements OnDestroy {
     void this.api
       .postAction('RELAY', { type, state: slimBoard(state), meta: relayMeta }, room.roomCode)
       .catch((err) => console.warn('Relay failed', err));
-    if (type === 'GAME_OVER') this.sendReplayChunks(state);
+    if (type === 'GAME_OVER') {
+      this.sendReplayChunks();
+      state.replayLog = this.hostReplayLog;
+      this.emit(state);
+    }
   }
 
   /**
@@ -990,14 +1018,8 @@ export class GameEngineService implements OnDestroy {
    * the WebSocket limit again, the broadcast dies, and the race looks frozen.
    * Guests get the log in small chunks after the board.
    */
-  private sendReplayChunks(state: GameState): void {
-    const room = this.roomService.room;
-    if (!room?.isHost) return;
-    replayChunks(state.replayLog).forEach((moves, index) => {
-      void this.api
-        .postAction('SAVE_LIVE_REPLAY', { index, moves }, room.roomCode)
-        .catch((err) => console.warn('Replay chunk failed', err));
-    });
+  private sendReplayChunks(): void {
+    this.flushReplayChunks(true);
   }
 
   /**
