@@ -1,7 +1,7 @@
 import { AsyncPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { TranslateModule } from '@ngx-translate/core';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { getTrackById } from '../../core/models/tracks';
 import {
@@ -162,6 +162,7 @@ const PAD_GLYPHS: Record<string, string> = {
 export class GameRoomComponent implements OnInit, OnDestroy {
   readonly game = inject(GameEngineService);
   readonly telemetry = inject(TelemetryService);
+  private readonly i18n = inject(TranslateService);
   private readonly haptic = inject(HapticService);
   private readonly audio = inject(AudioService);
   private readonly room = inject(RoomService);
@@ -175,6 +176,24 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   readonly formatRaceTime = formatRaceTime;
   readonly fuelOnReserve = fuelOnReserve;
   readonly fuelEmpty = fuelEmpty;
+
+  fuelChipLabel(car: Player): string {
+    const key = fuelEmpty(car.fuel) ? 'game.fuelEmptyAlert' : 'game.fuelReserveAlert';
+    return this.i18n.instant(key, { name: car.nickname });
+  }
+
+  fuelMeterLabel(fuel: number | undefined): string {
+    return this.i18n.instant(fuelEmpty(fuel) ? 'game.fuelEmpty' : 'game.fuelReserve');
+  }
+
+  get isHost(): boolean {
+    return !!this.room.room?.isHost;
+  }
+
+  get aiDebugText(): string {
+    return this.aiDebugLines.join('\n');
+  }
+
   private readonly subs: Subscription[] = [];
 
   showCelebration = false;
@@ -210,6 +229,8 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   private stopPenaltyTimer: ReturnType<typeof setInterval> | null = null;
   /** One-shot so reconnect/replay emissions don't restart the anthem. */
   private victoryAnthemPlayed = false;
+  /** Last AI decision traces from the host engine, newest first. */
+  aiDebugLines: string[] = [];
   /** Removes the one-shot gesture listener used to unlock AudioContext. */
   private removeAudioUnlock: (() => void) | null = null;
 
@@ -229,6 +250,12 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.zone.run(() => {
           this.wakeName = nickname;
           this.wakeAttempt = attempt;
+          this.cdr.detectChanges();
+        });
+      }),
+      this.game.aiDebug$.subscribe((line) => {
+        this.zone.run(() => {
+          this.aiDebugLines = [line, ...this.aiDebugLines].slice(0, 8);
           this.cdr.detectChanges();
         });
       })

@@ -98,6 +98,8 @@ export class GameEngineService implements OnDestroy {
   /** Human phones listen for this and show the "jogue agora!" countdown. */
   readonly playNow$ = new Subject<string>();
   readonly wakeTry$ = new Subject<{ nickname: string; attempt: number }>();
+  /** Host-side AI decision trace so a stalled field can be seen without the console. */
+  readonly aiDebug$ = new Subject<string>();
   private wakeSeat = '';
   private wakeAttempt = 0;
   /** Fast local moves once only bots are left, so the human is not waiting on Lambda. */
@@ -114,6 +116,14 @@ export class GameEngineService implements OnDestroy {
 
   get state(): GameState | null {
     return this.stateSubject.value;
+  }
+
+  /** Host-only trace of why an AI seat moved, waited, or stopped. */
+  private aiLog(msg: string): void {
+    const stamp = new Date().toISOString().slice(11, 23);
+    const line = `[DOTRACE-AI] ${stamp} ${msg}`;
+    console.log(line);
+    this.aiDebug$.next(line);
   }
 
   /**
@@ -510,6 +520,7 @@ export class GameEngineService implements OnDestroy {
           nickname: player.nickname,
           position: pos,
         });
+        this.aiLog(`finish ${player.nickname} pos=${pos} round=${state.round}`);
         this.setStateAndRelay('PLAYER_FINISHED', state, { finisher: player.nickname });
       }
     }
@@ -551,10 +562,15 @@ export class GameEngineService implements OnDestroy {
   }
 
   private advanceTurn(state: GameState, meta?: Record<string, unknown>): void {
-    if (this.tryEndRace(state)) return;
+    if (this.tryEndRace(state)) {
+      this.aiLog(`advance aborted: race over`);
+      return;
+    }
 
     const prevIndex = state.currentTurnIndex;
     state.currentTurnIndex = nextActiveTurnIndex(state);
+    const seat = state.turnOrder[state.currentTurnIndex];
+    this.aiLog(`advance ${prevIndex}->${state.currentTurnIndex} seat=${seat ?? '?'} round=${state.round}`);
     if (state.currentTurnIndex <= prevIndex) {
       state.round += 1;
     }
@@ -592,6 +608,7 @@ export class GameEngineService implements OnDestroy {
    */
   private tryEndRace(state: GameState): boolean {
     if (state.phase === 'GAME_OVER' || !isGameOver(state)) return false;
+    this.aiLog(`race over`);
     state.phase = 'GAME_OVER';
     updateSessionStats(state);
     this.setStateAndRelay('GAME_OVER', state);
@@ -1107,6 +1124,7 @@ export class GameEngineService implements OnDestroy {
   private maybeDriveAi(state: GameState): void {
     if (!this.isHost || state.phase !== 'GAME_ROUND') return;
     if (this.shouldRushBots(state)) {
+      this.aiLog(`rush bots`);
       this.scheduleRush();
       return;
     }
@@ -1129,9 +1147,15 @@ export class GameEngineService implements OnDestroy {
       return;
     }
     const seat = state.turnOrder[state.currentTurnIndex];
-    if (!seat?.startsWith('ai#')) return;
+    if (!seat?.startsWith('ai#')) {
+      this.aiLog(`drive skip seat=${seat ?? '?'}`);
+      return;
+    }
     const player = state.players.find((candidate) => candidate.connectionId === seat);
-    if (player) this.requestAiMove(player);
+    if (player) {
+      this.aiLog(`drive ${player.nickname}`);
+      this.requestAiMove(player);
+    }
   }
 
   /** Humans are done and at least one bot is still out. An exhibition has no humans to wait on. */
@@ -1205,7 +1229,11 @@ export class GameEngineService implements OnDestroy {
       shouldPitForFuel(intent.fuelPlan, player.fuel, cellsToGoal, lapCells, boxDist);
     const saveFuel =
       player.fuel !== undefined && shouldSaveFuel(intent.fuelPlan, player.fuel, cellsToGoal, lapCells);
-    const commitFuel = !!box && ((reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit)) || forecast);
+    const pitReachable = moves.some((move) => isPitTile(getTileAt(track, move.landing.x, move.landing.y)));
+    const commitFuel =
+      !!box &&
+      (pitReachable || boxDist <= 16 || onPit) &&
+      ((reserve && (player.fuel! <= 12 || boxDist <= 22 || onPit)) || forecast);
     const commitThrough = !!box && through && !reserve && (boxDist <= 14 || onPit);
     const ahead = state.players.some(
       (other) =>
@@ -1225,15 +1253,18 @@ export class GameEngineService implements OnDestroy {
       }
       if (move.velocity.x === 0 && move.velocity.y === 0) score -= 100;
       const tile = getTileAt(track, move.landing.x, move.landing.y);
-      if (box && (commitFuel || commitThrough)) {
+      const offRoad = tile === 'grass' || tile === 'rumble' || tile === null;
+      if (offRoad && !onPit) score -= 50_000;
+      if (box && (commitFuel || commitThrough) && !offRoad) {
         const dist = Math.max(Math.abs(move.landing.x - box.x), Math.abs(move.landing.y - box.y));
         score += (48 - dist) * (commitFuel ? 180 : 90);
         if (isPitTile(tile)) score += commitFuel ? 4_000 : 3_000;
         if (commitFuel && move.landing.x === box.x && move.landing.y === box.y) score += 100_000;
         if (commitThrough && move.landing.x === box.x && move.landing.y === box.y) score -= 50_000;
       }
-      const side = (move.landing.y - player.position.y) * intent.side;
-      score += side * 6;
+      if (tile === 'track' || tile === 'finish' || isPitTile(tile)) {
+        score += (move.landing.y - player.position.y) * intent.side * 1.5;
+      }
       if (saveFuel && gearOf(move.velocity) > 4 && !commitFuel) score -= 80 * (gearOf(move.velocity) - 4);
       if (ahead && intent.lateBrake && gearOf(move.velocity) >= gearOf(player.velocity) && !commitFuel) {
         score += 30 * intent.push;
@@ -1250,12 +1281,16 @@ export class GameEngineService implements OnDestroy {
       (accelerating || attackBoost) && !isPitTile(getTileAt(track, best.landing.x, best.landing.y))
         ? request
         : undefined;
+    this.aiLog(`local ${player.nickname}`);
     return this.applyMove(player.connectionId, best.velocity, boost);
   }
 
   private requestAiMove(player: Player, attempt = 1, stuck = false): void {
     const seatId = player.connectionId;
-    if (this.aiInFlight.has(seatId) && !stuck) return;
+    if (this.aiInFlight.has(seatId) && !stuck) {
+      this.aiLog(`skip in-flight ${player.nickname}`);
+      return;
+    }
     const state = this.state;
     const room = this.roomService.room;
     if (!state || !room || !canPlayerMove(state, seatId)) return;
@@ -1269,6 +1304,7 @@ export class GameEngineService implements OnDestroy {
     const base = aiTurnToken(state, current);
     const token = stuck ? `${base}:stuck` : attempt > 1 ? `${base}:2` : base;
     this.aiInFlight.add(seatId);
+    this.aiLog(`request ${player.nickname} attempt=${attempt}`);
     void this.api
       .postAction<{ velocity?: Vector2D }>(
         'PLAY_AI_TURN',
@@ -1278,6 +1314,7 @@ export class GameEngineService implements OnDestroy {
       )
       .then((response) => {
         const payload = response.payload as { velocity?: Vector2D; drs?: boolean; ers?: boolean } | undefined;
+        this.aiLog(`response ${player.nickname}`);
         this.finishAiMove(seatId, token, payload?.velocity, attempt, {
           drs: payload?.drs === true,
           ers: payload?.ers === true,
@@ -1285,6 +1322,7 @@ export class GameEngineService implements OnDestroy {
       })
       .catch((err) => {
         console.warn('AI turn failed', err);
+        this.aiLog(`fail ${player.nickname} ${err instanceof Error ? err.message : String(err)}`);
         if (stuck || attempt >= 2) {
           this.playLocalBotMove();
           return;
@@ -1308,12 +1346,16 @@ export class GameEngineService implements OnDestroy {
   ): void {
     const latest = this.state;
     const player = latest?.players.find((candidate) => candidate.connectionId === seatId);
-    if (!latest || !player || !velocity) return;
+    if (!latest || !player || !velocity) {
+      this.aiLog(`finish drop seat=${seatId}`);
+      return;
+    }
     if (!Number.isInteger(velocity.x) || !Number.isInteger(velocity.y)) return;
     if (!canPlayerMove(latest, seatId)) return;
     const expected = aiTurnToken(latest, player);
     if (token !== expected && token !== `${expected}:2` && token !== `${expected}:stuck`) return;
     const applied = this.applyMove(seatId, velocity, requestedBoost(boost));
+    this.aiLog(`applied ${player.nickname} ${applied ? 'ok' : 'rejected'}`);
     if (!applied) {
       if (attempt === 1) {
         this.scheduleAi(seatId, 0, () => {

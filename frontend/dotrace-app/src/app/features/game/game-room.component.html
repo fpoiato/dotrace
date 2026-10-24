@@ -69,6 +69,9 @@
           }}
         </p>
       }
+      @if (isHost && aiDebugLines.length > 0) {
+        <pre class="mb-1.5 max-h-24 shrink-0 overflow-y-auto rounded border border-slate-600 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-300 whitespace-pre-wrap" role="log">{{ aiDebugText }}</pre>
+      }
       @if (myPlayer(state); as me) {
         @if (me.isOffTrack) {
           <p
@@ -109,13 +112,10 @@
                 <div
                   class="penalty-chip flex items-center gap-2 rounded-md border bg-slate-950/95 px-2 py-1.5 shadow-lg"
                   [class.border-red-500]="fuelEmpty(car.fuel)"
-                  [class.bg-red-950/80]="fuelEmpty(car.fuel)"
-                  [class.border-amber-400/50]="!fuelEmpty(car.fuel)"
+                  [class.bg-red-900]="fuelEmpty(car.fuel)"
+                  [class.border-amber-400]="!fuelEmpty(car.fuel)"
                   role="status"
-                  [attr.aria-label]="
-                    (fuelEmpty(car.fuel) ? 'game.fuelEmptyAlert' : 'game.fuelReserveAlert')
-                      | translate: { name: car.nickname }
-                  "
+                  [attr.aria-label]="fuelChipLabel(car)"
                 >
                   <svg
                     class="h-5 w-5 shrink-0"
@@ -247,9 +247,7 @@
                       [class.fuel-reserve]="!fuelEmpty(me.fuel)"
                       viewBox="0 0 24 24"
                       role="img"
-                      [attr.aria-label]="
-                        (fuelEmpty(me.fuel) ? 'game.fuelEmpty' : 'game.fuelReserve') | translate
-                      "
+                      [attr.aria-label]="fuelMeterLabel(me.fuel)"
                     >
                       <path fill="currentColor" d="M6 3h8a2 2 0 0 1 2 2v2h1.2a2 2 0 0 1 1.8 1.1l1.5 3.2A2 2 0 0 1 20.7 14H19v5a1 1 0 0 1-1 1h-1v1h-2v-1H8v1H6v-1a1 1 0 0 1-1-1V5a2 2 0 0 1 1-2zm0 2v6h8V5H6zm10 4.2V14h3.1l-1.2-2.6A.8.8 0 0 0 17.2 11H16zM6 13v6h10v-6H6z"/>
                     </svg>
