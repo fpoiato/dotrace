@@ -11,8 +11,12 @@ export const REPLAY_CHUNK = 80;
  * in small chunks; a reconnect snapshot must not carry it either.
  */
 export function slimBoard(state: GameState): GameState {
+  // Detach the growing replay before the clone. Copying it on every relay
+  // is what stalled the host around round 150.
+  const log = state.replayLog;
+  delete state.replayLog;
   const copy = structuredClone(state);
-  delete copy.replayLog;
+  if (log) state.replayLog = log;
   for (const player of copy.players) {
     if (player.trail && player.trail.length > RELAY_TRAIL_POINTS) {
       player.trail = player.trail.slice(-RELAY_TRAIL_POINTS);
