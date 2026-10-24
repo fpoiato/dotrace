@@ -70,15 +70,11 @@
         </p>
       }
       @if (isHost && aiDebugLines.length > 0) {
-        <div
-          class="mb-1.5 max-h-24 shrink-0 overflow-y-auto rounded border border-slate-600/60 bg-slate-950/90 px-1.5 py-1 font-mono text-[10px] leading-tight text-slate-300"
+        <pre
+          class="mb-1.5 max-h-24 shrink-0 overflow-y-auto rounded border border-slate-600 bg-slate-950 px-2 py-1 font-mono text-xs leading-tight text-slate-300 whitespace-pre-wrap"
           role="log"
           aria-live="polite"
-        >
-          @for (line of aiDebugLines; track $index) {
-            <div>{{ line }}</div>
-          }
-        </div>
+        >{{ aiDebugText }}</pre>
       }
       @if (myPlayer(state); as me) {
         @if (me.isOffTrack) {

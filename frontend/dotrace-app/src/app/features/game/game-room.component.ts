@@ -177,6 +177,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   get isHost(): boolean {
     return !!this.room.room?.isHost;
   }
+
+  get aiDebugText(): string {
+    return this.aiDebugLines.join('\n');
+  }
   readonly fuelOnReserve = fuelOnReserve;
   readonly fuelEmpty = fuelEmpty;
   private readonly subs: Subscription[] = [];
