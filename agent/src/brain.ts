@@ -243,7 +243,8 @@ export class HeuristicBrain implements MoveBrain {
       const hy = summary.situation.raceHeading.y;
       const side =
         hx * (move.landing.y - summary.position.y) - hy * (move.landing.x - summary.position.x);
-      score += side * intent.side * 8;
+      const onAsphalt = move.landingTile === 'track' || move.landingTile === 'finish';
+      if (onAsphalt && !move.grassShortcut && !move.overspeed) score += side * intent.side * 2;
       if (saveFuel && move.gear > 4 && !commitFuel) score -= 70 * (move.gear - 4);
       if (saveFuel && move.gear >= 2 && move.gear <= 4 && !move.overspeed) score += 24;
       if (attack && intent.lateBrake && move.gear >= currentGear && !move.overspeed && !commitFuel) {

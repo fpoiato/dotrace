@@ -439,17 +439,20 @@ function forwardScore(
   if (!fight) return score;
 
   const want = fight.side * 1.4;
-  if (fight.side !== 0) {
-    score -= Math.abs(fight.landingSide - want) * 8;
-    score += fight.landingSide * fight.side * 4;
+  const onLine = option.lateral <= 1.5 && !option.overspeed && option.clearAhead >= 2;
+  if (fight.side !== 0 && onLine) {
+    score -= Math.abs(fight.landingSide - want) * 3;
+    score += fight.landingSide * fight.side * 2;
   }
   if (
     fight.attack &&
+    onLine &&
     Math.abs(fight.rivalSide) > 0.35 &&
     Math.sign(fight.landingSide) !== Math.sign(fight.rivalSide) &&
-    Math.abs(fight.landingSide) > 0.35
+    Math.abs(fight.landingSide) > 0.35 &&
+    Math.abs(fight.landingSide) <= 1.6
   ) {
-    score += 14;
+    score += 6;
   }
   const stop = stoppingDistance(Math.max(option.gear, 1));
   if (fight.attack && fight.lateBrake && cells > stop * 0.7 && option.gear >= currentGear && !option.overspeed) {
@@ -666,9 +669,16 @@ export function buildLayaScene(
       }
     }
   }
+  const pitReachable = pending.some((option) => {
+    if (option.illegal) return false;
+    const tile = getTileAt(track, option.landing.x, option.landing.y);
+    return isPitTile(tile);
+  });
   const commitFuel =
+    !offTrack &&
     player.fuel !== undefined &&
     !!box &&
+    (pitReachable || boxDist <= 16) &&
     shouldPitForFuel(intent.fuelPlan, player.fuel, situation.cellsToGoal, lapCells, boxDist);
   const saveFuel =
     player.fuel !== undefined &&
@@ -681,6 +691,7 @@ export function buildLayaScene(
     if (commitFuel && box && !option.illegal) {
       const tile = getTileAt(track, option.landing.x, option.landing.y);
       if (tile === 'grass' || tile === 'rumble' || tile === null) return;
+      if (isGrassShortcut(track, position, option.landing)) return;
       const dist = Math.max(Math.abs(option.landing.x - box.x), Math.abs(option.landing.y - box.y));
       const onBox = option.landing.x === box.x && option.landing.y === box.y;
       const score = (64 - dist) * 12 + (isPitTile(tile) ? 240 : 0) + (onBox ? 1_000 : 0);
