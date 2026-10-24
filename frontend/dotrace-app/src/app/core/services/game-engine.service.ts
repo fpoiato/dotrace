@@ -134,7 +134,17 @@ export class GameEngineService implements OnDestroy {
    */
   private emit(state: GameState): void {
     this.noteSeatClock(state);
-    this.stateSubject.next(structuredClone(state));
+    // The replay grows without bound. Cloning it on every turn is what froze
+    // round 150: the phone spent the frame copying thousands of moves and the
+    // wake timers never ran. Share one log array across emissions.
+    const log = state.replayLog;
+    delete state.replayLog;
+    const clone = structuredClone(state);
+    if (log) {
+      state.replayLog = log;
+      clone.replayLog = log;
+    }
+    this.stateSubject.next(clone);
   }
 
   /** Wall clock for the seat on the turn. A hidden phone freezes timers, not this. */
@@ -1374,9 +1384,13 @@ export class GameEngineService implements OnDestroy {
   }
 
   private boardForAi(state: GameState): GameState {
+    const log = state.replayLog;
+    const stats = state.sessionStats;
+    delete state.replayLog;
+    delete state.sessionStats;
     const copy = structuredClone(state);
-    delete copy.replayLog;
-    delete copy.sessionStats;
+    if (log) state.replayLog = log;
+    if (stats) state.sessionStats = stats;
     for (const player of copy.players) {
       player.trail = player.trail?.slice(-1) ?? [];
     }
